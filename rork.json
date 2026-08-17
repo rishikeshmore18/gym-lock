@@ -1,0 +1,10 @@
+{
+  "apps": [
+    {
+      "name": "GymLock",
+      "path": "ios-gymlock",
+      "framework": "swift"
+    }
+  ],
+  "$schema": "https://rork.com/schema/rork.json"
+}

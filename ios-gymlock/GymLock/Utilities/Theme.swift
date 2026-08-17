@@ -1,0 +1,83 @@
+import SwiftUI
+
+/// GymLock's warm, Airbnb-inspired design system.
+/// A single source of truth for colour, radius, and motion so every
+/// onboarding page and app screen shares one visual language.
+enum Theme {
+    // MARK: - Palette
+
+    /// Warm off-white app canvas.
+    static let canvas = Color(red: 0.980, green: 0.976, blue: 0.965)
+    /// Elevated white card surface.
+    static let surface = Color.white
+    /// Slightly warmer surface used for inset rows.
+    static let surfaceMuted = Color(red: 0.961, green: 0.953, blue: 0.937)
+    /// Grounded coral accent — the only saturated colour in the app.
+    static let accent = Color(red: 0.910, green: 0.365, blue: 0.306)
+    /// Primary near-black text.
+    static let ink = Color(red: 0.102, green: 0.102, blue: 0.102)
+    /// Secondary grey text.
+    static let inkSecondary = Color(red: 0.420, green: 0.420, blue: 0.420)
+    /// Tertiary grey used for axis labels and fine print.
+    static let inkTertiary = Color(red: 0.600, green: 0.600, blue: 0.600)
+    /// Hairline border.
+    static let border = Color(red: 0.910, green: 0.910, blue: 0.910)
+    /// Dark surface used behind the logo mark.
+    static let logoBackdrop = Color(red: 0.071, green: 0.071, blue: 0.075)
+
+    // MARK: - Radii
+
+    static let cardRadius: CGFloat = 24
+    static let controlRadius: CGFloat = 16
+
+    // MARK: - Spacing
+
+    static let pageMargin: CGFloat = 28
+
+    // MARK: - Motion
+
+    /// Restrained ease used for page-level content settling.
+    static let settle: Animation = .timingCurve(0.22, 0.9, 0.24, 1, duration: 0.55)
+    /// Fast colour/state transition for controls — no scale, no bounce.
+    static let stateChange: Animation = .easeInOut(duration: 0.18)
+    /// Vertical page transition, TikTok-like: quick with no visible bounce.
+    static let pageTurn: Animation = .timingCurve(0.2, 0.85, 0.2, 1, duration: 0.42)
+}
+
+// MARK: - Shared modifiers
+
+extension View {
+    /// Applies the standard warm card treatment: white surface, generous
+    /// radius, hairline border, and a soft lifted shadow.
+    func warmCard(radius: CGFloat = Theme.cardRadius) -> some View {
+        self
+            .background(Theme.surface, in: .rect(cornerRadius: radius))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            }
+            .shadow(color: Color.black.opacity(0.06), radius: 18, x: 0, y: 8)
+    }
+}
+
+// MARK: - Primary call to action
+
+/// The single button style used across onboarding and setup.
+/// Communicates readiness through colour saturation only — never scale.
+struct PrimaryCTAStyle: ButtonStyle {
+    var isEnabled: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background(
+                Theme.accent.opacity(isEnabled ? (configuration.isPressed ? 0.86 : 1) : 0.32),
+                in: .rect(cornerRadius: Theme.controlRadius)
+            )
+            .animation(Theme.stateChange, value: isEnabled)
+            .animation(Theme.stateChange, value: configuration.isPressed)
+    }
+}
