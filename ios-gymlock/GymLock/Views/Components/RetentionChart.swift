@@ -10,7 +10,7 @@ struct RetentionChart: View {
     private let willpower: [CGFloat] = [
         0.62, 0.66, 0.63, 0.55, 0.46, 0.38, 0.31, 0.26, 0.22, 0.19, 0.17, 0.16, 0.15,
     ]
-    private let forcingFunction: [CGFloat] = [
+    private let gymLockSystem: [CGFloat] = [
         0.62, 0.65, 0.68, 0.71, 0.74, 0.77, 0.80, 0.83, 0.86, 0.88, 0.90, 0.92, 0.94,
     ]
 
@@ -36,7 +36,7 @@ struct RetentionChart: View {
                         )
 
                     // Climbing series — solid accent, the product's promise.
-                    smoothPath(values: forcingFunction, in: plot)
+                    smoothPath(values: gymLockSystem, in: plot)
                         .trim(from: 0, to: progress)
                         .stroke(
                             Theme.accent,
@@ -44,11 +44,11 @@ struct RetentionChart: View {
                         )
 
                     // Shared origin marker, so the "same start" reads instantly.
-                    marker(at: point(index: 0, values: forcingFunction, in: plot), filled: false)
+                    marker(at: point(index: 0, values: gymLockSystem, in: plot), filled: false)
                         .opacity(progress > 0.02 ? 1 : 0)
 
                     if progress > 0.985 {
-                        marker(at: point(index: forcingFunction.count - 1, values: forcingFunction, in: plot), filled: true)
+                        marker(at: point(index: gymLockSystem.count - 1, values: gymLockSystem, in: plot), filled: true)
                         marker(at: point(index: willpower.count - 1, values: willpower, in: plot), filled: true, muted: true)
                     }
                 }
@@ -63,7 +63,7 @@ struct RetentionChart: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "Chart. Both paths start together in week one. Willpower alone declines to near zero by week twelve. With a forcing function it climbs steadily."
+            "Chart. Both paths start together in week one. Willpower alone declines to near zero by week twelve. With GymLock System it climbs steadily."
         )
     }
 
@@ -144,7 +144,7 @@ struct RetentionChart: View {
             legendRow(
                 color: Theme.accent,
                 dashed: false,
-                label: "with a forcing function"
+                label: "with GymLock System"
             )
             legendRow(
                 color: Theme.inkTertiary,

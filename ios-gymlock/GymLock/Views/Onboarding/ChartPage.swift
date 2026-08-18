@@ -12,8 +12,8 @@ struct ChartPage: View {
         OnboardingScene(topAnchor: 0.13, heroMaxHeightFraction: 0.40) {
             VStack(alignment: .leading, spacing: 10) {
                 AccentedText(
-                    full: "willpower fades. systems don't.",
-                    highlighted: ["systems don't."],
+                    full: "willpower fades. GymLock System doesn't.",
+                    highlighted: ["GymLock System"],
                     size: 32
                 )
 
@@ -63,7 +63,7 @@ struct ChartPage: View {
             legendRow(
                 color: Theme.accent,
                 isDashed: false,
-                text: "a forcing function — decides once"
+                text: "GymLock System — decides once"
             )
         }
     }
