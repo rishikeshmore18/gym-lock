@@ -6,6 +6,8 @@ struct HomeView: View {
     @Environment(AppStore.self) private var store
 
     @State private var isShowingSchedule = false
+    // TEMPORARY (dev only) — remove this and `devRestartCard` below.
+    @State private var isConfirmingRestart = false
 
     private var isTrainingDayToday: Bool {
         let weekdayNumber = Calendar.current.component(.weekday, from: Date())
@@ -27,6 +29,9 @@ struct HomeView: View {
                         locksCard
                         consistencyCard
                         principleCard
+
+                        // TEMPORARY (dev only) — remove this line.
+                        devRestartCard
                     }
                     .padding(.horizontal, Theme.pageMargin)
                     .padding(.bottom, 32)
@@ -226,6 +231,53 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
         .background(Theme.accent.opacity(0.08), in: .rect(cornerRadius: Theme.cardRadius))
+    }
+
+    // MARK: - TEMPORARY dev affordance
+    // Everything below this marker exists only to re-run onboarding while
+    // building. Delete this whole section (and its two references above)
+    // before shipping.
+
+    private var devRestartCard: some View {
+        VStack(spacing: 10) {
+            Button {
+                isConfirmingRestart = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("restart onboarding")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundStyle(Theme.inkSecondary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .background(Theme.ink.opacity(0.05), in: .rect(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                        .foregroundStyle(Theme.ink.opacity(0.18))
+                )
+            }
+
+            Text("dev only — wipes your name and locks")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.inkTertiary)
+        }
+        .padding(.top, 8)
+        .confirmationDialog(
+            "Start over as a first-time user?",
+            isPresented: $isConfirmingRestart,
+            titleVisibility: .visible
+        ) {
+            Button("Restart onboarding", role: .destructive) {
+                Haptics.commit()
+                store.resetAll()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This clears your name and both locks, then returns to the first screen.")
+        }
     }
 }
 
