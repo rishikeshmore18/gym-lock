@@ -1,26 +1,37 @@
 import SwiftUI
 
-/// Scene 5 — the pinned narrative, and the centrepiece of the story.
+/// Scene 6 — the loop, and the centrepiece of the story.
 ///
-/// The diagram never moves. Each swipe advances one node of the loop, the
-/// artwork crossfades in place, and the caption beneath it changes. This is why
-/// the loop reads as one thing changing state rather than seven screens.
+/// The diagram never moves and the user never has to work for it: the six states
+/// play themselves, the artwork crossfades in place, and the caption changes with
+/// it. A segmented bar along the bottom shows how far through the lap the loop
+/// currently is.
+///
+/// The loop does not stop. Once a full lap has played, the word "break it."
+/// appears and the way forward opens — while the loop keeps turning behind it,
+/// because that is the point being made.
 struct LoopPage: View {
     let isActive: Bool
-    /// Index into `LoopState.sequence`, owned by the flow and driven by swipes.
-    let step: Int
+
+    /// Seconds each state holds on screen.
+    private static let dwell: Double = 1.25
+    /// How long the resting overview frame holds before the lap starts.
+    private static let openingHold: Double = 1.0
+    private static let stepCount = 6
+
+    @State private var stateIndex = 0
+    /// 0...1 across one lap of the loop, animated linearly through each state
+    /// so the bar fills at a constant, honest rate.
+    @State private var lapProgress: CGFloat = 0
+    @State private var hasCompletedLap = false
 
     private var state: LoopState {
-        let clamped = min(max(step, 0), LoopState.sequence.count - 1)
+        let clamped = min(max(stateIndex, 0), LoopState.sequence.count - 1)
         return LoopState.sequence[clamped]
     }
 
-    private var isFinalState: Bool {
-        state.id == LoopState.sequence.count - 1
-    }
-
     var body: some View {
-        OnboardingScene(topAnchor: 0.10, heroMaxHeightFraction: 0.48) {
+        OnboardingScene(topAnchor: 0.10, heroMaxHeightFraction: 0.40) {
             VStack(alignment: .leading, spacing: 10) {
                 AccentedText(
                     full: "it's not laziness. it's a loop.",
@@ -40,16 +51,13 @@ struct LoopPage: View {
             VStack(alignment: .leading, spacing: 14) {
                 caption
 
-                stepRail
+                progressBar
 
-                SwipeUpHint(
-                    label: isFinalState ? "break it" : "keep going",
-                    isActive: isActive
-                )
-                .frame(maxWidth: .infinity)
+                breakRow
             }
             .sceneElement(.footer)
         }
+        .task(id: isActive) { await run() }
     }
 
     /// The caption swaps with the state, matched to the highlighted node.
@@ -76,18 +84,83 @@ struct LoopPage: View {
         .frame(minHeight: 52, alignment: .top)
     }
 
-    /// Six ticks showing how far through the loop the user has swiped.
-    private var stepRail: some View {
+    /// Six segments that fill in real time as each state plays, so the scene
+    /// reads as something running rather than something waiting to be poked.
+    private var progressBar: some View {
         HStack(spacing: 5) {
-            ForEach(LoopState.sequence.dropFirst()) { candidate in
-                let isReached = state.nodeNumber.map { candidate.id <= $0 } ?? false
+            ForEach(1...Self.stepCount, id: \.self) { step in
+                let fill = min(max(lapProgress * CGFloat(Self.stepCount) - CGFloat(step - 1), 0), 1)
 
-                Capsule()
-                    .fill(isReached ? Theme.accent : Theme.ink.opacity(0.12))
-                    .frame(height: 3)
-                    .animation(Theme.stateChange, value: isReached)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Theme.ink.opacity(0.10))
+                    .frame(height: 4)
+                    .overlay(alignment: .leading) {
+                        GeometryReader { proxy in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Theme.accent)
+                                .frame(width: proxy.size.width * fill)
+                        }
+                    }
             }
         }
         .accessibilityHidden(true)
+    }
+
+    /// Appears once the loop has come all the way around.
+    private var breakRow: some View {
+        VStack(spacing: 8) {
+            Text("break it.")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(Theme.accent)
+
+            SwipeUpHint(isActive: isActive && hasCompletedLap)
+        }
+        .frame(maxWidth: .infinity)
+        .opacity(hasCompletedLap ? 1 : 0)
+        .offset(y: hasCompletedLap ? 0 : 8)
+    }
+
+    // MARK: - The loop, playing itself
+
+    private func run() async {
+        guard isActive else {
+            stateIndex = 0
+            lapProgress = 0
+            hasCompletedLap = false
+            return
+        }
+
+        // Open on the resting overview frame, so the diagram is legible before
+        // it starts changing state.
+        try? await Task.sleep(for: .seconds(Self.openingHold))
+        guard !Task.isCancelled else { return }
+
+        var lap = 0
+
+        while !Task.isCancelled {
+            for step in 1...Self.stepCount {
+                withAnimation(.easeInOut(duration: 0.34)) { stateIndex = step }
+                withAnimation(.linear(duration: Self.dwell)) {
+                    lapProgress = CGFloat(step) / CGFloat(Self.stepCount)
+                }
+
+                // Only the first lap ticks; after that the loop turns quietly.
+                if lap == 0 { Haptics.tap() }
+
+                try? await Task.sleep(for: .seconds(Self.dwell))
+                if Task.isCancelled { return }
+            }
+
+            lap += 1
+
+            if !hasCompletedLap {
+                withAnimation(Theme.settle) { hasCompletedLap = true }
+                Haptics.commit()
+            }
+
+            // A short breath at the top of the loop, then it starts over.
+            withAnimation(.easeOut(duration: 0.3)) { lapProgress = 0 }
+            try? await Task.sleep(for: .milliseconds(420))
+        }
     }
 }

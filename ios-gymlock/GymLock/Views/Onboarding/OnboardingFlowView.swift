@@ -2,9 +2,10 @@ import SwiftUI
 
 /// The onboarding story: ten scenes on one continuous vertical scroll.
 ///
-/// Two scenes are pinned narratives that hold sub-steps, so their content
-/// changes under the user's swipe instead of becoming separate screens: the
-/// "Problem" kinetic-typography sequence and the loop diagram.
+/// Every scene plays itself. The two multi-part scenes — the "Problem" kinetic
+/// typography sequence and the loop diagram — run on their own timelines and open
+/// the way forward when they are done, so a swipe always means "next scene" and
+/// never "advance this one".
 struct OnboardingFlowView: View {
     @Environment(AppStore.self) private var store
 
@@ -13,7 +14,6 @@ struct OnboardingFlowView: View {
     }
 
     @State private var index = 0
-    @State private var subStep = 0
     @State private var isEditingName = false
 
     private var maxReachableIndex: Int {
@@ -27,10 +27,8 @@ struct OnboardingFlowView: View {
 
             VerticalPager(
                 index: $index,
-                subStep: $subStep,
                 pageCount: Scene.allCases.count,
                 maxReachableIndex: maxReachableIndex,
-                subStepCount: subStepCount(for:),
                 isDragDisabled: isEditingName
             ) { pageIndex in
                 scene(at: pageIndex)
@@ -40,15 +38,6 @@ struct OnboardingFlowView: View {
                 .padding(.trailing, 10)
                 .opacity(index == 0 ? 0 : 1)
                 .animation(Theme.settle, value: index)
-        }
-    }
-
-    /// Sub-steps per scene. Only the pinned narrative scenes hold more than one.
-    private func subStepCount(for pageIndex: Int) -> Int {
-        switch Scene(rawValue: pageIndex) {
-        case .problem: return ProblemReelPage.stepCount
-        case .loop: return LoopState.sequence.count
-        default: return 1
         }
     }
 
@@ -74,11 +63,11 @@ struct OnboardingFlowView: View {
         case .problem:
             ProblemReelPage(isActive: isActive)
         case .guilt:
-            GuiltPage(isActive: isActive)
+            GuiltPage(isActive: isActive, name: store.greetingName)
         case .loop:
-            LoopPage(isActive: isActive, step: subStep)
+            LoopPage(isActive: isActive)
         case .excuses:
-            ExcusesPage(isActive: isActive)
+            ExcusesPage(isActive: isActive, name: store.greetingName)
         case .chart:
             ChartPage(isActive: isActive)
         case .caution:
@@ -109,7 +98,6 @@ struct OnboardingFlowView: View {
     private func advance() {
         withAnimation(Theme.pageTurn) {
             index = min(index + 1, maxReachableIndex)
-            subStep = 0
         }
     }
 }

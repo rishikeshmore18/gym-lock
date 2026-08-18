@@ -34,38 +34,33 @@ struct IllustrationView: View {
     }
 }
 
-/// The pinned loop diagram. Only two frames are ever alive: the state being
-/// shown and the one it is crossfading from, so the sequence stays cheap.
+/// The pinned loop diagram. Exactly two frames are ever alive: the state being
+/// shown and the one it is crossfading away from, so the sequence stays cheap no
+/// matter how many laps it runs.
+///
+/// Identity is keyed to the state, so the crossfade works for *any* change —
+/// including the wrap from the last state back to the first, which a
+/// neighbours-only approach would hard-cut.
 ///
 /// Nothing moves — the diagram transforms in place, which is what makes the
 /// sequence read as one visual changing state rather than seven pictures.
 struct LoopDiagramView: View {
     let state: LoopState
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
         ZStack {
-            ForEach(neighbouring, id: \.id) { candidate in
-                IllustrationView(
-                    illustration: candidate.illustration,
-                    cornerRadius: 26,
-                    isBreathing: false
-                )
-                .opacity(candidate.id == state.id ? 1 : 0)
-                .scaleEffect(candidate.id == state.id ? 1 : (reduceMotion ? 1 : 0.97))
-            }
+            IllustrationView(
+                illustration: state.illustration,
+                cornerRadius: 26,
+                isBreathing: false
+            )
+            .id(state.id)
+            .transition(.opacity)
         }
         .animation(.easeInOut(duration: 0.34), value: state.id)
         .breathing(amplitude: 2)
         .accessibilityHidden(false)
         .accessibilityLabel(accessibilityDescription)
-    }
-
-    /// The current state plus its immediate neighbours, so a crossfade in either
-    /// direction always has its partner frame already mounted.
-    private var neighbouring: [LoopState] {
-        LoopState.sequence.filter { abs($0.id - state.id) <= 1 }
     }
 
     private var accessibilityDescription: String {
