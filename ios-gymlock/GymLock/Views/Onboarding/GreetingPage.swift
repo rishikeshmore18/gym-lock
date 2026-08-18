@@ -1,52 +1,45 @@
 import SwiftUI
 
-/// Page 3 — the app proves it remembered the name, then names the real pattern.
+/// Scene 3 — the app proves it remembered the name, then names the real pattern.
+/// Deliberately quiet and vertically centred: one thought, lots of air.
 struct GreetingPage: View {
     let isActive: Bool
     let name: String
 
-    @State private var greetingShown = false
     @State private var bodyShown = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Spacer()
+        QuietScene {
+            VStack(alignment: .leading, spacing: 0) {
+                AccentedText(
+                    full: "hi, \(name).",
+                    highlighted: [name],
+                    size: 46
+                )
+                .sceneElement(.headline)
 
-            AccentedText(
-                full: "hi, \(name).",
-                highlighted: [name],
-                size: 46
-            )
-            .opacity(greetingShown ? 1 : 0)
-            .offset(y: greetingShown ? 0 : 14)
+                Text("most people don't miss the gym because they're lazy.")
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+                    .lineSpacing(6)
+                    .padding(.top, 24)
+                    .sceneElement(.support)
 
-            Text("most people don't fail because they're lazy.\nthey fail because their phone wins in the moment.")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(Theme.ink)
-                .lineSpacing(6)
-                .padding(.top, 22)
+                Text("they miss it because the moment always wins.")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .lineSpacing(4)
+                    .padding(.top, 14)
+                    .opacity(bodyShown ? 1 : 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } footer: {
+            SwipeUpHint(label: "see how", isActive: isActive && bodyShown)
                 .opacity(bodyShown ? 1 : 0)
-                .offset(y: bodyShown ? 0 : 12)
-
-            Text("let's change that.")
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(Theme.inkSecondary)
-                .padding(.top, 18)
-                .opacity(bodyShown ? 1 : 0)
-
-            Spacer()
-
-            SwipeUpHint(isActive: isActive && bodyShown)
-                .frame(maxWidth: .infinity)
-                .opacity(bodyShown ? 1 : 0)
-                .padding(.bottom, 40)
         }
-        .padding(.horizontal, Theme.pageMargin)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: isActive) {
             guard isActive else { return }
-            withAnimation(Theme.settle) { greetingShown = true }
-            try? await Task.sleep(for: .milliseconds(420))
+            try? await Task.sleep(for: .milliseconds(620))
             withAnimation(Theme.settle) { bodyShown = true }
         }
     }

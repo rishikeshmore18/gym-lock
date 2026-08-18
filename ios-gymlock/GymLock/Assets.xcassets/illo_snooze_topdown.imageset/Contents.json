@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "illo_snooze_topdown.jpg",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

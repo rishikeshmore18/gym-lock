@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "illo_caution_sign.jpg",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

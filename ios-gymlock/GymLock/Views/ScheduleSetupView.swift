@@ -17,8 +17,13 @@ struct ScheduleSetupView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     header
 
+                    IllustrationView(illustration: .curlBench, cornerRadius: 26)
+                        .frame(maxHeight: 190)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 20)
+
                     gymCard
-                        .padding(.top, 26)
+                        .padding(.top, 22)
 
                     bedtimeCard
                         .padding(.top, 16)

@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Page 1 — the professional logo introduction.
-/// The mark settles in first, the wordmark follows, then the swipe hint.
+/// Scene 1 — the logo introduction. The mark settles in first, the wordmark
+/// follows, then the swipe affordance teaches the gesture.
 struct LogoSplashPage: View {
     let isActive: Bool
 
@@ -10,32 +10,28 @@ struct LogoSplashPage: View {
     @State private var hintShown = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        QuietScene {
+            VStack(spacing: 0) {
+                logoMark
+                    .opacity(markShown ? 1 : 0)
+                    .scaleEffect(markShown ? 1 : 0.94)
 
-            logoMark
-                .opacity(markShown ? 1 : 0)
-                .scaleEffect(markShown ? 1 : 0.94)
+                Text("GymLock")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(Theme.ink)
+                    .padding(.top, 26)
+                    .opacity(wordmarkShown ? 1 : 0)
 
-            Text("GymLock")
-                .font(.system(size: 30, weight: .bold))
-                .foregroundStyle(Theme.ink)
-                .padding(.top, 26)
-                .opacity(wordmarkShown ? 1 : 0)
-
-            Text("show up. then scroll.")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.inkSecondary)
-                .padding(.top, 8)
-                .opacity(wordmarkShown ? 1 : 0)
-
-            Spacer()
-
+                Text("show up. then scroll.")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .padding(.top, 8)
+                    .opacity(wordmarkShown ? 1 : 0)
+            }
+        } footer: {
             SwipeUpHint(isActive: isActive && hintShown)
                 .opacity(hintShown ? 1 : 0)
-                .padding(.bottom, 40)
         }
-        .frame(maxWidth: .infinity)
         .task(id: isActive) {
             guard isActive else { return }
             withAnimation(Theme.settle) { markShown = true }

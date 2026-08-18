@@ -25,6 +25,7 @@ struct HomeView: View {
 
                         statusCard
                         locksCard
+                        consistencyCard
                         principleCard
                     }
                     .padding(.horizontal, Theme.pageMargin)
@@ -188,6 +189,28 @@ struct HomeView: View {
                 .monospacedDigit()
                 .foregroundStyle(Theme.ink)
         }
+    }
+
+    /// Consistency, framed as history rather than as a streak to protect.
+    private var consistencyCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            IllustrationView(illustration: .calendarMarking, cornerRadius: 18)
+                .frame(maxHeight: 168)
+                .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("your history")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                Text("every verified session gets marked here.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.inkSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 16)
+        }
+        .padding(20)
+        .warmCard()
     }
 
     private var principleCard: some View {

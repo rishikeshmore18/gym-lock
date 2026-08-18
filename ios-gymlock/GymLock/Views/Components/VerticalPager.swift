@@ -1,74 +1,140 @@
 import SwiftUI
 
-/// A full-screen vertical pager with TikTok-style paging: one page fills the
-/// viewport, a drag past the threshold advances, and the transition is a quick
-/// ease with no visible bounce.
+/// A full-screen vertical pager driving one continuous onboarding story.
 ///
-/// Pages receive the exact page height so they can lay out edge to edge, and
-/// the pager can be locked while a keyboard or a modal owns the gesture space.
-struct VerticalPager<Content: View>: View {
+/// Three things matter here:
+///
+/// 1. **The whole page is the gesture surface.** Every page is given an opaque
+///    backing and an explicit hit-test shape, so a swipe anywhere — over
+///    whitespace, over artwork, over the headline — moves the story. The drag is
+///    attached simultaneously, so buttons and text fields keep working.
+/// 2. **Animation derives from position, not from appearance.** The continuous
+///    scroll position is published to each page as `sceneReveal`, so entrances
+///    play forwards as a page arrives and reverse as it leaves.
+/// 3. **Pages may hold their own sub-steps.** A page with several sub-steps stays
+///    pinned while the user swipes through them, which is how the loop sequence
+///    tells its story without stacking seven screens.
+struct VerticalPager<Page: View>: View {
     @Binding var index: Int
+    /// Step within the current page, for pinned narrative pages.
+    @Binding var subStep: Int
     let pageCount: Int
     /// Highest page the user is allowed to reach, used to gate progression.
     var maxReachableIndex: Int
-    /// Disables the drag gesture entirely (for example while typing).
+    /// Number of sub-steps for a page. `1` means the page advances immediately.
+    var subStepCount: (Int) -> Int
+    /// Disables the drag entirely, for example while the keyboard is up.
     var isDragDisabled: Bool
-    @ViewBuilder var content: (CGFloat) -> Content
+    @ViewBuilder var page: (Int) -> Page
 
     @State private var dragTranslation: CGFloat = 0
 
-    private let advanceThreshold: CGFloat = 60
+    private let advanceThreshold: CGFloat = 56
 
     var body: some View {
         GeometryReader { proxy in
-            let pageHeight = proxy.size.height
+            let height = max(proxy.size.height, 1)
+            // Continuous position measured in pages: 2.4 means 40% of the way
+            // from page 2 towards page 3.
+            let position = CGFloat(index) - dragTranslation / height
 
-            VStack(spacing: 0) {
-                content(pageHeight)
+            ZStack(alignment: .top) {
+                ForEach(mountedIndices(around: position), id: \.self) { pageIndex in
+                    let distance = CGFloat(pageIndex) - position
+
+                    page(pageIndex)
+                        .frame(width: proxy.size.width, height: height)
+                        .background(Theme.canvas)
+                        .contentShape(.rect)
+                        .environment(\.sceneReveal, max(0, 1 - abs(distance)))
+                        .offset(y: distance * height)
+                }
             }
-            .frame(width: proxy.size.width, alignment: .top)
-            .offset(y: -CGFloat(index) * pageHeight + dragTranslation)
+            .frame(width: proxy.size.width, height: height, alignment: .top)
+            .contentShape(.rect)
+            .simultaneousGesture(dragGesture(pageHeight: height), isEnabled: !isDragDisabled)
             .animation(Theme.pageTurn, value: index)
-            .gesture(dragGesture(pageHeight: pageHeight), isEnabled: !isDragDisabled)
+            .animation(Theme.pageTurn, value: subStep)
         }
         .clipped()
         .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
+    /// Keeps only the pages that can be on screen alive, so the illustration
+    /// memory footprint stays flat regardless of how long the story is.
+    private func mountedIndices(around position: CGFloat) -> [Int] {
+        let lower = max(0, Int(floor(position)) - 1)
+        let upper = min(pageCount - 1, Int(ceil(position)) + 1)
+        guard lower <= upper else { return [index] }
+        return Array(lower...upper)
+    }
+
+    private var forwardLimit: Int {
+        min(maxReachableIndex, pageCount - 1)
+    }
+
     private func dragGesture(pageHeight: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 12)
+        DragGesture(minimumDistance: 10)
             .onChanged { value in
-                dragTranslation = resistedTranslation(value.translation.height, pageHeight: pageHeight)
+                dragTranslation = resistedTranslation(
+                    value.translation.height,
+                    pageHeight: pageHeight
+                )
             }
             .onEnded { value in
-                let combined = value.translation.height + value.predictedEndTranslation.height * 0.35
-                var target = index
-
-                if combined < -advanceThreshold {
-                    target = min(index + 1, min(maxReachableIndex, pageCount - 1))
-                } else if combined > advanceThreshold {
-                    target = max(index - 1, 0)
-                }
-
-                if target != index {
-                    Haptics.soft()
-                }
+                let projected = value.translation.height + value.predictedEndTranslation.height * 0.3
 
                 withAnimation(Theme.pageTurn) {
                     dragTranslation = 0
-                    index = target
+
+                    if projected < -advanceThreshold {
+                        advance()
+                    } else if projected > advanceThreshold {
+                        retreat()
+                    }
                 }
             }
     }
 
-    /// Rubber-bands the drag when the user pulls beyond the reachable range.
+    private func advance() {
+        if subStep + 1 < subStepCount(index) {
+            subStep += 1
+            Haptics.tap()
+        } else if index < forwardLimit {
+            index += 1
+            subStep = 0
+            Haptics.soft()
+        }
+    }
+
+    private func retreat() {
+        if subStep > 0 {
+            subStep -= 1
+            Haptics.tap()
+        } else if index > 0 {
+            let target = index - 1
+            index = target
+            // Land on the last sub-step so a pinned narrative reverses cleanly.
+            subStep = max(0, subStepCount(target) - 1)
+            Haptics.soft()
+        }
+    }
+
+    /// Rubber-bands the drag whenever the swipe will not move the page: at the
+    /// ends of the story, and while a pinned page still has sub-steps to show.
     private func resistedTranslation(_ raw: CGFloat, pageHeight: CGFloat) -> CGFloat {
         let pullingUp = raw < 0
-        let blockedForward = index >= min(maxReachableIndex, pageCount - 1)
+
+        let pinnedForward = subStep + 1 < subStepCount(index)
+        let pinnedBackward = subStep > 0
+        let blockedForward = index >= forwardLimit
         let blockedBackward = index <= 0
 
-        if (pullingUp && blockedForward) || (!pullingUp && blockedBackward) {
-            return raw * 0.18
+        if pullingUp && (pinnedForward || blockedForward) {
+            return raw * 0.16
+        }
+        if !pullingUp && (pinnedBackward || blockedBackward) {
+            return raw * 0.16
         }
         return max(min(raw, pageHeight), -pageHeight)
     }

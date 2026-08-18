@@ -2,8 +2,9 @@ import Combine
 import SwiftUI
 import UIKit
 
-/// Page 2 — "hi." lands alone, slides up, and the name question arrives.
-/// The CTA communicates readiness through colour saturation only.
+/// Scene 2 — "hi." lands alone, then the name question arrives beneath it.
+/// The block stays vertically centred, and only lifts far enough to clear the
+/// keyboard. The CTA communicates readiness through colour saturation only.
 struct NamePage: View {
     let isActive: Bool
     @Binding var name: String
@@ -22,11 +23,7 @@ struct NamePage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if questionShown {
-                Spacer().frame(height: 12)
-            } else {
-                Spacer()
-            }
+            Spacer(minLength: 20)
 
             Text("hi.")
                 .font(.system(size: 72, weight: .bold))
@@ -48,7 +45,7 @@ struct NamePage: View {
                     .padding(.top, 12)
             }
 
-            Spacer()
+            Spacer(minLength: 20)
 
             if questionShown {
                 Button {
@@ -61,11 +58,12 @@ struct NamePage: View {
                 }
                 .buttonStyle(PrimaryCTAStyle(isEnabled: canContinue))
                 .disabled(!canContinue)
-                .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 16 : 40)
+                .padding(.bottom, keyboardHeight > 0 ? 16 : 34)
             }
         }
         .padding(.horizontal, Theme.pageMargin)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.bottom, keyboardHeight)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(Theme.settle, value: questionShown)
         .animation(.easeOut(duration: 0.26), value: keyboardHeight)
         .onChange(of: isFieldFocused) { _, focused in
