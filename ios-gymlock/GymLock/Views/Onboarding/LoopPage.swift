@@ -2,28 +2,34 @@ import SwiftUI
 
 /// Scene 6 — the loop, and the centrepiece of the story.
 ///
-/// The diagram never moves and the user never has to work for it: the six states
-/// play themselves, the artwork crossfades in place, and the caption changes with
-/// it. A segmented bar along the bottom shows how far through the lap the loop
-/// currently is.
+/// The user never has to work for it: the six states play themselves as a single
+/// continuous shot, and the caption changes with them. One unbroken bar along the
+/// bottom shows how far through the lap the loop currently is.
 ///
-/// The loop does not stop. Once a full lap has played, the word "break it."
+/// The loop does not stop. Halfway through the first lap the word "break it."
 /// appears and the way forward opens — while the loop keeps turning behind it,
-/// because that is the point being made.
+/// because that is the point being made. Until that halfway mark the story is
+/// held here on purpose.
 struct LoopPage: View {
     let isActive: Bool
+    /// Called once the loop has played to its halfway mark, which is what
+    /// unlocks the rest of the story.
+    var onReachHalfway: () -> Void = {}
 
     /// Seconds each state holds on screen.
-    private static let dwell: Double = 1.25
+    private static let dwell: Double = 1.15
     /// How long the resting overview frame holds before the lap starts.
     private static let openingHold: Double = 1.0
     private static let stepCount = 6
+    /// The state after which the way forward opens.
+    private static let halfwayStep = 3
 
     @State private var stateIndex = 0
     /// 0...1 across one lap of the loop, animated linearly through each state
     /// so the bar fills at a constant, honest rate.
     @State private var lapProgress: CGFloat = 0
-    @State private var hasCompletedLap = false
+    @State private var barOpacity: Double = 1
+    @State private var isHalfwayReached = false
 
     private var state: LoopState {
         let clamped = min(max(stateIndex, 0), LoopState.sequence.count - 1)
@@ -45,7 +51,7 @@ struct LoopPage: View {
             }
             .sceneElement(.headline)
         } hero: {
-            LoopDiagramView(state: state)
+            LoopFilmView(state: state, isPlaying: isActive)
                 .sceneElement(.hero)
         } footer: {
             VStack(alignment: .leading, spacing: 14) {
@@ -84,40 +90,47 @@ struct LoopPage: View {
         .frame(minHeight: 52, alignment: .top)
     }
 
-    /// Six segments that fill in real time as each state plays, so the scene
+    /// One continuous bar filling in real time across the whole lap, so the scene
     /// reads as something running rather than something waiting to be poked.
+    ///
+    /// A faint notch marks the halfway point while it is still ahead — that is
+    /// where the story opens up, and showing it is fairer than silently refusing
+    /// the swipe.
     private var progressBar: some View {
-        HStack(spacing: 5) {
-            ForEach(1...Self.stepCount, id: \.self) { step in
-                let fill = min(max(lapProgress * CGFloat(Self.stepCount) - CGFloat(step - 1), 0), 1)
-
-                RoundedRectangle(cornerRadius: 2)
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
                     .fill(Theme.ink.opacity(0.10))
-                    .frame(height: 4)
-                    .overlay(alignment: .leading) {
-                        GeometryReader { proxy in
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(Theme.accent)
-                                .frame(width: proxy.size.width * fill)
-                        }
-                    }
+
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: proxy.size.width * lapProgress)
+                    .opacity(barOpacity)
+
+                Capsule()
+                    .fill(Theme.ink.opacity(0.22))
+                    .frame(width: 2, height: 8)
+                    .offset(x: proxy.size.width * 0.5 - 1)
+                    .opacity(isHalfwayReached ? 0 : 1)
+                    .animation(Theme.settle, value: isHalfwayReached)
             }
         }
+        .frame(height: 4)
         .accessibilityHidden(true)
     }
 
-    /// Appears once the loop has come all the way around.
+    /// Appears once the loop has played to its halfway mark.
     private var breakRow: some View {
         VStack(spacing: 8) {
             Text("break it.")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(Theme.accent)
 
-            SwipeUpHint(isActive: isActive && hasCompletedLap)
+            SwipeUpHint(isActive: isActive && isHalfwayReached)
         }
         .frame(maxWidth: .infinity)
-        .opacity(hasCompletedLap ? 1 : 0)
-        .offset(y: hasCompletedLap ? 0 : 8)
+        .opacity(isHalfwayReached ? 1 : 0)
+        .offset(y: isHalfwayReached ? 0 : 8)
     }
 
     // MARK: - The loop, playing itself
@@ -126,7 +139,6 @@ struct LoopPage: View {
         guard isActive else {
             stateIndex = 0
             lapProgress = 0
-            hasCompletedLap = false
             return
         }
 
@@ -149,18 +161,32 @@ struct LoopPage: View {
 
                 try? await Task.sleep(for: .seconds(Self.dwell))
                 if Task.isCancelled { return }
+
+                if step == Self.halfwayStep { unlock() }
             }
 
             lap += 1
-
-            if !hasCompletedLap {
-                withAnimation(Theme.settle) { hasCompletedLap = true }
-                Haptics.commit()
-            }
-
-            // A short breath at the top of the loop, then it starts over.
-            withAnimation(.easeOut(duration: 0.3)) { lapProgress = 0 }
-            try? await Task.sleep(for: .milliseconds(420))
+            await resetBar()
         }
+    }
+
+    /// Opens the way forward. Safe to call repeatedly.
+    private func unlock() {
+        guard !isHalfwayReached else { return }
+        withAnimation(Theme.settle) { isHalfwayReached = true }
+        Haptics.commit()
+        onReachHalfway()
+    }
+
+    /// Returns the bar to empty between laps by fading the fill out rather than
+    /// animating it backwards, which would read as undoing progress.
+    private func resetBar() async {
+        withAnimation(.easeOut(duration: 0.26)) { barOpacity = 0 }
+        try? await Task.sleep(for: .milliseconds(280))
+        guard !Task.isCancelled else { return }
+
+        lapProgress = 0
+        withAnimation(.easeIn(duration: 0.2)) { barOpacity = 1 }
+        try? await Task.sleep(for: .milliseconds(240))
     }
 }

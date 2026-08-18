@@ -15,10 +15,13 @@ struct OnboardingFlowView: View {
 
     @State private var index = 0
     @State private var isEditingName = false
+    /// The loop scene holds the story until it has played to its halfway mark.
+    @State private var isLoopUnlocked = false
 
     private var maxReachableIndex: Int {
-        // The name is the only hard gate in the story.
-        store.hasName ? Scene.allCases.count - 1 : Scene.name.rawValue
+        guard store.hasName else { return Scene.name.rawValue }
+        guard isLoopUnlocked else { return Scene.loop.rawValue }
+        return Scene.allCases.count - 1
     }
 
     var body: some View {
@@ -65,7 +68,9 @@ struct OnboardingFlowView: View {
         case .guilt:
             GuiltPage(isActive: isActive, name: store.greetingName)
         case .loop:
-            LoopPage(isActive: isActive)
+            LoopPage(isActive: isActive) {
+                withAnimation(Theme.settle) { isLoopUnlocked = true }
+            }
         case .excuses:
             ExcusesPage(isActive: isActive, name: store.greetingName)
         case .chart:

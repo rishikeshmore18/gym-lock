@@ -40,12 +40,6 @@ struct ExcusesPage: View {
             VStack(alignment: .leading, spacing: 14) {
                 reasonWheel
 
-                Text("all of them are true.")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Theme.ink)
-                    .opacity(verdictShown ? 1 : 0)
-                    .offset(y: verdictShown ? 0 : 8)
-
                 SwipeUpHint(isActive: isActive && verdictShown)
                     .frame(maxWidth: .infinity)
                     .opacity(verdictShown ? 1 : 0)
