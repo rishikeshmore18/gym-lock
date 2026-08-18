@@ -1,14 +1,15 @@
 import SwiftUI
 
-/// The onboarding story: nine scenes on one continuous vertical scroll.
+/// The onboarding story: ten scenes on one continuous vertical scroll.
 ///
-/// Scene five is a pinned narrative that holds six sub-steps, so the loop
-/// diagram changes state under the user's swipe instead of becoming six pages.
+/// Two scenes are pinned narratives that hold sub-steps, so their content
+/// changes under the user's swipe instead of becoming separate screens: the
+/// "Problem" kinetic-typography sequence and the loop diagram.
 struct OnboardingFlowView: View {
     @Environment(AppStore.self) private var store
 
     private enum Scene: Int, CaseIterable {
-        case logo, name, greeting, guilt, loop, excuses, chart, caution, solution
+        case logo, name, greeting, problem, guilt, loop, excuses, chart, caution, solution
     }
 
     @State private var index = 0
@@ -42,9 +43,13 @@ struct OnboardingFlowView: View {
         }
     }
 
-    /// Sub-steps per scene. Only the loop scene holds more than one.
+    /// Sub-steps per scene. Only the pinned narrative scenes hold more than one.
     private func subStepCount(for pageIndex: Int) -> Int {
-        Scene(rawValue: pageIndex) == .loop ? LoopState.sequence.count : 1
+        switch Scene(rawValue: pageIndex) {
+        case .problem: return ProblemReelPage.stepCount
+        case .loop: return LoopState.sequence.count
+        default: return 1
+        }
     }
 
     @ViewBuilder
@@ -66,6 +71,8 @@ struct OnboardingFlowView: View {
             )
         case .greeting:
             GreetingPage(isActive: isActive, name: store.greetingName)
+        case .problem:
+            ProblemReelPage(isActive: isActive)
         case .guilt:
             GuiltPage(isActive: isActive)
         case .loop:

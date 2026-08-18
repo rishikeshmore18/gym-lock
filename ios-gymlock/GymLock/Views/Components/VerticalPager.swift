@@ -13,7 +13,9 @@ import SwiftUI
 ///    play forwards as a page arrives and reverse as it leaves.
 /// 3. **Pages may hold their own sub-steps.** A page with several sub-steps stays
 ///    pinned while the user swipes through them, which is how the loop sequence
-///    tells its story without stacking seven screens.
+///    tells its story without stacking seven screens. Pinned pages also receive
+///    a continuous `sceneStep`, so a multi-phase scene can be driven directly by
+///    the finger and reverse when the user scrolls back.
 struct VerticalPager<Page: View>: View {
     @Binding var index: Int
     /// Step within the current page, for pinned narrative pages.
@@ -28,8 +30,12 @@ struct VerticalPager<Page: View>: View {
     @ViewBuilder var page: (Int) -> Page
 
     @State private var dragTranslation: CGFloat = 0
+    /// Undamped drag, used to drive sub-step progress on pinned pages.
+    @State private var rawDrag: CGFloat = 0
 
     private let advanceThreshold: CGFloat = 56
+    /// Drag distance that corresponds to one whole sub-step.
+    private let subStepTravel: CGFloat = 180
 
     var body: some View {
         GeometryReader { proxy in
@@ -47,6 +53,7 @@ struct VerticalPager<Page: View>: View {
                         .background(Theme.canvas)
                         .contentShape(.rect)
                         .environment(\.sceneReveal, max(0, 1 - abs(distance)))
+                        .environment(\.sceneStep, stepPosition(for: pageIndex))
                         .offset(y: distance * height)
                 }
             }
@@ -58,6 +65,21 @@ struct VerticalPager<Page: View>: View {
         }
         .clipped()
         .ignoresSafeArea(.keyboard, edges: .bottom)
+    }
+
+    /// Continuous sub-step position to publish to a given page.
+    ///
+    /// Pages already behind the current one report their final sub-step, so a
+    /// multi-phase scene does not snap back to its first phase while it is still
+    /// partly on screen during a page turn.
+    private func stepPosition(for pageIndex: Int) -> CGFloat {
+        let lastStep = CGFloat(max(0, subStepCount(pageIndex) - 1))
+
+        if pageIndex < index { return lastStep }
+        guard pageIndex == index, lastStep > 0 else { return 0 }
+
+        let live = CGFloat(subStep) - rawDrag / subStepTravel
+        return min(max(live, 0), lastStep)
     }
 
     /// Keeps only the pages that can be on screen alive, so the illustration
@@ -76,6 +98,7 @@ struct VerticalPager<Page: View>: View {
     private func dragGesture(pageHeight: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
+                rawDrag = value.translation.height
                 dragTranslation = resistedTranslation(
                     value.translation.height,
                     pageHeight: pageHeight
@@ -86,6 +109,7 @@ struct VerticalPager<Page: View>: View {
 
                 withAnimation(Theme.pageTurn) {
                     dragTranslation = 0
+                    rawDrag = 0
 
                     if projected < -advanceThreshold {
                         advance()
@@ -120,8 +144,10 @@ struct VerticalPager<Page: View>: View {
         }
     }
 
-    /// Rubber-bands the drag whenever the swipe will not move the page: at the
-    /// ends of the story, and while a pinned page still has sub-steps to show.
+    /// Decides how much of the drag the page itself absorbs.
+    ///
+    /// A pinned page barely moves — its own content is animating under the
+    /// finger instead — while the ends of the story rubber-band.
     private func resistedTranslation(_ raw: CGFloat, pageHeight: CGFloat) -> CGFloat {
         let pullingUp = raw < 0
 
@@ -130,11 +156,12 @@ struct VerticalPager<Page: View>: View {
         let blockedForward = index >= forwardLimit
         let blockedBackward = index <= 0
 
-        if pullingUp && (pinnedForward || blockedForward) {
-            return raw * 0.16
-        }
-        if !pullingUp && (pinnedBackward || blockedBackward) {
-            return raw * 0.16
+        if pullingUp {
+            if pinnedForward { return raw * 0.03 }
+            if blockedForward { return raw * 0.16 }
+        } else {
+            if pinnedBackward { return raw * 0.03 }
+            if blockedBackward { return raw * 0.16 }
         }
         return max(min(raw, pageHeight), -pageHeight)
     }

@@ -19,6 +19,33 @@ extension EnvironmentValues {
     }
 }
 
+// MARK: - Scene step
+
+private struct SceneStepKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    /// Continuous position within a pinned page's sub-steps: `1.4` means the
+    /// page is settled on sub-step 1 and 40% of the way towards sub-step 2
+    /// under the user's finger.
+    ///
+    /// Unlike the discrete sub-step index, this tracks the live drag, so a
+    /// scene can map a multi-phase animation onto scroll position and have it
+    /// reverse naturally when the user scrolls back.
+    var sceneStep: CGFloat {
+        get { self[SceneStepKey.self] }
+        set { self[SceneStepKey.self] = newValue }
+    }
+}
+
+/// Smoothly eased 0...1 ramp, used to keep phase transitions from starting or
+/// stopping abruptly.
+func smoothstep(_ x: CGFloat) -> CGFloat {
+    let t = min(max(x, 0), 1)
+    return t * t * (3 - 2 * t)
+}
+
 /// The four content roles in a scene, each with its own reveal window so the
 /// headline always lands slightly before the hero visual.
 enum SceneRole {
@@ -59,9 +86,7 @@ enum SceneRole {
     func progress(at reveal: CGFloat) -> CGFloat {
         let range = window
         let raw = (reveal - range.lowerBound) / (range.upperBound - range.lowerBound)
-        let clamped = min(max(raw, 0), 1)
-        // Smoothstep keeps the entrance from starting or stopping abruptly.
-        return clamped * clamped * (3 - 2 * clamped)
+        return smoothstep(raw)
     }
 }
 
