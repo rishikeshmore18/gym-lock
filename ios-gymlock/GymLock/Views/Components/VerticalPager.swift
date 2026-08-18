@@ -57,9 +57,13 @@ struct VerticalPager<Page: View>: View {
 
     /// Keeps only the pages that can be on screen alive, so the illustration
     /// memory footprint stays flat regardless of how long the story is.
+    ///
+    /// Nothing past `forwardLimit` is ever mounted. That is what makes a gate a
+    /// gate: while a scene is holding the story, the next one cannot be dragged
+    /// into view even a sliver, so there is nothing to mistake for progress.
     private func mountedIndices(around position: CGFloat) -> [Int] {
         let lower = max(0, Int(floor(position)) - 1)
-        let upper = min(pageCount - 1, Int(ceil(position)) + 1)
+        let upper = min(forwardLimit, Int(ceil(position)) + 1)
         guard lower <= upper else { return [index] }
         return Array(lower...upper)
     }
@@ -103,13 +107,16 @@ struct VerticalPager<Page: View>: View {
         Haptics.soft()
     }
 
-    /// Rubber-bands the drag at the ends of the story, where the swipe will not
-    /// move the page.
+    /// Rubber-bands the drag where the swipe will not move the page.
+    ///
+    /// A gated forward swipe is met with a near-solid wall — a few points of give
+    /// so the gesture is acknowledged, then nothing. A loose rubber-band would
+    /// slide the page far enough to look like it was about to turn.
     private func resistedTranslation(_ raw: CGFloat, pageHeight: CGFloat) -> CGFloat {
         let pullingUp = raw < 0
 
-        if pullingUp && index >= forwardLimit { return raw * 0.16 }
-        if !pullingUp && index <= 0 { return raw * 0.16 }
+        if pullingUp && index >= forwardLimit { return max(raw * 0.05, -18) }
+        if !pullingUp && index <= 0 { return min(raw * 0.12, 42) }
 
         return max(min(raw, pageHeight), -pageHeight)
     }

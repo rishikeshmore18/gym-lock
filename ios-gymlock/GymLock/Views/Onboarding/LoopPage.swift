@@ -2,9 +2,9 @@ import SwiftUI
 
 /// Scene 6 — the loop, and the centrepiece of the story.
 ///
-/// The user never has to work for it: the six states play themselves as a single
-/// continuous shot, and the caption changes with them. One unbroken bar along the
-/// bottom shows how far through the lap the loop currently is.
+/// The user never has to work for it: the six states play themselves in a fixed
+/// frame, and the caption changes with them. One unbroken bar along the bottom
+/// shows how far through the lap the loop currently is.
 ///
 /// The loop does not stop. Halfway through the first lap the word "break it."
 /// appears and the way forward opens — while the loop keeps turning behind it,
@@ -51,7 +51,7 @@ struct LoopPage: View {
             }
             .sceneElement(.headline)
         } hero: {
-            LoopFilmView(state: state, isPlaying: isActive)
+            LoopFilmView(state: state)
                 .sceneElement(.hero)
         } footer: {
             VStack(alignment: .leading, spacing: 14) {
@@ -92,10 +92,6 @@ struct LoopPage: View {
 
     /// One continuous bar filling in real time across the whole lap, so the scene
     /// reads as something running rather than something waiting to be poked.
-    ///
-    /// A faint notch marks the halfway point while it is still ahead — that is
-    /// where the story opens up, and showing it is fairer than silently refusing
-    /// the swipe.
     private var progressBar: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
@@ -106,13 +102,6 @@ struct LoopPage: View {
                     .fill(Theme.accent)
                     .frame(width: proxy.size.width * lapProgress)
                     .opacity(barOpacity)
-
-                Capsule()
-                    .fill(Theme.ink.opacity(0.22))
-                    .frame(width: 2, height: 8)
-                    .offset(x: proxy.size.width * 0.5 - 1)
-                    .opacity(isHalfwayReached ? 0 : 1)
-                    .animation(Theme.settle, value: isHalfwayReached)
             }
         }
         .frame(height: 4)
@@ -151,7 +140,7 @@ struct LoopPage: View {
 
         while !Task.isCancelled {
             for step in 1...Self.stepCount {
-                withAnimation(.easeInOut(duration: 0.34)) { stateIndex = step }
+                stateIndex = step
                 withAnimation(.linear(duration: Self.dwell)) {
                     lapProgress = CGFloat(step) / CGFloat(Self.stepCount)
                 }

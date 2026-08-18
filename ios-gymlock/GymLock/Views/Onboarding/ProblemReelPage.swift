@@ -5,8 +5,10 @@ import SwiftUI
 ///
 /// Four movements, on one timeline, with no input required at any point:
 ///
-/// 1. A slot-machine wheel of the word "Problem" is already turning as the page
-///    arrives. It decelerates like a picker and the centre copy is *picked*.
+/// 1. The page is landed on mid-spin: a slot-machine wheel of the word "Problem"
+///    is already racing past, too fast and too blurred to read, and it resolves
+///    into focus as it decelerates like a picker until the centre copy is
+///    *picked*. Nothing static is ever shown first.
 /// 2. The picked copy holds while the echoes above and below it fade away.
 /// 3. It locks to the left margin and shrinks to make room.
 /// 4. A second wheel spins up beside it, naming the problem — endlessly.
@@ -40,14 +42,18 @@ struct ProblemReelPage: View {
     private static let wheelRowHeight: CGFloat = 56
     private static let reelRowHeight: CGFloat = 62
     private static let reelSize: CGFloat = 30
-    /// Where the wheel starts, in rows below its resting position.
-    private static let spinStart: Double = -6.4
+    /// Where the wheel starts, in rows below its resting position. Far enough
+    /// back that the opening stage is a genuine sprint rather than a nudge.
+    private static let spinStart: Double = -13.0
+    /// Blur while the wheel is at full speed. This is the scene's entrance: the
+    /// wheel resolves from unreadable to sharp instead of fading in.
+    private static let spinBlurMax: CGFloat = 6.5
 
     @Environment(\.sceneReveal) private var reveal
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var spin: Double = ProblemReelPage.spinStart
-    @State private var spinBlur: CGFloat = 0
+    @State private var spinBlur: CGFloat = ProblemReelPage.spinBlurMax
     /// Opacity multiplier for every copy except the picked one.
     @State private var echoFade: CGFloat = 1
     @State private var lockLeft: CGFloat = 0
@@ -58,7 +64,9 @@ struct ProblemReelPage: View {
     /// left-locked position can never jitter mid-animation.
     @State private var problemWidth: CGFloat = 0
 
-    private var entrance: CGFloat { smoothstep((reveal - 0.28) / 0.55) }
+    /// Opacity comes up early and fast, because blur — not fade — is what this
+    /// scene resolves out of. Waiting on a fade would show a still frame first.
+    private var entrance: CGFloat { smoothstep((reveal - 0.10) / 0.42) }
 
     var body: some View {
         GeometryReader { proxy in
@@ -77,7 +85,7 @@ struct ProblemReelPage: View {
                     rowHeight: reduceMotion ? 0 : Self.wheelRowHeight,
                     size: Self.problemSize
                 )
-                .blur(radius: spinBlur)
+                .blur(radius: reduceMotion ? 0 : spinBlur)
 
                 reel(containerWidth: width)
             }
@@ -137,10 +145,8 @@ struct ProblemReelPage: View {
         }
 
         Haptics.prepareSelection()
-        // Let the page turn finish before the wheel starts slowing down.
-        try? await Task.sleep(for: .milliseconds(420))
-        guard !Task.isCancelled else { return }
-
+        // No opening pause: the wheel is already at speed while the page is still
+        // turning, so the user lands on motion rather than on a still frame.
         await pickTheWord()
         guard !Task.isCancelled else { return }
 
@@ -171,16 +177,25 @@ struct ProblemReelPage: View {
             return
         }
 
-        spinBlur = 5
-        withAnimation(.linear(duration: 0.40)) { spin = -2.6 }
+        // Stage 0 — full speed, unreadable. Roughly fourteen rows a second.
+        spinBlur = Self.spinBlurMax
+        withAnimation(.linear(duration: 0.46)) { spin = -6.4 }
+        try? await Task.sleep(for: .milliseconds(440))
+        guard !Task.isCancelled else { return }
+
+        // Stage 1 — speed comes off and the word starts to become legible.
+        withAnimation(.easeOut(duration: 0.40)) {
+            spin = -2.6
+            spinBlur = 3.2
+        }
         try? await Task.sleep(for: .milliseconds(400))
         guard !Task.isCancelled else { return }
 
-        // Two rows cross the centre during this stage, so these ticks land on
-        // real word crossings rather than being decorative.
+        // Stage 2 — two rows cross the centre here, so these ticks land on real
+        // word crossings rather than being decorative.
         withAnimation(.easeOut(duration: 0.38)) {
             spin = -0.6
-            spinBlur = 1.6
+            spinBlur = 1.4
         }
         Haptics.selection()
         try? await Task.sleep(for: .milliseconds(190))
@@ -188,6 +203,7 @@ struct ProblemReelPage: View {
         try? await Task.sleep(for: .milliseconds(190))
         guard !Task.isCancelled else { return }
 
+        // Stage 3 — settles onto the picked copy.
         withAnimation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.62)) {
             spin = 0
             spinBlur = 0
@@ -228,7 +244,7 @@ struct ProblemReelPage: View {
 
     private func reset() {
         spin = Self.spinStart
-        spinBlur = 0
+        spinBlur = Self.spinBlurMax
         echoFade = 1
         lockLeft = 0
         reelPresence = 0
