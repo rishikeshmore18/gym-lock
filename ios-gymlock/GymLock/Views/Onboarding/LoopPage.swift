@@ -164,6 +164,10 @@ struct LoopPage: View {
         guard !isHalfwayReached else { return }
         withAnimation(Theme.settle) { isHalfwayReached = true }
         Haptics.commit()
+        // From this moment the next swipe breaks the screen. Spinning the haptic
+        // engine up now means the crack lands on the same frame as the gesture
+        // instead of a beat behind it.
+        Haptics.prepareGlassBreak()
         onReachHalfway()
     }
 

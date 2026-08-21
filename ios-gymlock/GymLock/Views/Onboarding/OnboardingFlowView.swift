@@ -17,8 +17,8 @@ struct OnboardingFlowView: View {
         case logo, name, greeting, problem, guilt, loop, excuses, chart, caution, solution
     }
 
-    /// How long the glass takes to clear the screen.
-    private static let shatterDuration: Double = 1.15
+    /// How long the glass takes to heave, break, and clear the screen.
+    private static let shatterDuration: Double = 1.35
 
     @State private var index = 0
     @State private var isEditingName = false
@@ -33,6 +33,12 @@ struct OnboardingFlowView: View {
     @State private var hasShattered = false
     /// Nil while the story needs to cut rather than slide. See `breakTheLoop()`.
     @State private var pageAnimation: Animation? = Theme.pageTurn
+    /// True while the break owns the incoming scene's entrance.
+    @State private var isGlassTransition = false
+    /// The incoming scene's hand-driven reveal, ramped as the glass clears.
+    @State private var incomingReveal: Double = 1
+    /// The scene whose own timeline is being held back behind the glass.
+    @State private var heldScene: Int?
 
     private var maxReachableIndex: Int {
         guard store.hasName else { return Scene.name.rawValue }
@@ -57,7 +63,8 @@ struct OnboardingFlowView: View {
                 isDragDisabled: isEditingName,
                 interceptedPages: interceptedPages,
                 onInterceptedAdvance: { _ in breakTheLoop() },
-                pageAnimation: pageAnimation
+                pageAnimation: pageAnimation,
+                sceneRevealOverride: isGlassTransition ? incomingReveal : nil
             ) { pageIndex in
                 scene(at: pageIndex)
             }
@@ -83,7 +90,10 @@ struct OnboardingFlowView: View {
 
     @ViewBuilder
     private func scene(at pageIndex: Int) -> some View {
-        let isActive = index == pageIndex
+        // A held scene is mounted but not yet running. Starting a scene's
+        // timeline while it is buried under falling glass would mean the user
+        // misses the opening of it entirely.
+        let isActive = index == pageIndex && heldScene != pageIndex
 
         switch Scene(rawValue: pageIndex) ?? .logo {
         case .logo:
@@ -108,6 +118,7 @@ struct OnboardingFlowView: View {
             LoopPage(isActive: isActive) {
                 withAnimation(Theme.settle) { isLoopUnlocked = true }
             }
+            .allowsHitTesting(!isGlassTransition)
         case .excuses:
             ExcusesPage(isActive: isActive, name: store.greetingName)
         case .chart:
@@ -148,10 +159,11 @@ struct OnboardingFlowView: View {
     /// The one transition in the story that is not a page turn.
     ///
     /// The screen the user is looking at is photographed, the story cuts
-    /// instantly to the next scene underneath, and the photograph is then broken
-    /// into falling glass on top of it. Because the cut happens before the first
-    /// shard moves, the next scene is already sitting there fully settled, and it
-    /// is revealed through the widening gaps rather than sliding in behind them.
+    /// instantly to the next scene underneath, and the photograph is then heaved
+    /// upward and broken apart on top of it. Because the cut happens before the
+    /// first shard moves, the glass is still whole when the next scene arrives,
+    /// and that scene is uncovered through the widening gaps rather than sliding
+    /// in behind them.
     ///
     /// Two details make it hold together: the snapshot is taken before `index`
     /// changes, and `pageAnimation` is dropped for that one state change so the
@@ -166,16 +178,31 @@ struct OnboardingFlowView: View {
         shatterImage = Image(uiImage: snapshot)
         shatterProgress = 0
 
-        // Same state update, so the pager renders the next scene with no
+        // One state update, so the pager renders the next scene with no
         // animation at all while the glass is still perfectly intact on top.
+        // The incoming scene is parked at the very start of its entrance and
+        // held there — the break is what will bring it in.
         pageAnimation = nil
+        isGlassTransition = true
+        incomingReveal = 0
         index = min(index + 1, maxReachableIndex)
+        heldScene = index
 
-        Haptics.medium()
+        // Fired on the finger leaving the screen rather than on the first
+        // animation frame: the swipe is the cause, and any delay between the
+        // gesture and the crack reads as lag.
+        Haptics.glassBreak()
 
         Task { await playShatter() }
     }
 
+    /// Runs the break and, underneath it, the arrival of the next scene.
+    ///
+    /// The two are staged against each other on purpose. The scene's elements
+    /// stagger in while the glass is still in the air, so the gaps open onto
+    /// something assembling itself, and the scene's own timeline is released
+    /// while the last pieces are still falling — by the time the screen is clear
+    /// it is already running, not waiting to start.
     private func playShatter() async {
         // One frame with everything settled and the glass unbroken, so the break
         // starts from an intact screen instead of mid-cut.
@@ -189,8 +216,19 @@ struct OnboardingFlowView: View {
         try? await Task.sleep(for: .milliseconds(120))
         pageAnimation = Theme.pageTurn
 
+        // Starts as the pane fails and the first pieces leave.
+        try? await Task.sleep(for: .milliseconds(80))
+        withAnimation(.timingCurve(0.2, 0.85, 0.25, 1, duration: 0.66)) {
+            incomingReveal = 1
+        }
+
+        try? await Task.sleep(for: .milliseconds(340))
+        heldScene = nil
+
         try? await Task.sleep(for: .seconds(Self.shatterDuration))
         shatterImage = nil
         shatterProgress = 0
+        isGlassTransition = false
+        incomingReveal = 1
     }
 }

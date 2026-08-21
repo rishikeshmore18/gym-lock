@@ -30,6 +30,15 @@ struct VerticalPager<Page: View>: View {
     /// index change land instantly — needed when a parent-drawn transition has
     /// to cut to the following scene rather than slide to it.
     var pageAnimation: Animation? = Theme.pageTurn
+    /// Overrides the reveal published to the *current* page while the parent is
+    /// drawing its own transition.
+    ///
+    /// A parent-drawn cut puts the incoming page at its final position
+    /// instantly, which means `sceneReveal` is already `1` and that scene's
+    /// entrance never plays — it simply exists, fully formed, the moment it is
+    /// uncovered. Driving the reveal by hand lets the parent stage the entrance
+    /// against whatever it is drawing on top.
+    var sceneRevealOverride: Double?
     @ViewBuilder var page: (Int) -> Page
 
     @State private var dragTranslation: CGFloat = 0
@@ -51,7 +60,7 @@ struct VerticalPager<Page: View>: View {
                         .frame(width: proxy.size.width, height: height)
                         .background(Theme.canvas)
                         .contentShape(.rect)
-                        .environment(\.sceneReveal, max(0, 1 - abs(distance)))
+                        .environment(\.sceneReveal, reveal(for: pageIndex, distance: distance))
                         .offset(y: distance * height)
                 }
             }
@@ -79,6 +88,15 @@ struct VerticalPager<Page: View>: View {
 
     private var forwardLimit: Int {
         min(maxReachableIndex, pageCount - 1)
+    }
+
+    /// How arrived a page is: normally derived from scroll position, unless the
+    /// parent has taken the current page's entrance over.
+    private func reveal(for pageIndex: Int, distance: CGFloat) -> CGFloat {
+        if pageIndex == index, let override = sceneRevealOverride {
+            return CGFloat(override)
+        }
+        return max(0, 1 - abs(distance))
     }
 
     private func dragGesture(pageHeight: CGFloat) -> some Gesture {
