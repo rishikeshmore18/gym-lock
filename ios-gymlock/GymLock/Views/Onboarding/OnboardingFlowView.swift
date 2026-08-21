@@ -1,11 +1,16 @@
 import SwiftUI
 
-/// The onboarding story: ten scenes on one continuous vertical scroll.
+/// The onboarding story: thirty-one scenes on one continuous vertical scroll.
 ///
-/// Every scene plays itself. The two multi-part scenes — the "Problem" kinetic
-/// typography sequence and the loop diagram — run on their own timelines and open
-/// the way forward when they are done, so a swipe always means "next scene" and
-/// never "advance this one".
+/// It runs in two halves that share a single gesture, a single visual language,
+/// and a single sense of momentum:
+///
+/// 1. **The story** (logo → caution) establishes the problem and asks the user
+///    to opt in. Scenes here play themselves and open the way forward when they
+///    are done, so a swipe always means "next scene".
+/// 2. **The system** (commitment → activation) turns that agreement into a
+///    configured product. These scenes take input, so several of them hold the
+///    story until they have an answer.
 ///
 /// One scene does not merely turn: leaving the loop breaks the screen. See
 /// `breakTheLoop()`.
@@ -14,7 +19,15 @@ struct OnboardingFlowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum Scene: Int, CaseIterable {
-        case logo, name, greeting, problem, guilt, loop, excuses, chart, caution, solution
+        // The story.
+        case logo, name, greeting, problem, guilt, loop, excuses, chart, caution
+
+        // The system.
+        case commitment, dayZero, targetFrequency, currentFrequency
+        case failureWindow, failureTime, failureReasons, distractingApps, nightLoop
+        case persistentAlarm, alarmSound, mechanisms, comebackMode, buildingSystem
+        case gravity, interventionTimeline, systemSummary
+        case lockedState, unlockedState, firstWeek, finalCommitment, activation
     }
 
     /// How long the glass takes to heave, break, and clear the screen.
@@ -24,6 +37,13 @@ struct OnboardingFlowView: View {
     @State private var isEditingName = false
     /// The loop scene holds the story until it has played to its halfway mark.
     @State private var isLoopUnlocked = false
+    /// The press-and-hold on the commitment screen holds the system half.
+    @State private var hasCommitted = false
+
+    /// Shared services for the system half.
+    @State private var pagerLock = PagerInteractionLock()
+    @State private var alarmPlayer = AlarmSoundPlayer()
+    @State private var subscriptions = SubscriptionStore()
 
     /// The captured screen currently breaking apart, if any.
     @State private var shatterImage: Image?
@@ -40,9 +60,22 @@ struct OnboardingFlowView: View {
     /// The scene whose own timeline is being held back behind the glass.
     @State private var heldScene: Int?
 
+    private var profile: OnboardingProfile { store.profile }
+
+    /// The furthest scene the user has earned.
+    ///
+    /// Each gate is a question that later screens genuinely depend on. Anything
+    /// with a sensible default — the frequency wheels, the alarm sound, the
+    /// toggles — is deliberately not gated, because forcing a tap on a screen
+    /// that is already correct is just friction.
     private var maxReachableIndex: Int {
         guard store.hasName else { return Scene.name.rawValue }
         guard isLoopUnlocked else { return Scene.loop.rawValue }
+        guard hasCommitted else { return Scene.commitment.rawValue }
+        if profile.failureWindow == nil { return Scene.failureWindow.rawValue }
+        if profile.failureReasons.isEmpty { return Scene.failureReasons.rawValue }
+        if profile.selectedDistractingApps.isEmpty { return Scene.distractingApps.rawValue }
+        if profile.nightScrollingFrequency == nil { return Scene.nightLoop.rawValue }
         return Scene.allCases.count - 1
     }
 
@@ -60,7 +93,7 @@ struct OnboardingFlowView: View {
                 index: $index,
                 pageCount: Scene.allCases.count,
                 maxReachableIndex: maxReachableIndex,
-                isDragDisabled: isEditingName,
+                isDragDisabled: isEditingName || pagerLock.isLocked,
                 interceptedPages: interceptedPages,
                 onInterceptedAdvance: { _ in breakTheLoop() },
                 pageAnimation: pageAnimation,
@@ -86,6 +119,9 @@ struct OnboardingFlowView: View {
                 .allowsHitTesting(false)
             }
         }
+        .environment(pagerLock)
+        .environment(alarmPlayer)
+        .environment(subscriptions)
     }
 
     @ViewBuilder
@@ -96,6 +132,8 @@ struct OnboardingFlowView: View {
         let isActive = index == pageIndex && heldScene != pageIndex
 
         switch Scene(rawValue: pageIndex) ?? .logo {
+        // MARK: The story
+
         case .logo:
             LogoSplashPage(isActive: isActive)
         case .name:
@@ -125,22 +163,78 @@ struct OnboardingFlowView: View {
             ChartPage(isActive: isActive)
         case .caution:
             CautionPage(isActive: isActive)
-        case .solution:
-            SolutionPage(isActive: isActive) {
-                store.stage = .scheduleSetup
+
+        // MARK: The system
+
+        case .commitment:
+            CommitmentPage(isActive: isActive) {
+                withAnimation(Theme.settle) { hasCommitted = true }
+                advance()
+            }
+        case .dayZero:
+            DayZeroPage(isActive: isActive, onContinue: advance)
+        case .targetFrequency:
+            TargetFrequencyPage(isActive: isActive, onContinue: advance)
+        case .currentFrequency:
+            CurrentFrequencyPage(isActive: isActive, onContinue: advance)
+        case .failureWindow:
+            FailureWindowPage(isActive: isActive, onContinue: advance)
+        case .failureTime:
+            FailureTimePage(isActive: isActive, onContinue: advance)
+        case .failureReasons:
+            FailureReasonsPage(isActive: isActive, onContinue: advance)
+        case .distractingApps:
+            DistractingAppsPage(isActive: isActive, onContinue: advance)
+        case .nightLoop:
+            NightLoopPage(isActive: isActive, onContinue: advance)
+        case .persistentAlarm:
+            PersistentAlarmPage(isActive: isActive, onContinue: advance)
+        case .alarmSound:
+            AlarmSoundPage(isActive: isActive, onContinue: advance)
+        case .mechanisms:
+            MechanismsPage(isActive: isActive, onContinue: advance)
+        case .comebackMode:
+            ComebackModePage(isActive: isActive, onContinue: advance)
+        case .buildingSystem:
+            BuildingSystemPage(isActive: isActive, onContinue: advance)
+        case .gravity:
+            GravityPage(isActive: isActive, name: store.greetingName, onContinue: advance)
+        case .interventionTimeline:
+            InterventionTimelinePage(isActive: isActive, onContinue: advance)
+        case .systemSummary:
+            SystemSummaryPage(isActive: isActive, onContinue: advance)
+        case .lockedState:
+            LockedStatePage(isActive: isActive, onContinue: advance)
+        case .unlockedState:
+            UnlockedStatePage(isActive: isActive, onContinue: advance)
+        case .firstWeek:
+            FirstWeekPage(isActive: isActive, onContinue: advance)
+        case .finalCommitment:
+            FinalCommitmentPage(isActive: isActive, onActivate: advance)
+        case .activation:
+            ActivationPage(isActive: isActive) {
+                store.stage = .home
             }
         }
     }
 
     /// A quiet rail showing position in the story.
+    ///
+    /// The marks shrink as the flow grows so the rail always fits the viewport
+    /// without becoming its own scrolling problem — the language is unchanged,
+    /// only the scale.
     private var progressRail: some View {
-        VStack(spacing: 6) {
+        let count = Scene.allCases.count - 1
+        let dot: CGFloat = count > 20 ? 4 : 8
+        let gap: CGFloat = count > 20 ? 3 : 6
+
+        return VStack(spacing: gap) {
             ForEach(Scene.allCases.dropFirst(), id: \.rawValue) { scene in
                 let isCurrent = index == scene.rawValue
 
                 Capsule()
                     .fill(isCurrent ? Theme.accent : Theme.ink.opacity(0.14))
-                    .frame(width: 3, height: isCurrent ? 18 : 8)
+                    .frame(width: 3, height: isCurrent ? dot * 2.6 : dot)
                     .animation(Theme.settle, value: isCurrent)
             }
         }

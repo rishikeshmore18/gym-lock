@@ -19,6 +19,7 @@ final class AppStore {
         static let name = "gymlock.userName"
         static let stage = "gymlock.stage"
         static let schedule = "gymlock.schedule"
+        static let profile = "gymlock.profile"
     }
 
     private let defaults: UserDefaults
@@ -33,6 +34,11 @@ final class AppStore {
 
     var schedule: GymSchedule {
         didSet { persistSchedule() }
+    }
+
+    /// Everything the user told GymLock while building their system.
+    var profile: OnboardingProfile {
+        didSet { persistProfile() }
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -50,6 +56,13 @@ final class AppStore {
             schedule = decoded
         } else {
             schedule = .default
+        }
+
+        if let data = defaults.data(forKey: Key.profile),
+           let decoded = try? JSONDecoder().decode(OnboardingProfile.self, from: data) {
+            profile = decoded
+        } else {
+            profile = .default
         }
     }
 
@@ -78,10 +91,45 @@ final class AppStore {
         defaults.set(data, forKey: Key.schedule)
     }
 
+    private func persistProfile() {
+        guard let data = try? JSONEncoder().encode(profile) else { return }
+        defaults.set(data, forKey: Key.profile)
+    }
+
+    /// Folds the onboarding answers into the live schedule the rest of the app
+    /// runs on, so the home screen reflects the system the user just built
+    /// rather than the defaults.
+    ///
+    /// Training days are chosen by spreading the requested count across the week
+    /// with rest days in between, which is a far better starting point than the
+    /// first N weekdays and is still fully editable later.
+    func applyProfileToSchedule() {
+        schedule.gymTime = profile.failureTime
+        if profile.wantsNightLock {
+            schedule.bedtime = profile.bedtime
+        }
+        schedule.trainingDays = Self.spreadTrainingDays(count: profile.targetWorkoutsPerWeek)
+    }
+
+    /// Picks `count` days spread as evenly as possible across the week.
+    static func spreadTrainingDays(count: Int) -> Set<Weekday> {
+        let ordered = Weekday.allCases
+        let clamped = min(max(count, 1), ordered.count)
+        guard clamped < ordered.count else { return Set(ordered) }
+
+        let stride = Double(ordered.count) / Double(clamped)
+        let picked = (0..<clamped).map { step -> Weekday in
+            let index = min(ordered.count - 1, Int((Double(step) * stride).rounded(.down)))
+            return ordered[index]
+        }
+        return Set(picked)
+    }
+
     /// Wipes stored progress. Used by the developer reset affordance in Settings.
     func resetAll() {
         userName = ""
         schedule = .default
+        profile = .default
         stage = .onboarding
     }
 }
