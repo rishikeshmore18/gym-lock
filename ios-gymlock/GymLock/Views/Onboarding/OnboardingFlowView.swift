@@ -213,7 +213,7 @@ struct OnboardingFlowView: View {
             FinalCommitmentPage(isActive: isActive, onActivate: advance)
         case .activation:
             ActivationPage(isActive: isActive) {
-                store.stage = .home
+                store.completeOnboarding()
             }
         }
     }

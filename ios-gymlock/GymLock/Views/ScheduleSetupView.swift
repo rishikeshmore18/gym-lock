@@ -163,7 +163,7 @@ struct ScheduleSetupView: View {
         VStack(spacing: 0) {
             Button {
                 Haptics.commit()
-                store.stage = .home
+                store.completeOnboarding()
             } label: {
                 Text("lock it in")
             }
