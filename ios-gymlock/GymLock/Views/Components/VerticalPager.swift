@@ -21,6 +21,15 @@ struct VerticalPager<Page: View>: View {
     var maxReachableIndex: Int
     /// Disables the drag entirely, for example while the keyboard is up.
     var isDragDisabled: Bool
+    /// Pages whose forward transition the parent draws itself. Leaving one of
+    /// these does not turn the page — `onInterceptedAdvance` is called instead,
+    /// and the parent is responsible for moving `index`.
+    var interceptedPages: Set<Int> = []
+    var onInterceptedAdvance: ((Int) -> Void)?
+    /// Animation used for an ordinary page turn. Set to `nil` to make the next
+    /// index change land instantly — needed when a parent-drawn transition has
+    /// to cut to the following scene rather than slide to it.
+    var pageAnimation: Animation? = Theme.pageTurn
     @ViewBuilder var page: (Int) -> Page
 
     @State private var dragTranslation: CGFloat = 0
@@ -49,7 +58,7 @@ struct VerticalPager<Page: View>: View {
             .frame(width: proxy.size.width, height: height, alignment: .top)
             .contentShape(.rect)
             .simultaneousGesture(dragGesture(pageHeight: height), isEnabled: !isDragDisabled)
-            .animation(Theme.pageTurn, value: index)
+            .animation(pageAnimation, value: index)
         }
         .clipped()
         .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -82,13 +91,25 @@ struct VerticalPager<Page: View>: View {
             }
             .onEnded { value in
                 let projected = value.translation.height + value.predictedEndTranslation.height * 0.3
+                let wantsForward = projected < -advanceThreshold
+                let wantsBack = projected > advanceThreshold
+
+                // An intercepted page hands the whole transition to the parent.
+                // This runs outside `withAnimation` on purpose: the parent may
+                // need to cut to the next scene with no animation at all, and an
+                // enclosing transaction would override that.
+                if wantsForward, index < forwardLimit, interceptedPages.contains(index) {
+                    dragTranslation = 0
+                    onInterceptedAdvance?(index)
+                    return
+                }
 
                 withAnimation(Theme.pageTurn) {
                     dragTranslation = 0
 
-                    if projected < -advanceThreshold {
+                    if wantsForward {
                         advance()
-                    } else if projected > advanceThreshold {
+                    } else if wantsBack {
                         retreat()
                     }
                 }
@@ -97,6 +118,7 @@ struct VerticalPager<Page: View>: View {
 
     private func advance() {
         guard index < forwardLimit else { return }
+        guard !interceptedPages.contains(index) else { return }
         index += 1
         Haptics.soft()
     }
@@ -112,9 +134,14 @@ struct VerticalPager<Page: View>: View {
     /// A gated forward swipe is met with a near-solid wall — a few points of give
     /// so the gesture is acknowledged, then nothing. A loose rubber-band would
     /// slide the page far enough to look like it was about to turn.
+    /// An intercepted page is even more rigid than a gated one. Whatever the
+    /// parent draws on release starts from the settled screen, so the page must
+    /// not have crept upward first — a few points acknowledge the touch and
+    /// nothing more.
     private func resistedTranslation(_ raw: CGFloat, pageHeight: CGFloat) -> CGFloat {
         let pullingUp = raw < 0
 
+        if pullingUp && interceptedPages.contains(index) { return max(raw * 0.04, -6) }
         if pullingUp && index >= forwardLimit { return max(raw * 0.05, -18) }
         if !pullingUp && index <= 0 { return min(raw * 0.12, 42) }
 
