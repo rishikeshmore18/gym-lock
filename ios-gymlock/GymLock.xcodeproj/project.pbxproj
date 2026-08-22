@@ -395,7 +395,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = GymLock/GymLock.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -403,7 +402,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "GymLock uses the camera to take your Day 0 progress photo or clip. It is stored only on this iPhone and is never uploaded.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "GymLock uses your approximate location to match the mountain on your home screen to your local weather. The app works fully without it.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GymLock records audio only as part of a Day 0 video you choose to capture. It is stored only on this iPhone and is never uploaded.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -432,7 +430,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = GymLock/GymLock.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -440,7 +437,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "GymLock uses the camera to take your Day 0 progress photo or clip. It is stored only on this iPhone and is never uploaded.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "GymLock uses your approximate location to match the mountain on your home screen to your local weather. The app works fully without it.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GymLock records audio only as part of a Day 0 video you choose to capture. It is stored only on this iPhone and is never uploaded.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

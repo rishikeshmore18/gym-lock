@@ -20,9 +20,6 @@ final class AppStore {
         static let stage = "gymlock.stage"
         static let schedule = "gymlock.schedule"
         static let profile = "gymlock.profile"
-        static let journey = "gymlock.journey"
-        static let onboardingCompleted = "gymlock.onboardingCompleted"
-        static let commitmentDay = "gymlock.commitmentDay"
     }
 
     private let defaults: UserDefaults
@@ -42,23 +39,6 @@ final class AppStore {
     /// Everything the user told GymLock while building their system.
     var profile: OnboardingProfile {
         didSet { persistProfile() }
-    }
-
-    /// The user's real history on the mountain.
-    var journey: JourneyProgress {
-        didSet { persistJourney() }
-    }
-
-    /// Set once, when the user finishes onboarding. Every later launch reads
-    /// this and goes straight into the app.
-    private(set) var onboardingCompleted: Bool {
-        didSet { defaults.set(onboardingCompleted, forKey: Key.onboardingCompleted) }
-    }
-
-    /// The `yyyyMMdd` of the day the user last said "I'm going", so the locked-in
-    /// state survives the app being closed but never leaks into tomorrow.
-    private var commitmentDay: Int {
-        didSet { defaults.set(commitmentDay, forKey: Key.commitmentDay) }
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -84,19 +64,6 @@ final class AppStore {
         } else {
             profile = .default
         }
-
-        if let data = defaults.data(forKey: Key.journey),
-           let decoded = try? JSONDecoder().decode(JourneyProgress.self, from: data) {
-            journey = decoded
-        } else {
-            journey = .empty
-        }
-
-        onboardingCompleted = defaults.bool(forKey: Key.onboardingCompleted)
-        commitmentDay = defaults.integer(forKey: Key.commitmentDay)
-
-        // A stage of `.home` written by an earlier build is as good as the flag.
-        if stage == .home { onboardingCompleted = true }
     }
 
     /// Trimmed display name, falling back to a neutral greeting target.
@@ -127,75 +94,6 @@ final class AppStore {
     private func persistProfile() {
         guard let data = try? JSONEncoder().encode(profile) else { return }
         defaults.set(data, forKey: Key.profile)
-    }
-
-    private func persistJourney() {
-        guard let data = try? JSONEncoder().encode(journey) else { return }
-        defaults.set(data, forKey: Key.journey)
-    }
-
-    // MARK: - Finishing onboarding
-
-    /// Closes onboarding for good and starts the journey clock.
-    ///
-    /// The start date is only ever written once, so re-running this can never
-    /// reset a user's history back to week one.
-    func completeOnboarding() {
-        applyProfileToSchedule()
-        if journey.startDate == nil {
-            journey.startDate = Date()
-        }
-        onboardingCompleted = true
-        stage = .home
-    }
-
-    // MARK: - Today
-
-    var isTrainingDayToday: Bool {
-        let weekdayNumber = Calendar.current.component(.weekday, from: Date())
-        guard let today = Weekday(rawValue: weekdayNumber) else { return false }
-        return schedule.trainingDays.contains(today)
-    }
-
-    /// The next scheduled session, or nil when nothing is scheduled at all.
-    func nextSessionDate(from now: Date = Date(), calendar: Calendar = .current) -> Date? {
-        guard !schedule.trainingDays.isEmpty else { return nil }
-
-        for offset in 0..<8 {
-            guard let day = calendar.date(byAdding: .day, value: offset, to: now) else { continue }
-            let weekdayNumber = calendar.component(.weekday, from: day)
-            guard let weekday = Weekday(rawValue: weekdayNumber),
-                  schedule.trainingDays.contains(weekday)
-            else { continue }
-
-            guard let slot = calendar.date(
-                bySettingHour: schedule.gymTime.hour,
-                minute: schedule.gymTime.minute,
-                second: 0,
-                of: day
-            ) else { continue }
-
-            if slot > now { return slot }
-        }
-        return nil
-    }
-
-    var hasCommittedToday: Bool {
-        commitmentDay == DayStamp.stamp(for: Date())
-    }
-
-    /// Records the user saying they are on their way.
-    func commitToToday() {
-        commitmentDay = DayStamp.stamp(for: Date())
-    }
-
-    /// Logs a verified session for today.
-    func markWorkoutVerified() {
-        journey.markVerified()
-    }
-
-    func undoTodaysWorkout() {
-        journey.clearVerified()
     }
 
     /// Folds the onboarding answers into the live schedule the rest of the app
@@ -232,9 +130,6 @@ final class AppStore {
         userName = ""
         schedule = .default
         profile = .default
-        journey = .empty
-        commitmentDay = 0
-        onboardingCompleted = false
         stage = .onboarding
     }
 }
