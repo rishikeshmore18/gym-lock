@@ -25,6 +25,25 @@ enum Theme {
     /// Dark surface used behind the logo mark.
     static let logoBackdrop = Color(red: 0.071, green: 0.071, blue: 0.075)
 
+    // MARK: - Morning palette
+
+    /// Warmer, brighter end of the accent, used only as the far stop of a
+    /// gradient so coral stays the colour the eye reads.
+    static let accentWarm = Color(red: 0.965, green: 0.541, blue: 0.267)
+    /// Deeper end of the accent, for the leading edge of a fill.
+    static let accentDeep = Color(red: 0.847, green: 0.286, blue: 0.220)
+    /// Barely-there accent wash for haloes and inactive arcs.
+    static let accentWash = Color(red: 0.976, green: 0.918, blue: 0.886)
+    /// Deep blue reserved for the inside of the celestial illustration.
+    /// The app canvas never becomes this — only the artwork does.
+    static let night = Color(red: 0.141, green: 0.169, blue: 0.271)
+
+    // MARK: - Morning motion
+
+    /// The night-to-morning transition. Slow enough to read as a sunrise,
+    /// short enough not to hold up the flow.
+    static let celestial: Animation = .timingCurve(0.25, 0.85, 0.28, 1, duration: 0.95)
+
     // MARK: - Radii
 
     static let cardRadius: CGFloat = 24

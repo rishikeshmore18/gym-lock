@@ -20,6 +20,9 @@ final class AppStore {
         static let stage = "gymlock.stage"
         static let schedule = "gymlock.schedule"
         static let profile = "gymlock.profile"
+        static let plan = "gymlock.morningPlan"
+        static let log = "gymlock.momentumLog"
+        static let departureMessage = "gymlock.lastDepartureMessage"
     }
 
     private let defaults: UserDefaults
@@ -39,6 +42,31 @@ final class AppStore {
     /// Everything the user told GymLock while building their system.
     var profile: OnboardingProfile {
         didSet { persistProfile() }
+    }
+
+    /// When GymLock acts: the sleep rhythm, the alarm slots, and the night lock.
+    ///
+    /// This extends the profile rather than competing with it. The profile is
+    /// what the user said about themselves; the plan is the schedule they are
+    /// actually running, seeded from those answers.
+    var plan: MorningPlan {
+        didSet { persist(plan, forKey: Key.plan) }
+    }
+
+    /// The honest ledger of what happened on each planned session.
+    var log: MomentumLog {
+        didSet { persist(log, forKey: Key.log) }
+    }
+
+    /// Index of the last departure message sent, so the next one differs.
+    var lastDepartureMessageIndex: Int? {
+        didSet {
+            if let lastDepartureMessageIndex {
+                defaults.set(lastDepartureMessageIndex, forKey: Key.departureMessage)
+            } else {
+                defaults.removeObject(forKey: Key.departureMessage)
+            }
+        }
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -64,6 +92,55 @@ final class AppStore {
         } else {
             profile = .default
         }
+
+        if let data = defaults.data(forKey: Key.plan),
+           let decoded = try? JSONDecoder().decode(MorningPlan.self, from: data) {
+            plan = decoded
+        } else {
+            plan = .default
+        }
+
+        if let data = defaults.data(forKey: Key.log),
+           let decoded = try? JSONDecoder().decode(MomentumLog.self, from: data) {
+            log = decoded
+        } else {
+            log = .empty
+        }
+
+        lastDepartureMessageIndex = defaults.object(forKey: Key.departureMessage) as? Int
+    }
+
+    // MARK: - Morning plan
+
+    /// Builds the plan out of the onboarding answers the first time it is
+    /// needed, so the user is never asked something they already told us.
+    func seedPlanIfNeeded() {
+        guard plan.slots.isEmpty else { return }
+        plan = MorningPlan.seeded(from: profile, schedule: schedule)
+    }
+
+    /// Whether gym-bag missions may be offered.
+    ///
+    /// Nothing in onboarding asks about a bag, and requiring everyone to own one
+    /// would strand the people who do not. Until there is a real signal, the
+    /// mission stays out of the pool.
+    var usesGymBag: Bool { false }
+
+    /// Records a mission so the same one is not handed out twice running.
+    func rememberMission(_ mission: ActivationMissionType) {
+        var recent = plan.recentMissions
+        recent.append(mission)
+        if recent.count > 6 { recent.removeFirst(recent.count - 6) }
+        plan.recentMissions = recent
+    }
+
+    /// Folds a changed rhythm back into the night lock, but only when the user
+    /// has not customised it themselves.
+    func applyRhythmToNightLock() {
+        guard plan.nightLock.followsRhythm else { return }
+        plan.nightLock.customStart = plan.rhythm.bedtime
+        plan.nightLock.customEnd = plan.rhythm.wakeTime
+        schedule.bedtime = plan.rhythm.bedtime
     }
 
     /// Trimmed display name, falling back to a neutral greeting target.
@@ -94,6 +171,11 @@ final class AppStore {
     private func persistProfile() {
         guard let data = try? JSONEncoder().encode(profile) else { return }
         defaults.set(data, forKey: Key.profile)
+    }
+
+    private func persist<Value: Encodable>(_ value: Value, forKey key: String) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        defaults.set(data, forKey: key)
     }
 
     /// Folds the onboarding answers into the live schedule the rest of the app
@@ -130,6 +212,30 @@ final class AppStore {
         userName = ""
         schedule = .default
         profile = .default
+        plan = .default
+        log = .empty
+        lastDepartureMessageIndex = nil
         stage = .onboarding
     }
+
+    #if DEBUG
+    /// Removes recent skips so the within-allowance branch can be exercised.
+    func debugClearSkips() {
+        let cutoff = Date().addingTimeInterval(-28 * 24 * 3600)
+        log.outcomes.removeAll { $0.date >= cutoff && $0.kind.usesSkipAllowance }
+    }
+
+    /// Burns through the allowance so the over-allowance branch can be seen.
+    func debugExhaustSkips(count: Int) {
+        debugClearSkips()
+        for offset in 0..<count {
+            log.record(
+                SessionOutcome(
+                    date: Date().addingTimeInterval(-Double(offset + 1) * 24 * 3600),
+                    kind: .easySkip
+                )
+            )
+        }
+    }
+    #endif
 }

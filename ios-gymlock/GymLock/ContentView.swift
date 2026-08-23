@@ -1,8 +1,23 @@
 import SwiftUI
 
-/// Routes between the onboarding journey, the commitment screen, and home.
+/// Routes between the onboarding journey, the morning setup, and home.
+///
+/// A live morning takes over everything. Whatever the user was doing, the alarm
+/// firing means the only thing on screen is the decision — which is the entire
+/// point of an app that promises to interrupt.
 struct ContentView: View {
     @Environment(AppStore.self) private var store
+    @Environment(GymSessionCoordinator.self) private var coordinator
+
+    private var isMorningLive: Binding<Bool> {
+        Binding(
+            get: { coordinator.isSessionLive },
+            set: { isPresented in
+                guard !isPresented else { return }
+                coordinator.endSession()
+            }
+        )
+    }
 
     var body: some View {
         ZStack {
@@ -20,10 +35,18 @@ struct ContentView: View {
         }
         .animation(Theme.settle, value: store.stage)
         .preferredColorScheme(.light)
+        // Driven entirely by the session state: the flow dismisses itself when
+        // the coordinator ends the morning, and there is no separate
+        // presentation flag able to disagree with it.
+        .fullScreenCover(isPresented: isMorningLive) {
+            MorningFlowView()
+        }
     }
 }
 
 #Preview {
     ContentView()
         .environment(AppStore(defaults: UserDefaults(suiteName: "preview") ?? .standard))
+        .environment(GymSessionCoordinator(defaults: UserDefaults(suiteName: "preview") ?? .standard))
+        .environment(AlarmSoundPlayer())
 }
