@@ -23,6 +23,9 @@ final class AppStore {
         static let plan = "gymlock.morningPlan"
         static let log = "gymlock.momentumLog"
         static let departureMessage = "gymlock.lastDepartureMessage"
+        static let gym = "gymlock.primaryGym"
+        static let events = "gymlock.sessionEvents"
+        static let blockedAppsConfigured = "gymlock.blockedAppsConfigured"
     }
 
     private let defaults: UserDefaults
@@ -56,6 +59,35 @@ final class AppStore {
     /// The honest ledger of what happened on each planned session.
     var log: MomentumLog {
         didSet { persist(log, forKey: Key.log) }
+    }
+
+    /// The gym the user actually goes to.
+    ///
+    /// The one extra thing they configure for automatic arrival detection, set
+    /// once from a map search. V1 keeps a single primary gym; the field is
+    /// singular rather than a list because two gyms is a real but much rarer
+    /// case, and guessing at it now would complicate every arrival decision.
+    var primaryGym: GymLocation? {
+        didSet {
+            if let primaryGym {
+                persist(primaryGym, forKey: Key.gym)
+            } else {
+                defaults.removeObject(forKey: Key.gym)
+            }
+        }
+    }
+
+    /// The behavioural record that will power the activity grid.
+    var events: SessionEventLog {
+        didSet { persist(events, forKey: Key.events) }
+    }
+
+    /// Whether the user has been through the blocked-apps picker.
+    ///
+    /// Asked exactly once. Nobody should be choosing a blocklist at 6:30 in the
+    /// morning.
+    var hasConfiguredBlockedApps: Bool {
+        didSet { defaults.set(hasConfiguredBlockedApps, forKey: Key.blockedAppsConfigured) }
     }
 
     /// Index of the last departure message sent, so the next one differs.
@@ -107,8 +139,36 @@ final class AppStore {
             log = .empty
         }
 
+        if let data = defaults.data(forKey: Key.gym),
+           let decoded = try? JSONDecoder().decode(GymLocation.self, from: data) {
+            primaryGym = decoded
+        } else {
+            primaryGym = nil
+        }
+
+        if let data = defaults.data(forKey: Key.events),
+           let decoded = try? JSONDecoder().decode(SessionEventLog.self, from: data) {
+            events = decoded
+        } else {
+            events = .empty
+        }
+
+        hasConfiguredBlockedApps = defaults.bool(forKey: Key.blockedAppsConfigured)
         lastDepartureMessageIndex = defaults.object(forKey: Key.departureMessage) as? Int
     }
+
+    // MARK: - Events
+
+    /// Records a behavioural event.
+    ///
+    /// Everything here is emitted by the system as the morning unfolds. There
+    /// is no manual logging anywhere in GymLock, and there must never be.
+    func record(_ kind: SessionEventKind, sessionID: UUID? = nil, detail: String? = nil) {
+        events.record(SessionEvent(sessionID: sessionID, kind: kind, at: Date(), detail: detail))
+    }
+
+    /// Whether the passive arrival system is fully configured.
+    var isAutomaticArrivalReady: Bool { primaryGym != nil }
 
     // MARK: - Morning plan
 
@@ -214,6 +274,9 @@ final class AppStore {
         profile = .default
         plan = .default
         log = .empty
+        events = .empty
+        primaryGym = nil
+        hasConfiguredBlockedApps = false
         lastDepartureMessageIndex = nil
         stage = .onboarding
     }
@@ -223,6 +286,17 @@ final class AppStore {
     func debugClearSkips() {
         let cutoff = Date().addingTimeInterval(-28 * 24 * 3600)
         log.outcomes.removeAll { $0.date >= cutoff && $0.kind.usesSkipAllowance }
+    }
+
+    /// Drops in a plausible gym so arrival can be exercised without a map.
+    func debugSeedGym() {
+        guard primaryGym == nil else { return }
+        primaryGym = GymLocation(
+            name: "Test Gym",
+            subtitle: "debug fixture",
+            latitude: 37.3349,
+            longitude: -122.0090
+        )
     }
 
     /// Burns through the allowance so the over-allowance branch can be seen.

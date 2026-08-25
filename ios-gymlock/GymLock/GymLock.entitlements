@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Real app blocking. Requires Apple's manual approval for distribution:
+	  https://developer.apple.com/contact/request/family-controls-distribution
+	  Without this in the signed provisioning profile, GymLock falls back to
+	  demo shielding and says so in the interface.
+	-->
+	<key>com.apple.developer.family-controls</key>
+	<true/>
+
+	<!-- Passive, read-only workout detection. Nothing is ever written to Health. -->
+	<key>com.apple.developer.healthkit</key>
+	<true/>
+	<key>com.apple.developer.healthkit.access</key>
+	<array/>
+</dict>
+</plist>

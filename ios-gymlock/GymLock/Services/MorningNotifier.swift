@@ -20,8 +20,9 @@ final class MorningNotifier {
         static let deadline = "gymlock.session.deadline"
         static let comeback = "gymlock.session.comeback"
         static let moved = "gymlock.session.moved"
+        static let arrival = "gymlock.session.arrival"
 
-        static let all = [departure, deadline, comeback, moved]
+        static let all = [departure, deadline, comeback, moved, arrival]
     }
 
     @discardableResult
@@ -55,6 +56,24 @@ final class MorningNotifier {
         )
 
         return message.index
+    }
+
+    // MARK: - Arrival
+
+    /// The one message sent when the user is confirmed at the gym.
+    ///
+    /// This is the payoff notification, and it is exactly one line long. The
+    /// user is standing in a gym holding their phone; the correct thing for an
+    /// app to do at that moment is tell them their apps are back and then be
+    /// quiet. Five celebratory buzzes would be five reasons to keep looking at
+    /// the screen instead of training.
+    func sendArrival() async {
+        await deliver(
+            id: ID.arrival,
+            title: "you're here. \u{1F525}",
+            body: "apps unlocked. go train.",
+            after: 1
+        )
     }
 
     // MARK: - Deadline

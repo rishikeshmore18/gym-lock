@@ -28,11 +28,18 @@ struct GymLockApp: App {
                     await coordinator.syncAlarms()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    // Re-syncing on every foreground is what keeps the OS in
-                    // step after a timezone change, a reinstall, or an edit made
-                    // while the app was suspended. `replaceAll` is idempotent,
-                    // so this converges rather than accumulating duplicates.
                     guard phase == .active else { return }
+
+                    // Everything that has to recover from time passing while the
+                    // app was not running happens here: the shield failsafe, the
+                    // shield/session reconciliation, and any workout Health wrote
+                    // in the meantime.
+                    coordinator.applicationDidBecomeActive()
+
+                    // Re-syncing alarms on every foreground keeps the OS in step
+                    // after a timezone change, a reinstall, or an edit made while
+                    // suspended. `replaceAll` is idempotent, so this converges
+                    // rather than accumulating duplicates.
                     Task { await coordinator.syncAlarms() }
                 }
         }

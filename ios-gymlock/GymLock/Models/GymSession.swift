@@ -14,17 +14,21 @@ enum GymSessionState: String, Codable, Hashable {
     case activationMission
     case preparing
     case departed
+    /// The phone entered the gym region. Not success yet — the dwell check has
+    /// to rule out driving past.
     case approachingGym
-    case arrivedPendingWorkout
-    /// The window closed without the user reaching the gym. Distinct from
-    /// `quickWorkoutOffered` because expiry opens "plans changed?", which still
-    /// offers going, and only *then* leads to the fallback picker.
+    /// Confirmed physical arrival. This is the success state: apps unlock here,
+    /// and a workout is *not* required to reach it.
+    case arrived
+    /// The window closed without the user reaching the gym.
     case windowExpired
+    /// Location could not be confirmed for technical reasons. Explicitly not
+    /// the same as the user choosing not to go.
+    case arrivalTrouble
     case quickWorkoutOffered
     case quickWorkoutActive
     case cantToday
     case rescheduled
-    case gymWorkoutVerified
     case homeWorkoutVerified
     case completed
     case missed
@@ -48,6 +52,22 @@ enum GymSessionState: String, Codable, Hashable {
             false
         default:
             true
+        }
+    }
+
+    /// Whether the selected apps should be shielded in this state.
+    ///
+    /// The whole product exists for the moment another app wins, so the shield
+    /// is on from the alarm right through the trip — and lifts the instant the
+    /// user is confirmed at the gym, or resolves the day another way.
+    var wantsShield: Bool {
+        switch self {
+        case .alarmFired, .awaitingDecision, .activationMission,
+             .preparing, .departed, .approachingGym,
+             .windowExpired, .quickWorkoutActive:
+            true
+        default:
+            false
         }
     }
 }
@@ -129,10 +149,36 @@ struct GymSession: Codable, Hashable, Identifiable {
 
     var cantTodayResolution: CantTodayResolution?
 
-    /// Reserved for the location and workout verification that will land with
-    /// the real gym flow. Nothing in the app fakes these.
-    var locationVerified: Bool
-    var workoutVerified: Bool
+    // MARK: Arrival
+
+    /// When the phone first entered the gym region. Entering is only a
+    /// candidate; `arrivedAt` is the confirmed fact.
+    var arrivalCandidateAt: Date?
+    /// When arrival was actually confirmed, after the dwell check.
+    var arrivedAt: Date?
+    /// The single source of truth for "did they show up".
+    var gymArrivalVerified: Bool
+    /// Set when detection failed for technical reasons rather than because the
+    /// user did not go. Never presented as a missed workout.
+    var hadArrivalTrouble: Bool
+
+    // MARK: Workout
+
+    /// True when Apple Health independently recorded a workout for this
+    /// session. Enrichment only — nothing depends on it.
+    var workoutDetected: Bool
+    var detectedWorkout: DetectedWorkout?
+
+    // MARK: Shield
+
+    /// Hard upper bound on the shield for this session.
+    ///
+    /// Belt and braces alongside the shield service's own failsafe. If anything
+    /// at all goes wrong, apps come back.
+    var shieldFailsafeDeadline: Date?
+    /// True when the shield was lifted by the failsafe rather than by the user
+    /// earning it. Recorded, never credited.
+    var wasTechnicallyReleased: Bool
 
     // MARK: Rules
 
@@ -180,8 +226,14 @@ struct GymSession: Codable, Hashable, Identifiable {
         quickWorkoutStartedAt = nil
         quickWorkoutDeadline = nil
         cantTodayResolution = nil
-        locationVerified = false
-        workoutVerified = false
+        arrivalCandidateAt = nil
+        arrivedAt = nil
+        gymArrivalVerified = false
+        hadArrivalTrouble = false
+        workoutDetected = false
+        detectedWorkout = nil
+        shieldFailsafeDeadline = nil
+        wasTechnicallyReleased = false
     }
 
     // MARK: Derived
@@ -231,6 +283,27 @@ struct GymSession: Codable, Hashable, Identifiable {
     var mirrorPhrase: String {
         let phrases = ActivationMissionType.mirrorPhrases
         return phrases[mirrorPhraseIndex % phrases.count]
+    }
+
+    /// How far through the dwell confirmation the candidate is, 0...1.
+    func dwellProgress(at now: Date = Date()) -> Double {
+        guard let arrivalCandidateAt else { return 0 }
+        let elapsed = now.timeIntervalSince(arrivalCandidateAt)
+        return min(1, max(0, elapsed / ArrivalTuning.dwellSeconds))
+    }
+
+    /// The window during which a Health workout is considered part of this
+    /// session.
+    ///
+    /// Opens at arrival and runs well past it, because a workout sample is
+    /// written when the workout *ends* — often an hour or more after the user
+    /// walked in.
+    var workoutMatchWindow: DateInterval? {
+        guard let start = arrivedAt ?? quickWorkoutStartedAt ?? committedAt else { return nil }
+        return DateInterval(
+            start: start.addingTimeInterval(-15 * 60),
+            end: start.addingTimeInterval(5 * 3600)
+        )
     }
 }
 

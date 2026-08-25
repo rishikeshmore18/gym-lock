@@ -2,27 +2,39 @@ import Foundation
 
 /// What actually happened on a planned session.
 ///
-/// The distinction between `gymVerified` and `homeWorkout` is the whole point of
+/// The distinction between `showedUp` and `homeWorkout` is the whole point of
 /// this type: one of them is a gym visit and one of them is not, and the app is
 /// not allowed to blur that even though both protect momentum.
 enum SessionOutcomeKind: String, Codable, Hashable {
-    case gymVerified
+    /// Confirmed physical arrival at the configured gym.
+    ///
+    /// Named for exactly what it means. It is not a claim that the user
+    /// exercised — GymLock cannot know that and does not pretend to. It means
+    /// they got themselves there, which is the behaviour the product exists to
+    /// change.
+    case showedUp
     case homeWorkout
     case easySkip
     case dayOff
     case rescheduled
     case missed
+    /// Detection failed for technical reasons. Recorded so it can be
+    /// investigated, but it neither credits nor punishes the user.
+    case technicalFailure
 
     /// Whether this keeps the momentum streak alive.
+    ///
+    /// A technical failure does not preserve momentum, but it is also not a
+    /// miss: it sits outside the streak rather than breaking it.
     var preservesMomentum: Bool {
         switch self {
-        case .gymVerified, .homeWorkout: true
-        case .easySkip, .dayOff, .rescheduled, .missed: false
+        case .showedUp, .homeWorkout: true
+        case .easySkip, .dayOff, .rescheduled, .missed, .technicalFailure: false
         }
     }
 
-    /// Whether this counts as an actual, verified visit to a gym.
-    var isVerifiedGymVisit: Bool { self == .gymVerified }
+    /// Whether this counts as a visit to the gym.
+    var isVerifiedGymVisit: Bool { self == .showedUp }
 
     /// Whether it draws down the easy-skip allowance.
     var usesSkipAllowance: Bool {
@@ -40,12 +52,28 @@ struct SessionOutcome: Codable, Hashable, Identifiable {
     var kind: SessionOutcomeKind
     /// Minutes, for a home workout.
     var minutes: Int?
+    /// Which session produced this, so a late Health workout can find it again.
+    var sessionID: UUID?
+    /// Set when Apple Health independently recorded a workout.
+    ///
+    /// Strictly additive: its absence is never shown as a failure, because most
+    /// people lifting weights are not wearing a watch that logs it.
+    var workoutDetected: Bool
 
-    init(id: UUID = UUID(), date: Date = Date(), kind: SessionOutcomeKind, minutes: Int? = nil) {
+    init(
+        id: UUID = UUID(),
+        date: Date = Date(),
+        kind: SessionOutcomeKind,
+        minutes: Int? = nil,
+        sessionID: UUID? = nil,
+        workoutDetected: Bool = false
+    ) {
         self.id = id
         self.date = date
         self.kind = kind
         self.minutes = minutes
+        self.sessionID = sessionID
+        self.workoutDetected = workoutDetected
     }
 }
 
@@ -109,6 +137,28 @@ struct MomentumLog: Codable, Hashable {
 
     var totalVerifiedGymVisits: Int {
         outcomes.filter(\.kind.isVerifiedGymVisit).count
+    }
+
+    /// The outcome recorded on a given day, if the morning already resolved.
+    func outcome(on day: Date = Date(), calendar: Calendar = .current) -> SessionOutcome? {
+        outcomes.last { calendar.isDate($0.date, inSameDayAs: day) }
+    }
+
+    /// Attaches a detected workout to an already-recorded outcome.
+    ///
+    /// Health writes a workout when it *ends*, which can be an hour after the
+    /// user walked into the gym and long after the outcome was recorded. This is
+    /// how that arrives late without creating a duplicate visit.
+    ///
+    /// Returns whether anything changed, so callers can avoid a pointless write.
+    @discardableResult
+    mutating func attachWorkout(toSession sessionID: UUID) -> Bool {
+        guard let index = outcomes.lastIndex(where: { $0.sessionID == sessionID }) else {
+            return false
+        }
+        guard !outcomes[index].workoutDetected else { return false }
+        outcomes[index].workoutDetected = true
+        return true
     }
 
     /// Momentum-preserving days over the last fortnight, for the sparkline.

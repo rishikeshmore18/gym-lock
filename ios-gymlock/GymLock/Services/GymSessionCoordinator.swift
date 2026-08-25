@@ -10,6 +10,8 @@ enum MorningRoute: Equatable {
     case mission
     case countdown
     case departed
+    case confirmingArrival
+    case arrivalTrouble
     case plansChanged
     case quickWorkoutPicker
     case quickWorkoutActive
@@ -18,25 +20,29 @@ enum MorningRoute: Equatable {
     case gymSuccess
 }
 
-/// Runs the morning.
+/// Runs the morning, from the alarm to whatever actually happened.
 ///
-/// Everything that can happen between an alarm going off and the day being
-/// resolved passes through here: committing, missions, the countdown, departure,
-/// extensions, expiry, fallbacks, and the honest recording of what actually
-/// occurred.
+/// The shape of this type follows the product's central claim: **make the
+/// decision hard to avoid, then get out of the way.** Up to the point the user
+/// says "I'm going" the app is deliberately in their face. After the activation
+/// mission it becomes almost entirely passive — geofence, dwell, unlock — and
+/// the user should be able to complete a whole gym session without touching
+/// GymLock again.
 ///
-/// Two properties are worth calling out.
+/// Three properties are worth calling out.
 ///
 /// **The countdown is a deadline, not a timer.** The session stores an absolute
 /// `Date`, and every reading is `deadline - now`. Kill the app, reboot the
-/// phone, fly through a timezone: reopening recomputes the truth instead of
-/// starting again at 35:00.
+/// phone, fly through a timezone: reopening recomputes the truth.
 ///
-/// **Nothing here enforces app blocking.** That is FamilyControls' job and it is
-/// deliberately not built yet. The state machine is shaped so it can be added
-/// without rework — `.preparing` is where a shield would be applied and
-/// `.gymWorkoutVerified` is where it would lift — but no screen claims blocking
-/// is happening today.
+/// **Arrival unlocks; a workout does not gate anything.** A user with no watch
+/// and no tracker has exactly the same experience as one with both. Requiring
+/// `HKWorkout` before returning somebody's apps would punish them for their
+/// choice of hardware.
+///
+/// **Apps always come back.** Every lock carries a deadline, the shield service
+/// keeps its own independent ledger, and the failsafe runs on every foreground.
+/// There is no path through this class that can leave a phone shielded forever.
 @Observable
 @MainActor
 final class GymSessionCoordinator {
@@ -56,37 +62,68 @@ final class GymSessionCoordinator {
     private let location: SessionLocationMonitor
     private let alarms: any AlarmScheduling
 
+    let shield: any AppShielding
+    let arrival: GymArrivalMonitor
+    let health: HealthWorkoutObserver
+
     private var ticker: Task<Void, Never>?
 
     /// Injected so the coordinator can read the plan and write outcomes without
     /// owning a second copy of either.
     private weak var store: AppStore?
 
-    /// Collaborators are optional rather than defaulted inline: both are
+    /// Collaborators are optional rather than defaulted inline: they are
     /// `@MainActor` types, and a default argument is evaluated in a nonisolated
     /// context where they cannot be constructed.
     init(
         defaults: UserDefaults = .standard,
         notifier: MorningNotifier? = nil,
         location: SessionLocationMonitor? = nil,
-        alarms: (any AlarmScheduling)? = nil
+        alarms: (any AlarmScheduling)? = nil,
+        shield: (any AppShielding)? = nil,
+        arrival: GymArrivalMonitor? = nil,
+        health: HealthWorkoutObserver? = nil
     ) {
         self.defaults = defaults
         self.notifier = notifier ?? MorningNotifier()
         self.location = location ?? SessionLocationMonitor()
         self.alarms = alarms ?? AlarmSchedulerFactory.make()
+        self.shield = shield ?? AppShieldingFactory.make(defaults: defaults)
+        self.arrival = arrival ?? GymArrivalMonitor()
+        self.health = health ?? HealthWorkoutObserver(defaults: defaults)
     }
 
     // MARK: - Wiring
 
     func attach(to store: AppStore) {
         self.store = store
+
+        shield.refreshAuthorization()
+        arrival.refreshAvailability()
+        health.refreshAvailability()
+
+        // Before anything else: if a shield outlived its deadline while the app
+        // was closed, lift it now.
+        enforceShieldFailsafe()
+
         restore()
+        armArrivalIfPossible()
+        startHealthObservation()
     }
 
     var alarmCapability: AlarmDeliveryCapability { alarms.capability }
-
+    var shieldCapability: ShieldCapability { shield.capability }
     var locationMonitor: SessionLocationMonitor { location }
+
+    /// Called on every foreground.
+    ///
+    /// Three cheap, idempotent checks that between them recover from anything
+    /// that happened while the app was not running.
+    func applicationDidBecomeActive() {
+        enforceShieldFailsafe()
+        reconcileShieldWithSession()
+        Task { await health.fetchNewWorkouts() }
+    }
 
     // MARK: - Derived
 
@@ -101,10 +138,16 @@ final class GymSessionCoordinator {
             return .decision
         case .activationMission:
             return .mission
-        case .preparing, .approachingGym, .arrivedPendingWorkout:
+        case .preparing:
             return isShowingDepartureMoment ? .departed : .countdown
         case .departed:
             return isShowingDepartureMoment ? .departed : .countdown
+        case .approachingGym:
+            return .confirmingArrival
+        case .arrived:
+            return .gymSuccess
+        case .arrivalTrouble:
+            return .arrivalTrouble
         case .windowExpired:
             return .plansChanged
         case .quickWorkoutOffered:
@@ -113,8 +156,6 @@ final class GymSessionCoordinator {
             return .quickWorkoutActive
         case .homeWorkoutVerified:
             return .momentumSaved
-        case .gymWorkoutVerified:
-            return .gymSuccess
         case .cantToday:
             return .cantToday
         default:
@@ -122,10 +163,70 @@ final class GymSessionCoordinator {
         }
     }
 
-    /// Whether the window has run out while the user was still getting ready.
     var hasExpiredUnresolved: Bool {
-        guard let session else { return false }
-        return session.state == .windowExpired
+        session?.state == .windowExpired
+    }
+
+    // MARK: - Shield
+
+    /// Applies the shield for the active session.
+    ///
+    /// Called at the start of a morning and re-asserted on foreground. Safe to
+    /// call repeatedly: the shield service overwrites rather than stacks.
+    private func applyShield(for session: GymSession) {
+        guard shield.hasSelection else { return }
+
+        let deadline = ShieldPolicy.deadline(forWindowMinutes: session.windowMinutes)
+        shield.apply(until: deadline, sessionID: session.id)
+
+        if var updated = self.session {
+            updated.shieldFailsafeDeadline = deadline
+            self.session = updated
+            persist()
+        }
+
+        store?.record(.shieldApplied, sessionID: session.id)
+    }
+
+    /// Lifts the shield because the user earned it or resolved the day.
+    private func releaseShield(sessionID: UUID?) {
+        guard shield.isShielded else { return }
+        shield.release()
+        store?.record(.shieldRemoved, sessionID: sessionID)
+    }
+
+    /// The hard safety net.
+    ///
+    /// Runs on launch and on every foreground. If a lock has outlived its
+    /// deadline for any reason — a crash, corrupted state, a callback that never
+    /// arrived — the apps come back and the release is recorded as technical.
+    /// No gym visit is credited, and nothing punishes the user for it.
+    private func enforceShieldFailsafe() {
+        guard shield.enforceFailsafe(now: Date()) else { return }
+
+        store?.record(.technicalRelease, detail: "failsafe deadline reached")
+
+        guard var current = session else { return }
+        current.wasTechnicallyReleased = true
+        session = current
+        persist()
+    }
+
+    /// Makes the shield match the session after time has passed unobserved.
+    ///
+    /// Both directions matter. A morning that started while the app was closed
+    /// needs its shield applied; a session that ended needs it gone.
+    private func reconcileShieldWithSession() {
+        guard let current = session, current.state.isLive else {
+            if shield.isShielded { releaseShield(sessionID: nil) }
+            return
+        }
+
+        if current.state.wantsShield {
+            if !shield.isShielded { applyShield(for: current) }
+        } else if shield.isShielded {
+            releaseShield(sessionID: current.id)
+        }
     }
 
     // MARK: - Scheduling alarms
@@ -162,6 +263,224 @@ final class GymSessionCoordinator {
         await alarms.requestAuthorization()
     }
 
+    // MARK: - Arrival wiring
+
+    /// Registers the gym geofence.
+    ///
+    /// Armed permanently rather than per session: region monitoring survives
+    /// termination and reboot, and that persistence is exactly what lets arrival
+    /// be noticed without the user opening anything.
+    func armArrivalIfPossible() {
+        guard let gym = store?.primaryGym else { return }
+        arrival.refreshAvailability()
+        guard arrival.canDetectArrival else { return }
+        arrival.arm(for: gym)
+    }
+
+    private func beginWatchingForArrival() {
+        guard let gym = store?.primaryGym, arrival.canDetectArrival else { return }
+
+        arrival.beginWatching(
+            gym: gym,
+            onCandidate: { [weak self] in
+                Task { @MainActor in self?.noteArrivalCandidate() }
+            },
+            onArrival: { [weak self] in
+                Task { @MainActor in self?.confirmArrival() }
+            },
+            onTrouble: { [weak self] _ in
+                Task { @MainActor in self?.reportArrivalTrouble() }
+            }
+        )
+    }
+
+    /// The phone entered the gym region. Not success yet.
+    private func noteArrivalCandidate() {
+        guard var current = session, current.state.isLive else { return }
+        guard current.arrivalCandidateAt == nil else { return }
+        guard current.state == .preparing || current.state == .departed else { return }
+
+        current.arrivalCandidateAt = Date()
+        current.state = .approachingGym
+        session = current
+        persist()
+
+        store?.record(.gymArrivalCandidate, sessionID: current.id)
+    }
+
+    /// Confirmed. This is the moment the whole product exists to reach.
+    ///
+    /// Everything happens without the user touching anything: the visit is
+    /// recorded, the apps come back, and one notification says so. No "tap to
+    /// unlock", no reopening GymLock, no proving anything further.
+    func confirmArrival() {
+        guard var current = session, current.state.isLive else { return }
+        guard !current.gymArrivalVerified else { return }
+
+        let now = Date()
+        current.arrivedAt = now
+        current.gymArrivalVerified = true
+        current.hadArrivalTrouble = false
+        current.state = .arrived
+        session = current
+
+        // Showing up is the outcome. A workout, if Health ever reports one,
+        // attaches to this same record later rather than creating a second one.
+        store?.log.record(
+            SessionOutcome(date: now, kind: .showedUp, sessionID: current.id)
+        )
+        store?.record(.gymArrivalVerified, sessionID: current.id)
+
+        releaseShield(sessionID: current.id)
+        location.endSession()
+
+        Haptics.commit()
+        persist()
+
+        Task { [notifier] in
+            await notifier.cancelDeadlineReminder()
+            await notifier.sendArrival()
+        }
+
+        // A workout may already be sitting in Health from an earlier arrival
+        // this morning; check once rather than waiting for the observer.
+        Task { await matchWorkoutForCurrentSession() }
+    }
+
+    /// Detection failed for technical reasons.
+    ///
+    /// Deliberately its own state, and deliberately never recorded as a missed
+    /// workout. The user may well be standing in their gym; the phone simply
+    /// could not prove it.
+    private func reportArrivalTrouble() {
+        guard var current = session, current.state.isLive else { return }
+        guard current.state == .approachingGym || current.state == .departed else { return }
+
+        current.hadArrivalTrouble = true
+        current.state = .arrivalTrouble
+        session = current
+        persist()
+
+        store?.record(.technicalFailure, sessionID: current.id, detail: "arrival not confirmed")
+    }
+
+    /// Lets the user jump to the trouble screen from the confirming state.
+    ///
+    /// Someone standing in their gym watching "confirming arrival…" should not
+    /// have to wait out the full timeout before being offered a way through.
+    func reportArrivalTroubleManually() {
+        guard var current = session, current.state == .approachingGym else { return }
+        current.hadArrivalTrouble = true
+        current.state = .arrivalTrouble
+        session = current
+        persist()
+        store?.record(.technicalFailure, sessionID: current.id, detail: "user asked for help")
+    }
+
+    /// The user says they are at the gym after automatic detection failed.
+    ///
+    /// Only reachable from the trouble screen. Someone locked out of their apps
+    /// while standing in their gym must have a way forward that does not depend
+    /// on satellite reception.
+    func confirmArrivalManually() {
+        arrival.acceptManualConfirmation()
+        confirmArrival()
+    }
+
+    /// Gives up on confirming and releases the apps without crediting a visit.
+    func releaseAfterArrivalTrouble() {
+        guard let current = session else { return }
+
+        releaseShield(sessionID: current.id)
+        store?.log.record(
+            SessionOutcome(date: Date(), kind: .technicalFailure, sessionID: current.id)
+        )
+        store?.record(.technicalRelease, sessionID: current.id, detail: "user released")
+
+        var updated = current
+        updated.wasTechnicallyReleased = true
+        session = updated
+        persist()
+
+        endSession(clearingAnchor: true)
+    }
+
+    /// Retries confirmation from the trouble screen.
+    func retryArrival() {
+        guard var current = session else { return }
+        current.state = .departed
+        current.arrivalCandidateAt = nil
+        current.hadArrivalTrouble = false
+        session = current
+        persist()
+
+        beginWatchingForArrival()
+    }
+
+    // MARK: - Health
+
+    private func startHealthObservation() {
+        guard health.isUsable else { return }
+
+        health.startObserving { [weak self] workout in
+            Task { @MainActor in self?.attach(workout) }
+        }
+    }
+
+    func requestHealthAuthorization() async {
+        _ = await health.requestAuthorization()
+        startHealthObservation()
+        await matchWorkoutForCurrentSession()
+    }
+
+    /// Attaches a newly seen workout to whichever session it belongs to.
+    ///
+    /// A workout is written when it *ends*, so this routinely runs an hour or
+    /// more after the user arrived. It never creates a session — it only enriches
+    /// one that already exists.
+    private func attach(_ workout: DetectedWorkout) {
+        guard let store else { return }
+
+        // The live session first, then today's completed one. Nothing older is
+        // considered: a workout from three days ago is not evidence about today.
+        if var current = session,
+           let window = current.workoutMatchWindow,
+           window.contains(workout.startedAt) || window.contains(workout.endedAt) {
+            guard !current.workoutDetected else { return }
+
+            current.workoutDetected = true
+            current.detectedWorkout = workout
+            session = current
+            persist()
+
+            store.log.attachWorkout(toSession: current.id)
+            store.record(.workoutDetected, sessionID: current.id, detail: workout.summary)
+            return
+        }
+
+        // A session that already closed this morning.
+        guard let todays = store.log.outcome(on: workout.startedAt),
+              !todays.workoutDetected,
+              let sessionID = todays.sessionID
+        else { return }
+
+        store.log.attachWorkout(toSession: sessionID)
+        store.record(.workoutDetected, sessionID: sessionID, detail: workout.summary)
+    }
+
+    /// Looks for a workout matching the live session, on demand.
+    private func matchWorkoutForCurrentSession() async {
+        guard health.isUsable,
+              let current = session,
+              let window = current.workoutMatchWindow,
+              !current.workoutDetected
+        else { return }
+
+        let found = await health.workouts(in: window)
+        guard let first = found.first else { return }
+        attach(first)
+    }
+
     // MARK: - Starting a morning
 
     /// Called when an alarm fires, or when the user opens the app during a
@@ -194,23 +513,25 @@ final class GymSessionCoordinator {
         new.alarmFiredAt = date
 
         session = new
+        store.record(.alarmFired, sessionID: new.id)
+
+        // The shield goes on here, not after "I'm going". The product exists
+        // precisely for the moment another app wins the argument, and that
+        // moment is the thirty seconds after the alarm.
+        applyShield(for: new)
+
         persist()
         startTicking()
     }
 
     /// Lets a user who woke up before the alarm start anyway.
-    ///
-    /// The window is measured from the moment they commit, not from the alarm
-    /// they beat, so being early is rewarded with a calmer morning rather than
-    /// with a countdown that has already partly elapsed.
     func startEarly() {
         guard let store else { return }
         let next = store.plan.nextOccurrence()
         beginSession(for: next?.slot)
     }
 
-    /// Whether "start early" is worth offering: a session is planned today and
-    /// none is already running.
+    /// Whether "start early" is worth offering.
     var canStartEarly: Bool {
         guard session == nil, let store else { return false }
         let weekday = Calendar.current.component(.weekday, from: Date())
@@ -222,9 +543,9 @@ final class GymSessionCoordinator {
 
     /// "I'm going."
     ///
-    /// The single most important transition in the app. From this instant the
-    /// alarm stops escalating: the commitment has been made, and continuing to
-    /// shout at someone who already agreed is how trust gets spent.
+    /// The alarm stops escalating here. The shield is already on and stays
+    /// exactly as it is — tapping this must not make the phone *more* punishing,
+    /// because the user just did the thing the app wanted.
     func commitToGoing() {
         guard var current = session else { return }
 
@@ -240,6 +561,7 @@ final class GymSessionCoordinator {
         }
 
         session = current
+        store?.record(.committed, sessionID: current.id)
 
         if store?.plan.missionsEnabled == true {
             assignMission()
@@ -252,11 +574,6 @@ final class GymSessionCoordinator {
     }
 
     /// Pushes today's session later without abandoning it.
-    ///
-    /// Genuinely a move, not a dismissal: a one-off reminder is placed at the
-    /// new time and the recurring alarms are left alone, so tomorrow is
-    /// unaffected. The user gets one of these per session — it is offered from
-    /// the decision screen only, before any commitment has been made.
     func moveTodaysTime(by minutes: Int) {
         guard var current = session else { return }
 
@@ -264,24 +581,23 @@ final class GymSessionCoordinator {
         current.state = .rescheduled
         session = current
 
+        // The shield follows the decision: moving the session moves the lock
+        // rather than leaving the user blocked for a commitment that is no
+        // longer live.
+        releaseShield(sessionID: current.id)
+
         Task { [notifier] in
             await notifier.scheduleMovedSession(at: newTime)
         }
 
-        store?.log.record(SessionOutcome(kind: .rescheduled))
-        // The notification above is scheduled before the session is torn down,
-        // and `endSession` only clears the session-scoped reminders it owns.
+        store?.log.record(SessionOutcome(kind: .rescheduled, sessionID: current.id))
+        store?.record(.rescheduled, sessionID: current.id)
         endSession(clearingAnchor: true, keepingReminders: true)
     }
 
     // MARK: - Missions
 
-    /// Capabilities the device can currently verify with.
-    func availableCapabilities(
-        camera: Bool,
-        motion: Bool,
-        speech: Bool
-    ) -> Set<MissionCapability> {
+    func availableCapabilities(camera: Bool, motion: Bool, speech: Bool) -> Set<MissionCapability> {
         var set: Set<MissionCapability> = []
         if camera { set.insert(.camera) }
         if motion { set.insert(.motion) }
@@ -293,9 +609,6 @@ final class GymSessionCoordinator {
     func assignMission(capabilities: Set<MissionCapability>? = nil) {
         guard var current = session, let store else { return }
 
-        // Before permissions have been probed, assume motion — the fallback
-        // mission needs nothing but the pedometer, and the screen re-rolls once
-        // it knows more.
         let usable = capabilities ?? [.motion]
         let previous = store.plan.recentMissions.last
 
@@ -336,7 +649,6 @@ final class GymSessionCoordinator {
         Haptics.tap()
     }
 
-    /// Lets the user pick a specific mission from the list.
     func chooseMission(_ mission: ActivationMissionType) {
         guard var current = session else { return }
         current.mission = mission
@@ -351,13 +663,11 @@ final class GymSessionCoordinator {
         guard var current = session else { return }
         current.missionCompletedAt = Date()
         session = current
+        store?.record(.missionCompleted, sessionID: current.id, detail: current.mission?.rawValue)
         Haptics.commit()
         beginPreparation()
     }
 
-    /// Skips the mission entirely. Available from the mission screen so an
-    /// accessibility need, a broken sensor, or a bad morning cannot block a
-    /// user who has already committed.
     func skipMission() {
         beginPreparation()
     }
@@ -365,6 +675,10 @@ final class GymSessionCoordinator {
     // MARK: - Preparation
 
     /// Opens the window and sets the one true deadline.
+    ///
+    /// This is also where GymLock goes quiet. From here to the gym the only
+    /// things that should happen without the user asking are one departure
+    /// notification, one deadline reminder, and the automatic unlock on arrival.
     func beginPreparation() {
         guard var current = session else { return }
 
@@ -376,6 +690,7 @@ final class GymSessionCoordinator {
 
         persist()
         startTicking()
+        beginWatchingForArrival()
 
         let gymBy = TimeOfDay(from: current.deadline ?? now).displayString
         Task { [notifier] in
@@ -409,9 +724,6 @@ final class GymSessionCoordinator {
     // MARK: - Departure
 
     /// Marks the user as having left, either detected or self-declared.
-    ///
-    /// Exactly one positive notification, and no alarm ever again for this
-    /// session.
     func markDeparted(detected: Bool) {
         guard var current = session, current.departedAt == nil else { return }
 
@@ -422,6 +734,8 @@ final class GymSessionCoordinator {
         isShowingPreparationNudge = false
         isShowingDepartureMoment = true
         Haptics.tap()
+
+        store?.record(.departed, sessionID: current.id)
 
         let previous = store?.lastDepartureMessageIndex
         Task { [notifier] in
@@ -444,6 +758,7 @@ final class GymSessionCoordinator {
         }
 
         persist()
+        beginWatchingForArrival()
     }
 
     func acknowledgeDeparture() {
@@ -452,11 +767,6 @@ final class GymSessionCoordinator {
 
     // MARK: - Expiry
 
-    /// The window ran out.
-    ///
-    /// This opens "plans changed?", not the fallback picker. Someone whose timer
-    /// expired ninety seconds from the gym should not be handed a home workout
-    /// as their first option.
     func handleExpiry() {
         guard var current = session else { return }
         guard current.state == .preparing || current.state == .departed else { return }
@@ -470,10 +780,6 @@ final class GymSessionCoordinator {
     }
 
     /// "Still going" on the expired screen: a short grace period, not a restart.
-    ///
-    /// Restarting the full window would make the deadline decorative. The grace
-    /// is fixed and does not consume the user's one extension, because it is a
-    /// different thing — an acknowledgement that they are nearly there.
     func grantGrace() {
         guard var current = session else { return }
         current.state = current.departedAt == nil ? .preparing : .departed
@@ -492,8 +798,6 @@ final class GymSessionCoordinator {
         persist()
     }
 
-    /// Backing out of the fallback picker returns the user where they came
-    /// from, rather than dumping everyone on the same screen.
     func leaveQuickWorkoutPicker() {
         guard var current = session else { return }
         current.state = current.deadline.map { $0 <= Date() } == true
@@ -503,6 +807,10 @@ final class GymSessionCoordinator {
         persist()
     }
 
+    /// Starts the home fallback.
+    ///
+    /// The shield stays on for the duration. The user chose a workout instead of
+    /// the gym, not instead of the commitment.
     func startQuickWorkout(minutes: Int) {
         guard var current = session else { return }
         let now = Date()
@@ -515,27 +823,38 @@ final class GymSessionCoordinator {
         Haptics.medium()
 
         location.endSession()
+        reconcileShieldWithSession()
     }
 
     /// Finishes a home workout.
-    ///
-    /// `wasCompleted` is honest: a user who stops early is recorded as not
-    /// having finished, and their momentum is not credited.
     func finishQuickWorkout(completed wasCompleted: Bool) {
         guard var current = session else { return }
 
         if wasCompleted {
             current.state = .homeWorkoutVerified
             session = current
+
             store?.log.record(
-                SessionOutcome(kind: .homeWorkout, minutes: current.quickWorkoutMinutes)
+                SessionOutcome(
+                    kind: .homeWorkout,
+                    minutes: current.quickWorkoutMinutes,
+                    sessionID: current.id,
+                    workoutDetected: current.workoutDetected
+                )
             )
+            store?.record(.quickWorkoutCompleted, sessionID: current.id)
+
+            releaseShield(sessionID: current.id)
             Haptics.commit()
             persist()
+
+            Task { await matchWorkoutForCurrentSession() }
         } else {
             current.state = .missed
             session = current
-            store?.log.record(SessionOutcome(kind: .missed))
+            store?.log.record(SessionOutcome(kind: .missed, sessionID: current.id))
+            store?.record(.missed, sessionID: current.id)
+            releaseShield(sessionID: current.id)
             endSession(clearingAnchor: true)
         }
     }
@@ -546,10 +865,10 @@ final class GymSessionCoordinator {
         guard var current = session else { return }
         current.state = .cantToday
         session = current
+        store?.record(.cantToday, sessionID: current.id)
         persist()
     }
 
-    /// Whether the user still has a no-questions-asked skip.
     var hasEasySkipRemaining: Bool {
         guard let store else { return true }
         return store.log.hasEasySkipRemaining(
@@ -566,6 +885,8 @@ final class GymSessionCoordinator {
 
     var easySkipsUsed: Int { store?.log.skipsUsedInLast28Days() ?? 0 }
 
+    /// The shield follows the resolution, always. Nobody gets trapped because
+    /// they legitimately could not go.
     func resolveCantToday(_ resolution: CantTodayResolution) {
         guard var current = session else { return }
         current.cantTodayResolution = resolution
@@ -579,22 +900,22 @@ final class GymSessionCoordinator {
         case .rescheduledWithin24h:
             current.state = .rescheduled
             session = current
-            store?.log.record(SessionOutcome(kind: .rescheduled))
+            releaseShield(sessionID: current.id)
+            store?.log.record(SessionOutcome(kind: .rescheduled, sessionID: current.id))
             scheduleComebackIfEnabled()
             endSession(clearingAnchor: true)
 
         case .tookTheDayOff:
             current.state = .completed
             session = current
+            releaseShield(sessionID: current.id)
             let kind: SessionOutcomeKind = hasEasySkipRemaining ? .easySkip : .dayOff
-            store?.log.record(SessionOutcome(kind: kind))
+            store?.log.record(SessionOutcome(kind: kind, sessionID: current.id))
             scheduleComebackIfEnabled()
             endSession(clearingAnchor: true)
         }
     }
 
-    /// Comeback Mode prepares the next realistic opportunity. It never
-    /// references what was missed and never asks for anything to be made up.
     private func scheduleComebackIfEnabled() {
         guard let store, store.profile.comebackModeEnabled else { return }
         guard let next = store.plan.nextOccurrence() else { return }
@@ -602,30 +923,6 @@ final class GymSessionCoordinator {
         Task { [notifier] in
             await notifier.scheduleComeback(at: next.fireDate)
         }
-    }
-
-    // MARK: - Gym verification
-
-    /// Reserved for the real location and workout verification.
-    ///
-    /// Nothing calls these with invented data. They exist so the state machine
-    /// already has the shape the gym flow will need.
-    func recordGymArrival() {
-        guard var current = session else { return }
-        current.locationVerified = true
-        current.state = .arrivedPendingWorkout
-        session = current
-        persist()
-    }
-
-    func recordGymWorkout() {
-        guard var current = session else { return }
-        current.workoutVerified = true
-        current.state = .gymWorkoutVerified
-        session = current
-        store?.log.record(SessionOutcome(kind: .gymVerified))
-        Haptics.commit()
-        persist()
     }
 
     // MARK: - Finishing
@@ -637,16 +934,22 @@ final class GymSessionCoordinator {
 
         if clearingAnchor { location.endSession() }
 
+        // Belt and braces: no session may end with a shield still standing.
+        if shield.isShielded { releaseShield(sessionID: session?.id) }
+
         isShowingDepartureMoment = false
         isShowingPreparationNudge = false
         session = nil
         defaults.removeObject(forKey: Key.session)
 
+        // The geofence stays armed for the next morning; only the per-session
+        // callbacks are torn down.
+        armArrivalIfPossible()
+
         guard !keepingReminders else { return }
         Task { [notifier] in await notifier.cancelSessionNotifications() }
     }
 
-    /// Dismisses a result screen once the user has read it.
     func acknowledgeResult() {
         endSession(clearingAnchor: true)
     }
@@ -659,24 +962,16 @@ final class GymSessionCoordinator {
     }
 
     /// Rebuilds an interrupted morning.
-    ///
-    /// Because the deadline is absolute, this is genuinely a restore rather than
-    /// a restart: a session whose window quietly ran out while the app was
-    /// closed reopens on the "plans changed?" screen, not on a fresh countdown.
     private func restore() {
         guard let data = defaults.data(forKey: Key.session),
               let stored = try? JSONDecoder().decode(GymSession.self, from: data)
         else { return }
 
-        // Anything from a previous day is stale. Waking up to yesterday's
-        // half-finished countdown would be worse than no memory at all.
-        guard Calendar.current.isDateInToday(stored.day) else {
+        // Anything from a previous day is stale, and a stale session must never
+        // keep a shield alive.
+        guard Calendar.current.isDateInToday(stored.day), stored.state.isLive else {
             defaults.removeObject(forKey: Key.session)
-            return
-        }
-
-        guard stored.state.isLive else {
-            defaults.removeObject(forKey: Key.session)
+            if shield.isShielded { releaseShield(sessionID: stored.id) }
             return
         }
 
@@ -688,28 +983,44 @@ final class GymSessionCoordinator {
             }
         }
 
+        // A dwell interrupted by a relaunch picks up where it was rather than
+        // starting its two minutes again.
+        if stored.state == .approachingGym, let candidateAt = stored.arrivalCandidateAt {
+            beginWatchingForArrival()
+            arrival.resumeConfirming(since: candidateAt)
+        } else if stored.state == .preparing || stored.state == .departed {
+            beginWatchingForArrival()
+        }
+
         if stored.hasExpired, stored.state == .preparing || stored.state == .departed {
             handleExpiry()
         }
 
+        reconcileShieldWithSession()
         startTicking()
     }
 
     // MARK: - Ticking
 
-    /// A one-second loop that only watches for the two moments the flow has to
-    /// react to on its own: the 75% nudge and the deadline.
-    ///
-    /// The countdown text is not driven from here — that is a `TimelineView`
-    /// reading the deadline directly, which stays correct even if this task is
-    /// suspended in the background.
+    /// A one-second loop watching only the moments the flow must react to on its
+    /// own: the 75% nudge, the deadline, and the shield failsafe.
     private func startTicking() {
         ticker?.cancel()
         ticker = Task { [weak self] in
+            var sinceFailsafeCheck = 0
+
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard let self else { return }
-                await MainActor.run { self.tick() }
+
+                sinceFailsafeCheck += 1
+                let shouldCheckFailsafe = sinceFailsafeCheck >= 60
+                if shouldCheckFailsafe { sinceFailsafeCheck = 0 }
+
+                await MainActor.run {
+                    self.tick()
+                    if shouldCheckFailsafe { self.enforceShieldFailsafe() }
+                }
             }
         }
     }
@@ -728,7 +1039,6 @@ final class GymSessionCoordinator {
             return
         }
 
-        // The nudge only makes sense for someone who has not left yet.
         guard current.departedAt == nil, !current.hasShownPreparationNudge else { return }
 
         if current.elapsedFraction() >= GymSession.nudgeFraction {
@@ -738,110 +1048,42 @@ final class GymSessionCoordinator {
             persist()
         }
     }
-}
 
-// MARK: - Debug simulation
+    // MARK: - Debug access
 
-#if DEBUG
-extension GymSessionCoordinator {
-    /// Drives the flow to any point without waiting for a real morning.
+    #if DEBUG
+    /// Narrow windows onto private state for the simulator, which lives in a
+    /// separate file and so cannot reach `private` members directly.
     ///
-    /// Compiled out of release builds entirely, so there is no path by which a
-    /// shipping user can reach a simulated state.
-    enum DebugStep: String, CaseIterable, Identifiable {
-        case alarmFired
-        case imGoing
-        case missionComplete
-        case departed
-        case countdownAt75
-        case countdownExpired
-        case cantTodayWithinAllowance
-        case cantTodayOverAllowance
-        case homeWorkoutCompleted
-        case gymArrival
-        case gymWorkoutCompleted
+    /// Each one is a thin passthrough to the real path rather than a shortcut
+    /// around it — a simulator that takes a different route through the state
+    /// machine tests nothing worth knowing.
+    var debugStore: AppStore? { store }
 
-        var id: String { rawValue }
-
-        var label: String {
-            switch self {
-            case .alarmFired: "alarm fired"
-            case .imGoing: "tapped I'm going"
-            case .missionComplete: "mission complete"
-            case .departed: "departed"
-            case .countdownAt75: "countdown at 75%"
-            case .countdownExpired: "countdown expired"
-            case .cantTodayWithinAllowance: "can't today (within allowance)"
-            case .cantTodayOverAllowance: "can't today (over allowance)"
-            case .homeWorkoutCompleted: "home workout completed"
-            case .gymArrival: "gym arrival"
-            case .gymWorkoutCompleted: "gym workout completed"
-            }
-        }
+    func debugReplace(_ updated: GymSession) {
+        session = updated
+        persist()
     }
 
-    func simulate(_ step: DebugStep) {
-        switch step {
-        case .alarmFired:
-            endSession()
-            beginSession(for: store?.plan.enabledSlots.first)
-
-        case .imGoing:
-            if session == nil { beginSession(for: store?.plan.enabledSlots.first) }
-            commitToGoing()
-
-        case .missionComplete:
-            if session == nil { simulate(.imGoing) }
-            completeMission()
-
-        case .departed:
-            if session == nil { simulate(.missionComplete) }
-            if session?.state == .activationMission { beginPreparation() }
-            markDeparted(detected: false)
-
-        case .countdownAt75:
-            if session?.state != .preparing { simulate(.missionComplete) }
-            guard var current = session, let committed = current.committedAt else { return }
-            let total = Double(current.windowMinutes) * 60
-            current.deadline = committed.addingTimeInterval(total)
-            // Rewind the start so the clock reads three-quarters gone.
-            current.committedAt = Date().addingTimeInterval(-total * GymSession.nudgeFraction)
-            current.deadline = Date().addingTimeInterval(total * (1 - GymSession.nudgeFraction))
-            current.hasShownPreparationNudge = false
-            session = current
-            isShowingPreparationNudge = true
-
-        case .countdownExpired:
-            if session?.state != .preparing { simulate(.missionComplete) }
-            guard var current = session else { return }
-            current.deadline = Date().addingTimeInterval(-1)
-            current.state = .preparing
-            session = current
-            handleExpiry()
-
-        case .cantTodayWithinAllowance:
-            store?.debugClearSkips()
-            if session == nil { beginSession(for: store?.plan.enabledSlots.first) }
-            beginCantToday()
-
-        case .cantTodayOverAllowance:
-            store?.debugExhaustSkips(count: easySkipAllowance)
-            if session == nil { beginSession(for: store?.plan.enabledSlots.first) }
-            beginCantToday()
-
-        case .homeWorkoutCompleted:
-            if session == nil { beginSession(for: store?.plan.enabledSlots.first) }
-            startQuickWorkout(minutes: 20)
-            finishQuickWorkout(completed: true)
-
-        case .gymArrival:
-            if session == nil { simulate(.departed) }
-            recordGymArrival()
-
-        case .gymWorkoutCompleted:
-            if session == nil { simulate(.gymArrival) }
-            recordGymWorkout()
-        }
+    func debugShowNudge() {
+        isShowingPreparationNudge = true
     }
+
+    func debugNoteCandidate() {
+        noteArrivalCandidate()
+    }
+
+    /// Undoes a candidate without confirming it — the drive-by outcome.
+    func debugCancelCandidate() {
+        guard var current = session, current.state == .approachingGym else { return }
+        current.state = current.departedAt == nil ? .preparing : .departed
+        current.arrivalCandidateAt = nil
+        session = current
+        persist()
+    }
+
+    func debugEnforceFailsafe() {
+        enforceShieldFailsafe()
+    }
+    #endif
 }
-#endif

@@ -1,25 +1,31 @@
 import SwiftUI
 
-/// The two configuration screens, shown once after activation.
+/// The one-time setup that runs after activation.
 ///
-/// They live here rather than inside the onboarding pager on purpose. The story
-/// half of onboarding is a continuous argument, and dropping a bedtime dial into
-/// the middle of it would break the momentum that argument depends on. These are
-/// setup, so they run after the user has already said yes — right before the
-/// first morning alarm is finalised.
+/// Four steps, and deliberately no more. Everything here is something GymLock
+/// genuinely cannot work out on its own, and each one is asked exactly once:
 ///
-/// The sleep screen is skipped entirely for someone who only trains in the
-/// evening. They go straight to the plan, where the same window is expressed as
-/// prepare and travel with no mention of bedtime.
+/// 1. **Sleep rhythm** — skipped entirely for evening-only trainers.
+/// 2. **Morning plan** — a review of what onboarding already worked out.
+/// 3. **Gym** — the single piece of configuration that makes arrival automatic.
+/// 4. **Blocked apps** — Apple's picker, which the app is not allowed to skip.
+///
+/// After this the user should never be asked to configure anything again. They
+/// do not start workouts, pick exercises, confirm arrival, or log durations. The
+/// product's whole promise is set up once, then get out of the way.
 struct MorningSetupFlowView: View {
     let onFinish: () -> Void
 
     @Environment(AppStore.self) private var store
+    @Environment(GymSessionCoordinator.self) private var coordinator
+
     @State private var step: Step = .rhythm
 
     private enum Step {
         case rhythm
         case plan
+        case gym
+        case blockedApps
     }
 
     var body: some View {
@@ -30,28 +36,87 @@ struct MorningSetupFlowView: View {
                     onUse: { rhythm in
                         store.plan.rhythm = rhythm
                         store.applyRhythmToNightLock()
-                        advance()
+                        advance(from: .rhythm)
                     },
-                    onSkip: { advance() }
+                    onSkip: { advance(from: .rhythm) }
                 )
                 .transition(.opacity)
 
             case .plan:
-                MorningAlarmPlanView(onSave: onFinish)
+                MorningAlarmPlanView(onSave: { advance(from: .plan) })
                     .transition(.opacity)
+
+            case .gym:
+                GymPickerView(
+                    onPicked: { gym in
+                        store.primaryGym = gym
+                        coordinator.armArrivalIfPossible()
+                        // Asked here rather than at launch, because this is the
+                        // first moment the reason for it is obvious.
+                        coordinator.arrival.requestAlways()
+                        advance(from: .gym)
+                    },
+                    onSkip: { advance(from: .gym) }
+                )
+                .transition(.opacity)
+
+            case .blockedApps:
+                BlockedAppsSetupView(
+                    onDone: { finish() },
+                    onSkip: { finish() }
+                )
+                .transition(.opacity)
             }
         }
         .animation(Theme.settle, value: step)
         .task { start() }
     }
 
-    /// Decides where to begin.
+    // MARK: - Navigation
+
     private func start() {
         store.seedPlanIfNeeded()
         step = store.plan.hasMorningSessions ? .rhythm : .plan
     }
 
-    private func advance() {
-        withAnimation(Theme.settle) { step = .plan }
+    private func advance(from current: Step) {
+        let next: Step
+
+        switch current {
+        case .rhythm:
+            next = .plan
+        case .plan:
+            // Neither of the last two steps is asked twice. Someone who already
+            // picked a gym and a blocklist walks straight out of setup.
+            if store.primaryGym == nil {
+                next = .gym
+            } else if !store.hasConfiguredBlockedApps {
+                next = .blockedApps
+            } else {
+                finish()
+                return
+            }
+        case .gym:
+            guard !store.hasConfiguredBlockedApps else {
+                finish()
+                return
+            }
+            next = .blockedApps
+        case .blockedApps:
+            finish()
+            return
+        }
+
+        withAnimation(Theme.settle) { step = next }
+    }
+
+    private func finish() {
+        Task {
+            // Health is requested last and never blocks anything. A user who
+            // declines it, or has no watch, gets an identical morning minus one
+            // optional tick.
+            await coordinator.requestHealthAuthorization()
+        }
+        onFinish()
     }
 }

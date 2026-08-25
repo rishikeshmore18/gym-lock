@@ -9,6 +9,8 @@ struct HomeView: View {
     @State private var isShowingSchedule = false
     @State private var isShowingMorningPlan = false
     @State private var isRunningSetup = false
+    @State private var isPickingGym = false
+    @State private var isChoosingApps = false
     // TEMPORARY (dev only) — remove this and `devRestartCard` below.
     @State private var isConfirmingRestart = false
     #if DEBUG
@@ -37,8 +39,10 @@ struct HomeView: View {
                             .padding(.bottom, 4)
 
                         statusCard
+                        thisMorningCard
                         morningCard
                         momentumCard
+                        automationCard
                         locksCard
                         consistencyCard
                         principleCard
@@ -84,6 +88,17 @@ struct HomeView: View {
                     .onDisappear {
                         Task { await coordinator.syncAlarms() }
                     }
+            }
+            .sheet(isPresented: $isPickingGym) {
+                GymPickerView(onPicked: { gym in
+                    store.primaryGym = gym
+                    coordinator.armArrivalIfPossible()
+                    coordinator.arrival.requestAlways()
+                    isPickingGym = false
+                })
+            }
+            .sheet(isPresented: $isChoosingApps) {
+                BlockedAppsSetupView(onDone: { isChoosingApps = false })
             }
             #if DEBUG
             .sheet(isPresented: $isShowingSimulator) {
@@ -225,10 +240,152 @@ struct HomeView: View {
             .offset(y: -6)
     }
 
+    /// What happened today, once the morning has resolved.
+    ///
+    /// Two facts, and the second one is never a failure. "No workout data"
+    /// simply means nothing wrote a workout to Health — which is the normal
+    /// case for anyone lifting without a watch. A red cross there would be
+    /// telling people off for their choice of hardware.
+    @ViewBuilder
+    private var thisMorningCard: some View {
+        if let outcome = store.log.outcome(), outcome.kind.preservesMomentum {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("this morning")
+                    .font(.system(size: 13, weight: .heavy))
+                    .tracking(0.6)
+                    .foregroundStyle(Theme.inkTertiary)
+
+                todayRow(
+                    icon: outcome.kind == .showedUp ? "figure.walk" : "house.fill",
+                    title: outcome.kind == .showedUp ? "showed up" : "quick workout completed",
+                    isConfirmed: true
+                )
+
+                todayRow(
+                    icon: "heart.fill",
+                    title: outcome.workoutDetected ? "workout detected" : "no workout data",
+                    isConfirmed: outcome.workoutDetected
+                )
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .warmCard(radius: 20)
+        }
+    }
+
+    private func todayRow(icon: String, title: String, isConfirmed: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isConfirmed ? Theme.accent : Theme.inkTertiary)
+                .frame(width: 32, height: 32)
+                .background(
+                    (isConfirmed ? Theme.accent : Theme.inkTertiary).opacity(0.11),
+                    in: .circle
+                )
+
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isConfirmed ? Theme.ink : Theme.inkSecondary)
+
+            Spacer(minLength: 8)
+
+            Image(systemName: isConfirmed ? "checkmark" : "minus")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(isConfirmed ? Theme.accent : Theme.inkTertiary.opacity(0.5))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(isConfirmed ? "yes" : "not recorded")")
+    }
+
+    /// The automatic bits, and an honest line about what is switched on.
+    ///
+    /// Only shown when something needs attention or the build cannot really
+    /// block. A fully configured user on an approved build sees nothing here,
+    /// because a working system should be invisible.
+    @ViewBuilder
+    private var automationCard: some View {
+        let needsGym = store.primaryGym == nil
+        let needsApps = !coordinator.shield.hasSelection
+        let isDemo = coordinator.shieldCapability == .demo
+
+        if needsGym || needsApps || isDemo {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("automatic unlock")
+                    .font(.system(size: 13, weight: .heavy))
+                    .tracking(0.6)
+                    .foregroundStyle(Theme.inkTertiary)
+
+                if needsGym {
+                    setupRow(
+                        icon: "mappin.and.ellipse",
+                        title: "choose your gym",
+                        detail: "so your apps unlock when you get there"
+                    ) { isPickingGym = true }
+                }
+
+                if needsApps {
+                    setupRow(
+                        icon: "shield.lefthalf.filled",
+                        title: "choose what to block",
+                        detail: "one-time setup"
+                    ) { isChoosingApps = true }
+                }
+
+                if isDemo {
+                    Text("this build can't block other apps yet — real blocking needs Apple's Screen Time approval.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.inkTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .warmCard(radius: 20)
+        }
+    }
+
+    private func setupRow(
+        icon: String,
+        title: String,
+        detail: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 34, height: 34)
+                    .background(Theme.accent.opacity(0.12), in: .circle)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Text(detail)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.inkSecondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.inkTertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
     /// The two numbers, side by side and clearly distinct.
     ///
-    /// A home workout can hold the streak on the left. Only a verified trip to
-    /// a gym moves the number on the right.
+    /// A home workout can hold the streak on the left. Only a confirmed trip to
+    /// the gym moves the number on the right.
     private var momentumCard: some View {
         HStack(spacing: 12) {
             VStack(spacing: 5) {

@@ -133,89 +133,33 @@ struct MorningFlowView: View {
                 onBack: { coordinator.endSession() }
             )
 
+        case .confirmingArrival:
+            ConfirmingArrivalView(
+                session: session,
+                gymName: store.primaryGym?.name,
+                onSkipToTrouble: { coordinator.reportArrivalTroubleManually() }
+            )
+
+        case .arrivalTrouble:
+            ArrivalTroubleView(
+                gymName: store.primaryGym?.name,
+                onRetry: { coordinator.retryArrival() },
+                onConfirmManually: { coordinator.confirmArrivalManually() },
+                onQuickWorkout: { coordinator.offerQuickWorkout() },
+                onRelease: { coordinator.releaseAfterArrivalTrouble() }
+            )
+
         case .gymSuccess:
-            GymSuccessView(
+            GymArrivedView(
+                session: session,
+                gymName: store.primaryGym?.name,
                 momentumStreak: store.log.momentumStreak,
-                gymVisitsThisMonth: store.log.verifiedGymVisitsThisMonth
-            ) {
-                coordinator.acknowledgeResult()
-            }
+                gymVisitsThisMonth: store.log.verifiedGymVisitsThisMonth,
+                shieldCapability: coordinator.shieldCapability,
+                onDone: { coordinator.acknowledgeResult() }
+            )
         }
     }
 }
 
-// MARK: - Gym success
 
-/// The screen for a genuinely verified gym session.
-///
-/// Reachable today only through the debug simulator, because real arrival and
-/// workout verification are not built yet. It exists now so the state machine
-/// has a terminal success state to aim at — and so the moment FamilyControls
-/// lands, the unlock has somewhere to happen.
-struct GymSuccessView: View {
-    let momentumStreak: Int
-    let gymVisitsThisMonth: Int
-    let onDone: () -> Void
-
-    var body: some View {
-        MorningScreen(trailingTitle: "Done", trailingAction: onDone) {
-            VStack(spacing: 22) {
-                HaloedGlyph(systemName: "checkmark.seal.fill", size: 96)
-                    .frame(height: 186)
-
-                VStack(spacing: 8) {
-                    Text("done.")
-                        .font(.system(size: 40, weight: .bold))
-                        .foregroundStyle(Theme.ink)
-
-                    Text("you earned the unlock.")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(Theme.inkSecondary)
-                }
-
-                HStack(spacing: 12) {
-                    statTile(
-                        value: "\(momentumStreak)",
-                        label: "momentum streak",
-                        icon: "flame.fill"
-                    )
-                    statTile(
-                        value: "\(gymVisitsThisMonth)",
-                        label: "gym visits this month",
-                        icon: "dumbbell.fill"
-                    )
-                }
-
-                Text("app unlocking arrives with the next release.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.inkTertiary)
-                    .multilineTextAlignment(.center)
-            }
-        } footer: {
-            MorningPrimaryButton(title: "keep going", systemImage: nil) {
-                onDone()
-            }
-        }
-    }
-
-    private func statTile(value: String, label: String, icon: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Theme.accent)
-
-            Text(value)
-                .font(.system(size: 32, weight: .bold))
-                .monospacedDigit()
-                .foregroundStyle(Theme.ink)
-
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.inkSecondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 18)
-        .warmCard(radius: 20)
-    }
-}
