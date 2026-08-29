@@ -29,7 +29,10 @@ struct ContentView: View {
                 ScheduleSetupView()
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             case .home:
-                HomeView()
+                // The new home is the default destination, for people finishing
+                // onboarding and for everyone who already has. The previous home
+                // is still here, unchanged, on its own tab.
+                RootTabView()
                     .transition(.opacity)
             }
         }
