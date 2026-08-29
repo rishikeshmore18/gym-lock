@@ -21,6 +21,17 @@ struct CalendarStripView: View {
     @ScaledMetric(relativeTo: .subheadline) private var markerSize: CGFloat = 44
     @ScaledMetric(relativeTo: .caption) private var weekdayHeight: CGFloat = 18
 
+    @State private var scrollPhase: ScrollPhase = .idle
+    @State private var lastTick: Date = .distantPast
+
+    /// Fastest the strip is allowed to tick. A flick crosses dates far quicker
+    /// than this; the ones in between are dropped rather than queued, because
+    /// haptics are feedback about movement, not a transcript of it.
+    private static let minimumTickGap: TimeInterval = 0.085
+
+    /// How recently a tick has to have fired for the settle to stay silent.
+    private static let settleQuietPeriod: TimeInterval = 0.14
+
     private var cellHeight: CGFloat { markerSize + weekdayHeight + 26 }
 
     var body: some View {
@@ -51,8 +62,40 @@ struct CalendarStripView: View {
             .scrollPosition(id: $leadingDay, anchor: .leading)
             .scrollIndicators(.hidden)
             .contentMargins(.horizontal, Self.margin, for: .scrollContent)
+            .onScrollPhaseChange { _, phase in
+                scrollPhase = phase
+                if phase.isScrolling { Haptics.prepareSelection() }
+                if phase == .idle { tickOnSettle() }
+            }
+            // Each change of the leading day is one date crossing the edge of
+            // the strip — a discrete step, which is what makes this feel like a
+            // picker rather than a buzz.
+            .onChange(of: leadingDay) { _, _ in tickOnCrossing() }
         }
         .frame(height: cellHeight)
+    }
+
+    // MARK: - Scroll feedback
+
+    /// Ticks only for movement the user is making. A programmatic scroll runs
+    /// in `.animating`, so nudging the strip after a tap stays silent instead
+    /// of firing a burst on top of the tap's own tick.
+    private func tickOnCrossing() {
+        guard scrollPhase == .interacting || scrollPhase == .decelerating else { return }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastTick) >= Self.minimumTickGap else { return }
+        lastTick = now
+        Haptics.selection()
+    }
+
+    /// One clearer tick where the strip comes to rest — but only if it has been
+    /// quiet for a moment, so a scroll that stops mid-tick does not double up.
+    private func tickOnSettle() {
+        let now = Date()
+        guard now.timeIntervalSince(lastTick) >= Self.settleQuietPeriod else { return }
+        lastTick = now
+        Haptics.selection()
     }
 
     private static func cellWidth(for width: CGFloat) -> CGFloat {

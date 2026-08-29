@@ -9,8 +9,10 @@ import UIKit
 enum Haptics {
     private static let selectionGenerator = UISelectionFeedbackGenerator()
 
-    static func tap() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    /// A light impact. `intensity` softens it further — used where the feedback
+    /// should be felt but not noticed, such as a card settling back into place.
+    static func tap(intensity: CGFloat = 1) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: intensity)
     }
 
     /// One iOS picker-style tick. Call only when the selected item actually

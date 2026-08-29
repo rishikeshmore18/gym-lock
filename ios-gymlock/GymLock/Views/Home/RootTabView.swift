@@ -49,6 +49,11 @@ struct RootTabView: View {
         // and a coral tab would be competing with that.
         .tint(Theme.ink)
         .onChange(of: selection) { _, tab in
+            // Fires on the change, not on the tap, so pressing the tab you are
+            // already on stays silent. One selection tick — a tab change is a
+            // confirmation, not an event.
+            Haptics.selection()
+
             // Leaving home resets the streak to compact at once. There is no
             // point animating a collapse onto a screen nobody is looking at,
             // and it guarantees the next tab never inherits a dimmed backdrop,
@@ -77,6 +82,9 @@ struct RootTabView: View {
             }
         }
         .task {
+            // A cold generator is late enough to be felt on the first tick.
+            Haptics.prepareSelection()
+
             // The two morning setup screens run once, immediately after
             // activation, before the first alarm is finalised. This lives at
             // the shell rather than inside a tab so it still runs when the new

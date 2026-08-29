@@ -55,6 +55,57 @@ struct FlameAnimationView: View {
     }
 }
 
+/// Where the flame actually is inside the square it is drawn in.
+///
+/// Measured from the composition rather than guessed: the artwork fills only
+/// 36% of its 800×800 canvas across and 49% down, and its centre of mass sits
+/// slightly below and right of the canvas centre. Sizing a `frame` around the
+/// canvas therefore produces a flame roughly half the size it looks like it
+/// should be, surrounded by dead space — which is exactly what was happening.
+/// These numbers let the flame be sized by the flame you can see.
+enum FlameArtwork {
+    // Measured 0.363 × 0.490 across every keyframe, rounded up a touch: the
+    // measurement is taken from path vertices, and a curve can bulge slightly
+    // past the points that define it. Overstating the fill makes the flame
+    // render a hair inside its slot rather than a hair outside it.
+    static let fillWidth: CGFloat = 0.375
+    static let fillHeight: CGFloat = 0.505
+
+    /// Offset of the artwork's centre from the canvas centre, as a fraction of
+    /// the canvas.
+    static let centreOffset = CGSize(width: 0.018, height: 0.049)
+
+    /// Width over height of the visible flame.
+    static var aspect: CGFloat { fillWidth / fillHeight }
+}
+
+/// The flame, sized by what you can see rather than by its canvas.
+///
+/// The Lottie is rendered at the larger canvas size it needs and allowed to
+/// overflow its layout slot — the overflow is transparent margin, so nothing is
+/// clipped and nothing collides. The slot the layout reserves is the flame
+/// itself.
+struct FlameFigure: View {
+    /// Height of the visible flame.
+    let visibleHeight: CGFloat
+    var isAnimating: Bool = true
+
+    var body: some View {
+        let canvas = visibleHeight / FlameArtwork.fillHeight
+
+        FlameAnimationView(isAnimating: isAnimating)
+            .frame(width: canvas, height: canvas)
+            .offset(
+                x: -canvas * FlameArtwork.centreOffset.width,
+                y: -canvas * FlameArtwork.centreOffset.height
+            )
+            .frame(
+                width: visibleHeight * FlameArtwork.aspect,
+                height: visibleHeight
+            )
+    }
+}
+
 /// Warm halo shown while the flame decodes.
 struct FlameGlow: View {
     var body: some View {

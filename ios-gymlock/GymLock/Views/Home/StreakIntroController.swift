@@ -12,6 +12,10 @@ import SwiftUI
 enum StreakPresentation: Equatable {
     /// Resting: just the capsule in the header.
     case compact
+    /// Mounted, but still exactly the capsule: same size, same place, same
+    /// shape. Lasts a frame or two and exists so there is a rendered starting
+    /// point to animate away from.
+    case arming
     /// Playing the entrance on its own. No close button, closes itself.
     case autoPresenting
     /// Opened by the user. Has a close button, stays until dismissed.
@@ -50,6 +54,11 @@ final class StreakIntroController {
     /// The close button belongs only to the card the user opened themselves.
     var showsCloseButton: Bool { state == .manuallyExpanded }
 
+    /// Bumped the moment the returning card reaches the capsule, so the capsule
+    /// can visibly take it back rather than the card simply vanishing at the
+    /// end of its journey.
+    private(set) var absorbPulse = 0
+
     /// Set while a full-screen flow is covering home. The entrance is not spent
     /// playing to nobody behind a cover.
     var isSuspended = false
@@ -69,12 +78,22 @@ final class StreakIntroController {
 
     /// High damping throughout: this is a soft expansion, not a bounce. The
     /// response values are long enough to read as travel rather than a pop.
-    static let expand: Animation = .spring(response: 0.55, dampingFraction: 0.90)
-    static let collapse: Animation = .spring(response: 0.52, dampingFraction: 0.96)
+    static let expand: Animation = .spring(response: 0.62, dampingFraction: 0.92)
+    static let collapse: Animation = .spring(response: 0.55, dampingFraction: 0.95)
 
     /// Reduce Motion keeps the same beats but drops the journey.
     static let reducedExpand: Animation = .easeOut(duration: 0.30)
     static let reducedCollapse: Animation = .easeIn(duration: 0.28)
+
+    /// Long enough to guarantee the capsule-sized state is rendered before
+    /// anything moves. Two frames at 60Hz, so it holds on a display that misses
+    /// one.
+    private static let armingFrames = 32
+
+    /// How far into the collapse the capsule reacts. Slightly before the card
+    /// lands, so the capsule is already opening as it arrives instead of
+    /// twitching afterwards.
+    private static let absorbPoint = 0.68
 
     /// The phases of the automatic entrance, in milliseconds.
     ///
@@ -91,10 +110,10 @@ final class StreakIntroController {
         /// ~3.0s standard, ~2.9s with Reduce Motion — the shorter travel is
         /// given back to the hold so the flame still gets its full moment.
         static let standard = Timing(
-            settle: 240, expandTravel: 540, flameMoment: 1100, hold: 520, collapseTravel: 600
+            settle: 240, expandTravel: 620, flameMoment: 1100, hold: 520, collapseTravel: 560
         )
         static let reducedMotion = Timing(
-            settle: 160, expandTravel: 300, flameMoment: 1100, hold: 1000, collapseTravel: 320
+            settle: 200, expandTravel: 340, flameMoment: 1100, hold: 900, collapseTravel: 340
         )
     }
 
@@ -150,24 +169,50 @@ final class StreakIntroController {
     /// takes over from one that is still playing — the user asking for it beats
     /// a presentation that was about to close itself.
     func open(reduceMotion: Bool) {
-        guard state != .manuallyExpanded else { return }
-        playback?.cancel()
-        playback = nil
-
-        Haptics.selection()
-        withAnimation(reduceMotion ? Self.reducedExpand : Self.expand) {
+        switch state {
+        case .manuallyExpanded:
+            return
+        case .autoPresenting:
+            // Already out. Adopt it — give it a close button and stop its
+            // timer — rather than replaying a journey the user just watched.
+            playback?.cancel()
+            playback = nil
             state = .manuallyExpanded
+        default:
+            arm(into: .manuallyExpanded, reduceMotion: reduceMotion)
+        }
+    }
+
+    /// Mounts the card at the capsule's exact geometry, waits for it to be
+    /// rendered there, and only then expands it.
+    ///
+    /// This frame is the difference between a morph and a fade. A view inserted
+    /// in its final state has no previous value for SwiftUI to animate from, so
+    /// the card would simply appear in the middle of the screen — which is
+    /// precisely what it must not do.
+    private func arm(into destination: StreakPresentation, reduceMotion: Bool) {
+        playback?.cancel()
+        state = .arming
+
+        playback = Task { [weak self] in
+            guard await self?.sleep(Self.armingFrames) == true else { return }
+            guard let self, state == .arming else { return }
+
+            withAnimation(reduceMotion ? Self.reducedExpand : Self.expand) {
+                state = destination
+            }
         }
     }
 
     /// Closes a manually opened card, by whichever route the user chose. Every
     /// route runs the same collapse, so the card is always absorbed back into
     /// the capsule rather than blinking away.
+    /// The haptic is not fired here but when the card actually arrives, so the
+    /// feedback lands with the capsule taking it back rather than with the
+    /// user's finger half a second earlier.
     func close(reduceMotion: Bool) {
         guard state == .manuallyExpanded else { return }
-
-        Haptics.selection()
-        collapse(reduceMotion: reduceMotion)
+        collapse(reduceMotion: reduceMotion, userInitiated: true)
     }
 
     // MARK: - Lifecycle
@@ -212,6 +257,9 @@ final class StreakIntroController {
         // has already arrived rather than racing it.
         guard await sleep(timing.settle) else { return }
 
+        state = .arming
+        guard await sleep(Self.armingFrames), state == .arming else { return }
+
         withAnimation(reduceMotion ? Self.reducedExpand : Self.expand) {
             state = .autoPresenting
         }
@@ -225,12 +273,14 @@ final class StreakIntroController {
 
         // A manual open during the sequence wins; don't yank it closed.
         guard state == .autoPresenting else { return }
-        collapse(reduceMotion: reduceMotion)
+        collapse(reduceMotion: reduceMotion, userInitiated: false)
     }
 
-    /// Runs the shared collapse and unmounts once it has finished travelling.
-    private func collapse(reduceMotion: Bool) {
+    /// Runs the shared collapse, hands the capsule its cue, and unmounts once
+    /// the card has finished travelling.
+    private func collapse(reduceMotion: Bool, userInitiated: Bool) {
         let travel = (reduceMotion ? Timing.reducedMotion : Timing.standard).collapseTravel
+        let absorbAt = Int(Double(travel) * Self.absorbPoint)
 
         playback?.cancel()
         withAnimation(reduceMotion ? Self.reducedCollapse : Self.collapse) {
@@ -238,10 +288,17 @@ final class StreakIntroController {
         }
 
         playback = Task { [weak self] in
-            guard await self?.sleep(travel) == true else { return }
-            guard self?.state == .collapsing else { return }
-            self?.state = .compact
-            self?.playback = nil
+            guard await self?.sleep(absorbAt) == true else { return }
+            guard let self, state == .collapsing else { return }
+
+            // Reduce Motion gets the feedback without the squeeze: there is no
+            // journey to receive, so nothing should visibly flex.
+            if !reduceMotion { absorbPulse &+= 1 }
+            if userInitiated { Haptics.tap(intensity: 0.45) }
+
+            guard await sleep(travel - absorbAt), state == .collapsing else { return }
+            state = .compact
+            playback = nil
         }
     }
 
