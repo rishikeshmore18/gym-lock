@@ -49,9 +49,11 @@ struct RootTabView: View {
         // and a coral tab would be competing with that.
         .tint(Theme.ink)
         .onChange(of: selection) { _, tab in
-            // Leaving home ends the entrance cleanly rather than letting it
-            // finish against a screen nobody is looking at.
-            if tab != .home { intro.cancel() }
+            // Leaving home resets the streak to compact at once. There is no
+            // point animating a collapse onto a screen nobody is looking at,
+            // and it guarantees the next tab never inherits a dimmed backdrop,
+            // a running flame, or a close button floating over it.
+            if tab != .home { intro.normalizeImmediately() }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

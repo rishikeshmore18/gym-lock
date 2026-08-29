@@ -15,10 +15,10 @@ struct FlameAnimationView: View {
     /// which is what Reduce Motion gets.
     var isAnimating: Bool = true
 
-    /// The source animation runs about 4.4s, which is far longer than the
-    /// entrance should ever hold the user. Playing it faster keeps the whole
-    /// intro inside its budget without cutting the flame off mid-shape.
-    private static let playbackSpeed: CGFloat = 3
+    /// The source animation runs about 4.4s. At this speed roughly one full
+    /// cycle plays inside the time the card is on screen — fast enough to feel
+    /// alive, slow enough to read as a burning flame rather than a flicker.
+    private static let playbackSpeed: CGFloat = 1.8
 
     /// Frame the flame settles on when motion is reduced — past the ignition,
     /// into the part of the loop that reads as a burning flame.
@@ -48,25 +48,9 @@ struct FlameAnimationView: View {
 
     private var base: LottieView<FlameGlow> {
         LottieView {
-            await Self.load()
+            await FlameAsset.resolved()
         } placeholder: {
             FlameGlow()
-        }
-    }
-
-    /// Loads the bundled file, degrading quietly if it is ever missing.
-    ///
-    /// A failure here must not leave the streak number floating on a blank
-    /// card, so the placeholder glow stays up instead. It is a backdrop, not a
-    /// substitute flame.
-    private static func load() async -> DotLottieFile? {
-        do {
-            return try await DotLottieFile.named(FlameAsset.name)
-        } catch {
-            #if DEBUG
-            print("[GymLock] streak flame unavailable: \(error.localizedDescription)")
-            #endif
-            return nil
         }
     }
 }
@@ -90,8 +74,42 @@ struct FlameGlow: View {
     }
 }
 
-/// Where the flame lives in the bundle.
+/// Loads and holds the one copy of the flame.
+///
+/// Parsed once and kept, so the first expansion is not also the first time the
+/// file is read off disk — that decode is exactly what would show up as a stall
+/// on the frame the card starts moving. Preparing it is not playing it: nothing
+/// renders until a card mounts.
+@MainActor
 enum FlameAsset {
     /// The `.lottie` file shipped in `Resources`, without its extension.
     static let name = "flame_streak"
+
+    private static var cached: DotLottieFile?
+    private static var isLoading = false
+
+    /// Call when home appears, so the composition is ready before it is needed.
+    static func prepare() async {
+        _ = await resolved()
+    }
+
+    static func resolved() async -> DotLottieFile? {
+        if let cached { return cached }
+        guard !isLoading else { return nil }
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let file = try await DotLottieFile.named(name)
+            cached = file
+            return file
+        } catch {
+            // A failure here must not leave the streak number floating on a
+            // blank card — the placeholder glow stays up instead.
+            #if DEBUG
+            print("[GymLock] streak flame unavailable: \(error.localizedDescription)")
+            #endif
+            return nil
+        }
+    }
 }

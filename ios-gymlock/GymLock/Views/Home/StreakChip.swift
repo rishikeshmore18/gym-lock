@@ -8,12 +8,33 @@ import SwiftUI
 /// a capsule the user sees every time they open the app.
 struct StreakChip: View {
     let streak: Int
+    /// Nil when the chip is only being used to reserve layout space.
+    var onTap: (() -> Void)?
 
     /// The orange of the supplied flame artwork, so the resting icon and the
     /// animated one are recognisably the same object.
     private static let flameOrange = Color(red: 1, green: 0.451, blue: 0)
 
     var body: some View {
+        Button {
+            onTap?()
+        } label: {
+            capsule
+                // Transparent margin around the capsule. The chip stays visually
+                // compact while the thing you actually have to hit clears 44pt.
+                .padding(.vertical, 4)
+                .padding(.horizontal, 2)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(PressableChipStyle())
+        .disabled(onTap == nil)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Self.accessibilityLabel(for: streak))
+        .accessibilityHint(onTap == nil ? "" : "Double tap to view streak")
+        .accessibilityAddTraits(onTap == nil ? [] : .isButton)
+    }
+
+    private var capsule: some View {
         HStack(spacing: 6) {
             Image(systemName: "flame.fill")
                 .font(.system(size: 15, weight: .semibold))
@@ -27,8 +48,6 @@ struct StreakChip: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .glassCapsule()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Self.accessibilityLabel(for: streak))
     }
 
     /// A zero streak is shown in grey, never red, and never as a broken flame.
@@ -42,11 +61,21 @@ struct StreakChip: View {
     }
 }
 
+/// A small inward press. Enough to confirm the tap landed, not enough to look
+/// like the chip is a game button.
+private struct PressableChipStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+    }
+}
+
 #Preview {
     HStack(spacing: 16) {
-        StreakChip(streak: 4)
-        StreakChip(streak: 0)
-        StreakChip(streak: 128)
+        StreakChip(streak: 4, onTap: {})
+        StreakChip(streak: 0, onTap: {})
+        StreakChip(streak: 128, onTap: {})
     }
     .padding(40)
     .background(Theme.canvas)
