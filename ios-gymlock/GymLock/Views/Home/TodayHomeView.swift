@@ -12,6 +12,8 @@ struct TodayHomeView: View {
 
     /// Owned by the tab shell so it survives tab switches.
     let intro: StreakIntroController
+    /// The morning session, for the hero and mini cards.
+    let coordinator: GymSessionCoordinator
 
     @State private var window = CalendarWindow()
     @State private var index = DayStatusIndex.empty
@@ -52,6 +54,12 @@ struct TodayHomeView: View {
 
     private var metrics: StreakCardMetrics { .fit(rootFrame.size) }
 
+    /// Everything the card section shows, derived from real state on each pass.
+    /// The derivation is a few hundred small array operations at most.
+    private var cards: HomeCardModel {
+        HomeCardDeriver.derive(store: store, coordinator: coordinator)
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             Theme.canvas.ignoresSafeArea()
@@ -61,18 +69,31 @@ struct TodayHomeView: View {
                     .padding(.horizontal, Theme.pageMargin)
                     .padding(.top, 6)
 
-                CalendarStripView(
-                    window: window,
-                    index: index,
-                    selectedDay: selectedDay,
-                    leadingDay: $leadingDay,
-                    onSelect: select
-                )
-                .padding(.top, 20)
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        CalendarStripView(
+                            window: window,
+                            index: index,
+                            selectedDay: selectedDay,
+                            leadingDay: $leadingDay,
+                            onSelect: select
+                        )
 
-                // Deliberately empty. The rest of home is coming section by
-                // section, and an empty screen is better than a padded one.
-                Spacer(minLength: 0)
+                        HeroCardView(stage: cards.hero)
+
+                        MiniCardsRow(
+                            protection: cards.protection,
+                            next: cards.next,
+                            path: cards.path
+                        )
+                    }
+                    // Matches the calendar strip's own content margin, so the
+                    // hero lines up with the dates above it.
+                    .padding(.horizontal, 18)
+                    .padding(.top, 20)
+                    .padding(.bottom, 24)
+                }
+                .scrollBounceBehavior(.basedOnSize)
             }
             .opacity(hasSettled ? 1 : 0)
         }
@@ -95,6 +116,16 @@ struct TodayHomeView: View {
             intro.play(streak: streak, reduceMotion: reduceMotion)
         }
         .onChange(of: intro.absorbPulse) { _, _ in absorbCard() }
+        .onChange(of: cards.pathStep) { previous, current in
+            // A step forward earns exactly one tap, and finishing the path is
+            // the one moment that gets the full success haptic.
+            guard current > previous else { return }
+            if current >= 4 {
+                Haptics.commit()
+            } else {
+                Haptics.tap()
+            }
+        }
         .onChange(of: leadingDay) { _, day in
             guard let day else { return }
             window.extend(reaching: day)

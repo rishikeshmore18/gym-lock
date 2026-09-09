@@ -29,7 +29,7 @@ struct RootTabView: View {
     var body: some View {
         TabView(selection: $selection) {
             Tab("Home", systemImage: "house.fill", value: RootTab.home) {
-                TodayHomeView(intro: intro)
+                TodayHomeView(intro: intro, coordinator: coordinator)
             }
 
             Tab("Progress", systemImage: "chart.bar.fill", value: RootTab.progress) {
