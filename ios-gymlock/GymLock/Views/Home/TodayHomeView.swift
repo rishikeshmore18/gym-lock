@@ -86,6 +86,13 @@ struct TodayHomeView: View {
                             next: cards.next,
                             path: cards.path
                         )
+
+                        // The second layer. Everything above answers "what do I
+                        // do now"; this answers "is this working", so it gets
+                        // air between it and the cards rather than joining the
+                        // same rhythm.
+                        MomentumSection(field: cards.momentum)
+                            .padding(.top, 12)
                     }
                     // Matches the calendar strip's own content margin, so the
                     // hero lines up with the dates above it.

@@ -29,7 +29,13 @@ struct HeroMetrics {
     var chartHeight: CGFloat { height * 0.40 }
     var checklistFont: CGFloat { max(10, width * 0.036) }
 
-    var leftFraction: CGFloat { 0.56 }
+    /// Copy width when the only thing behind it is a photograph, which can be
+    /// held back to whatever width the text needs.
+    var leftFraction: CGFloat { 0.58 }
+    /// Copy width when a ring or a chart occupies the right side. Narrower on
+    /// purpose: the two together have to fit inside the card, and at the wider
+    /// value the ring was pushed past the trailing edge and clipped.
+    var copyFraction: CGFloat { 0.46 }
 }
 
 // MARK: - The hero card
@@ -83,7 +89,7 @@ struct HeroCardView: View {
                     imageName: "HeroMountain",
                     eyebrow: "YOUR COMMITMENT",
                     headline: [alarm.displayString],
-                    support: "Tomorrow · 4 steps ready",
+                    support: "Tomorrow",
                     metrics: metrics,
                     showsCTA: onCTA != nil,
                     onCTA: onCTA
@@ -104,53 +110,49 @@ struct HeroCardView: View {
                     windowSeconds: windowSeconds,
                     metrics: metrics
                 )
+            // The live states lead with the instruction, never the fraction:
+            // the Path card owns "how far through you are", and printing that
+            // twice on one screen makes both copies mean less.
             case .committed(let step, let total):
                 RingHero(
                     eyebrow: "FIRST STEP WON",
-                    headline: ["\(step) / \(total)"],
-                    support: "Window open — get ready",
+                    headline: ["Get ready"],
+                    support: "Your window is open",
                     progress: Double(step) / Double(total),
                     ringIcon: "dumbbell.fill",
-                    ringValue: "\(step)/\(total)",
+                    ringValue: "ready",
                     tint: Theme.accent,
                     metrics: metrics
                 )
-            case .departed(let step, let total, let nearGym):
+            case .departed(_, _, let nearGym):
                 ImageHero(
                     imageName: "HeroRoad",
                     eyebrow: "YOU'RE MOVING",
-                    headline: ["\(step) / \(total)"],
-                    support: nearGym ? "Nearly there" : "Gym next",
+                    headline: nearGym ? ["Nearly", "there."] : ["Gym next."],
+                    support: nearGym ? "Almost at the door" : "Keep going",
                     metrics: metrics,
                     showsCTA: onCTA != nil,
-                    onCTA: onCTA,
-                    bottom: {
-                        GymLockStepDots(
-                            total: total,
-                            completed: step,
-                            dotSize: metrics.supportSize * 0.62
-                        )
-                    }
+                    onCTA: onCTA
                 )
             case .arrived(let step, let total):
                 RingHero(
                     eyebrow: "YOU'RE HERE",
-                    headline: ["\(step) / \(total)"],
+                    headline: ["Train now"],
                     support: "Apps unlocked — nice work",
                     progress: Double(step) / Double(total),
                     ringIcon: "dumbbell.fill",
-                    ringValue: "\(step)/\(total)",
+                    ringValue: "here",
                     tint: Theme.accent,
                     metrics: metrics
                 )
-            case .verified(let step, let total, let streak):
+            case .verified(let step, let total, _):
                 RingHero(
                     eyebrow: "WORKOUT VERIFIED",
-                    headline: ["\(step) / \(total)"],
-                    support: streak > 0 ? "🔥 \(streak) day momentum" : "Momentum secured",
+                    headline: ["Done."],
+                    support: "You showed up today.",
                     progress: Double(step) / Double(total),
-                    ringIcon: "dumbbell.fill",
-                    ringValue: "\(step)/\(total)",
+                    ringIcon: "checkmark",
+                    ringValue: "done",
                     tint: Theme.ink,
                     metrics: metrics
                 )
@@ -325,7 +327,10 @@ private struct ImageHero: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            GymLockHeroImageBlend(name: imageName)
+            // The photograph is held back across the whole copy column, so text
+            // always sits on white rather than on whatever happens to be in the
+            // artwork behind it.
+            GymLockHeroImageBlend(name: imageName, safeFraction: metrics.leftFraction)
                 .frame(width: metrics.width, height: metrics.height)
 
             VStack(alignment: .leading, spacing: 0) {
@@ -340,8 +345,10 @@ private struct ImageHero: View {
                 Text(support)
                     .font(.system(size: metrics.supportSize, weight: .medium))
                     .foregroundStyle(Theme.inkSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    // Two lines rather than one truncated one: a supporting
+                    // line ending in an ellipsis reads as a bug.
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
                     .padding(.top, 3)
 
                 if let bottomContent {
@@ -415,7 +422,7 @@ private struct RingHero: View {
                     .minimumScaleFactor(0.8)
                     .padding(.top, 3)
             }
-            .frame(width: metrics.width * metrics.leftFraction, alignment: .leading)
+            .frame(width: metrics.width * metrics.copyFraction, alignment: .leading)
             .padding(.leading, metrics.padding)
 
             Spacer(minLength: 0)
@@ -483,11 +490,11 @@ private struct CountdownHero: View {
                     Text("4 steps to a stronger you")
                         .font(.system(size: metrics.supportSize, weight: .medium))
                         .foregroundStyle(Theme.inkSecondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
                         .padding(.top, 3)
                 }
-                .frame(width: metrics.width * metrics.leftFraction, alignment: .leading)
+                .frame(width: metrics.width * metrics.copyFraction, alignment: .leading)
                 .padding(.leading, metrics.padding)
 
                 Spacer(minLength: 0)
@@ -525,12 +532,12 @@ private struct SetupHero: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("SETUP IN PROGRESS")
+                Text("FINISH YOUR SYSTEM")
                     .font(.system(size: metrics.eyebrowSize, weight: .bold))
                     .tracking(metrics.eyebrowSize * 0.14)
                     .foregroundStyle(Theme.inkSecondary)
 
-                Text("\(doneCount) of \(items.count) set")
+                Text("\(doneCount) of \(items.count) ready")
                     .font(.system(size: metrics.headlineSize, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(Theme.ink)
@@ -539,7 +546,9 @@ private struct SetupHero: View {
                     .contentTransition(.numericText())
                     .padding(.top, 2)
 
-                Text("Your system is nearly armed")
+                // Honest at both ends: nothing is "nearly armed" on the first
+                // run, and nothing needs three steps when one is left.
+                Text(doneCount == 0 ? "Three quick steps" : "Nearly armed")
                     .font(.system(size: metrics.supportSize, weight: .medium))
                     .foregroundStyle(Theme.inkSecondary)
                     .lineLimit(1)

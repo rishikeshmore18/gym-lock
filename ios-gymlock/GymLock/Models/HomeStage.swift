@@ -12,6 +12,9 @@ struct HomeCardModel: Equatable {
     var protection: ProtectionCard
     var next: NextCard
     var path: PathCard
+    /// The accumulated-proof layer below the cards. Defaulted so every stage
+    /// can be constructed without restating it; `derive` fills it in once.
+    var momentum: MomentumField = .empty
 
     /// 0–4, how far through today's commitment the user is. Observed by home so
     /// a step forward can earn its haptic exactly once.
@@ -110,17 +113,43 @@ struct PathCard: Equatable {
 // MARK: - Derivation
 
 enum HomeCardDeriver {
-    /// Builds the full card model from live state.
-    ///
-    /// Precedence runs from most specific to most general: a morning in
-    /// progress beats today's outcome, which beats a comeback, which beats the
-    /// aggregates. Anything the data cannot support falls through to an honest
-    /// simpler state.
+    /// Builds the full home model: the card section, then the record below it,
+    /// then a pass that stops two cards saying the same thing.
     static func derive(
         store: AppStore,
         coordinator: GymSessionCoordinator,
         now: Date = Date(),
         calendar: Calendar = .current
+    ) -> HomeCardModel {
+        var model = cardSection(
+            store: store,
+            coordinator: coordinator,
+            now: now,
+            calendar: calendar
+        )
+
+        model.momentum = MomentumField.build(
+            log: store.log,
+            plan: store.plan,
+            schedule: store.schedule,
+            now: now,
+            calendar: calendar
+        )
+
+        return deduplicated(model, store: store, now: now, calendar: calendar)
+    }
+
+    /// Builds the four cards from live state.
+    ///
+    /// Precedence runs from most specific to most general: a morning in
+    /// progress beats today's outcome, which beats a comeback, which beats the
+    /// aggregates. Anything the data cannot support falls through to an honest
+    /// simpler state.
+    private static func cardSection(
+        store: AppStore,
+        coordinator: GymSessionCoordinator,
+        now: Date,
+        calendar: Calendar
     ) -> HomeCardModel {
         let session = coordinator.session
         let isSameDay = session.map { calendar.isDate($0.day, inSameDayAs: now) } ?? false
@@ -160,8 +189,10 @@ enum HomeCardDeriver {
             )
         }
 
-        // 4. Setup still open.
-        let setup = setupChecklist(store: store)
+        // 4. Setup still open. This outranks every alarm state below it: a
+        // commitment the system cannot actually enforce is not the thing to be
+        // showing someone.
+        let setup = setupChecklist(store: store, coordinator: coordinator)
         if !setup.allSatisfied {
             return HomeCardModel(
                 hero: .setupIncomplete(items: setup.items),
@@ -348,12 +379,20 @@ enum HomeCardDeriver {
 
     // MARK: Conditions
 
-    private static func setupChecklist(store: AppStore) -> (items: [ChecklistItem], allSatisfied: Bool) {
+    private static func setupChecklist(
+        store: AppStore,
+        coordinator: GymSessionCoordinator
+    ) -> (items: [ChecklistItem], allSatisfied: Bool) {
         let items: [ChecklistItem] = [
             ChecklistItem(
                 id: "apps",
                 label: "Apps locked",
-                isDone: store.hasConfiguredBlockedApps
+                // Having visited the setup screen is not the same as having
+                // something selected. Only a live selection counts, or home
+                // would promise a lock the shield cannot apply — which is how
+                // the hero ended up announcing a commitment while the
+                // Protection card still said "choose apps in setup".
+                isDone: store.hasConfiguredBlockedApps && coordinator.shield.selectionCount > 0
             ),
             ChecklistItem(
                 id: "alarm",
@@ -383,6 +422,75 @@ enum HomeCardDeriver {
         guard seconds > 0, seconds <= leadIn else { return nil }
 
         return .countdown(secondsRemaining: seconds, windowSeconds: leadIn)
+    }
+
+    // MARK: Duplication
+
+    /// Stops the Next card repeating the number the hero already owns.
+    ///
+    /// The four cards only work if each answers a different question. Once the
+    /// hero has claimed the next alarm time, Next moves on to the moment after
+    /// it — the time the user actually has to be at the gym — which is new
+    /// information rather than the same clock printed twice.
+    private static func deduplicated(
+        _ model: HomeCardModel,
+        store: AppStore,
+        now: Date,
+        calendar: Calendar
+    ) -> HomeCardModel {
+        guard let claim = heroClaim(model.hero, store: store, now: now, calendar: calendar),
+              model.next.value.caseInsensitiveCompare(claim) == .orderedSame,
+              let alternative = nextDeadline(store, now: now, calendar: calendar),
+              alternative.value.caseInsensitiveCompare(claim) != .orderedSame
+        else { return model }
+
+        var updated = model
+        updated.next = alternative
+        return updated
+    }
+
+    /// The value the hero is already displaying, when it is the kind of value a
+    /// mini card could collide with.
+    private static func heroClaim(
+        _ hero: HeroStage,
+        store: AppStore,
+        now: Date,
+        calendar: Calendar
+    ) -> String? {
+        switch hero {
+        case .firstDay(let alarm):
+            return alarm.displayString
+        case .night(_, let nextAlarm):
+            return nextAlarm?.displayString
+        case .countdown:
+            return store.plan.nextOccurrence(after: now, calendar: calendar)?
+                .slot.alarmTime.displayString
+        case .restDay(_, let nextTime):
+            return nextTime
+        default:
+            return nil
+        }
+    }
+
+    /// "Gym by" — the far edge of the window, and how long the window is.
+    private static func nextDeadline(
+        _ store: AppStore,
+        now: Date,
+        calendar: Calendar
+    ) -> NextCard? {
+        guard let occurrence = store.plan.nextOccurrence(after: now, calendar: calendar) else {
+            return nil
+        }
+
+        let window = store.plan.windowMinutes
+        guard window > 0 else { return nil }
+
+        return NextCard(
+            eyebrow: "GYM BY",
+            value: occurrence.slot.gymByTime(window: window).displayString,
+            detail: "\(window) min window",
+            showsArrow: true
+        )
     }
 
     // MARK: Aggregates

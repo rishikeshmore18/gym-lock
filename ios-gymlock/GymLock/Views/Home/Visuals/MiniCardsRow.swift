@@ -263,7 +263,8 @@ struct PathMini: View {
                     GymLockStepDots(
                         total: state.totalSteps,
                         completed: state.completedSteps,
-                        dotSize: metrics.dotSize
+                        dotSize: metrics.dotSize,
+                        isActive: state.completedSteps > 0
                     )
                 }
             }
@@ -272,11 +273,17 @@ struct PathMini: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// A path with steps reads as a fraction; a path that is waiting reads as a
-    /// word, with the placeholder carrying the detail underneath it.
+    /// A path in progress reads as a fraction; a path that has not started
+    /// reads as a word.
+    ///
+    /// "0 / 4" before the first morning is a score, and a score of zero is the
+    /// wrong first impression for someone who has done nothing wrong yet. The
+    /// four outlined dots underneath already say everything the fraction would.
     private var valueText: String {
         guard state.placeholder == nil else { return "Ready" }
-        return "\(state.completedSteps) / \(state.totalSteps)"
+        return state.completedSteps > 0
+            ? "\(state.completedSteps) / \(state.totalSteps)"
+            : "Ready"
     }
 }
 

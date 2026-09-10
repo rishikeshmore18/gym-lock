@@ -70,6 +70,15 @@ struct GymLockStepDots: View {
     var completed: Int
     var dotSize: CGFloat = 9
     var spacing: CGFloat = 7
+    /// False before the morning has begun. Nothing is "current" yet, so no dot
+    /// takes the coral — an untouched path reads as waiting, never as behind.
+    var isActive: Bool = true
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The dot that just landed, held long enough to pop and settle.
+    @State private var poppedIndex: Int?
+    @State private var settle: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: spacing) {
@@ -78,6 +87,11 @@ struct GymLockStepDots: View {
                     .frame(width: dotSize, height: dotSize)
             }
         }
+        .onChange(of: completed) { previous, current in
+            guard current > previous, !reduceMotion else { return }
+            markLanded(current - 1)
+        }
+        .onDisappear { settle?.cancel() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(completed) of \(total) steps complete")
     }
@@ -85,7 +99,8 @@ struct GymLockStepDots: View {
     @ViewBuilder
     private func dot(for index: Int) -> some View {
         let isCompleted = index < completed
-        let isCurrent = index == completed && completed < total
+        let isCurrent = isActive && index == completed && completed < total
+        let isPopped = poppedIndex == index
 
         Circle()
             .fill(fill(isCompleted: isCompleted, isCurrent: isCurrent))
@@ -94,15 +109,29 @@ struct GymLockStepDots: View {
                     Circle().strokeBorder(Theme.border, lineWidth: 1.2)
                 }
             }
-            // Only a dot that just turned counts as a change worth animating;
-            // the ones already done render settled.
-            .scaleEffect(isCurrent && completed > 0 ? 1 : 1)
+            // Only the dot that just turned is worth animating; the ones
+            // already done render settled.
+            .scaleEffect(isPopped ? 1.45 : 1)
     }
 
     private func fill(isCompleted: Bool, isCurrent: Bool) -> Color {
         if isCompleted { return Theme.ink }
         if isCurrent { return Theme.accent }
         return Theme.surface
+    }
+
+    /// A step landing: one quick swell, then back to resting. Small enough that
+    /// it registers as confirmation rather than celebration — the celebration
+    /// belongs to finishing the path.
+    private func markLanded(_ index: Int) {
+        settle?.cancel()
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.45)) { poppedIndex = index }
+
+        settle = Task {
+            try? await Task.sleep(for: .milliseconds(260))
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { poppedIndex = nil }
+        }
     }
 }
 
@@ -310,8 +339,13 @@ struct GymLockMetricPair: View {
 /// the left column keeps its contrast on any crop.
 struct GymLockHeroImageBlend: View {
     var name: String
-    /// Extra feather, in fractions of the width, over the baked-in blend.
-    var featherWidth: CGFloat = 0.22
+    /// The share of the width the copy occupies. The photograph is held at full
+    /// white across this region and only begins to appear past it, so a
+    /// headline can never end up sitting on top of a grey shoulder or a lighting
+    /// change in the artwork.
+    var safeFraction: CGFloat = 0.5
+    /// How far past the safe region the image takes to reach full strength.
+    var featherWidth: CGFloat = 0.2
 
     var body: some View {
         GeometryReader { proxy in
@@ -325,8 +359,9 @@ struct GymLockHeroImageBlend: View {
                     LinearGradient(
                         stops: [
                             .init(color: .white, location: 0),
-                            .init(color: .white.opacity(0.85), location: featherWidth * 0.5),
-                            .init(color: .white.opacity(0), location: featherWidth),
+                            .init(color: .white, location: max(safeFraction * 0.88, 0.01)),
+                            .init(color: .white.opacity(0.88), location: max(safeFraction, 0.02)),
+                            .init(color: .white.opacity(0), location: min(safeFraction + featherWidth, 1)),
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
