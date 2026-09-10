@@ -7,6 +7,12 @@ import SwiftUI
 /// beside an icon — it is pressed into the object it counts, the way a wax seal
 /// sits on an envelope — so the tile reads as a single object from across the
 /// room. Built once, used for every stat card on this screen.
+///
+/// Sits between the home mini cards (18) and the momentum card (22): these
+/// tiles are wider than the minis, and a radius that does not grow with the
+/// card reads as a tighter, cheaper corner.
+private let statCardRadius: CGFloat = 20
+
 struct ProgressStatCard<Emblem: View>: View {
     /// Where the digit sits when the emblem underneath is colourful.
     enum DigitStyle {
@@ -41,11 +47,23 @@ struct ProgressStatCard<Emblem: View>: View {
                     .foregroundStyle(Theme.inkSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                    // 24 clears the digit disc, which hangs 15 below its emblem.
+                    // Clears the digit disc, which hangs 15 below its emblem.
                     .padding(.top, 26)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 178)
+            // Content runs to roughly 150; this leaves matching air above the
+            // emblem and below the label.
+            .frame(height: 174)
+            // The same surface, hairline and lift the home cards use. Without
+            // it the emblems float on the canvas and the tile stops reading as
+            // an object you can press.
+            .background(Theme.surface, in: .rect(cornerRadius: statCardRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: statCardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.045), radius: 10, y: 4)
+            .contentShape(.rect(cornerRadius: statCardRadius))
         }
         .buttonStyle(PressableTileStyle(reduceMotion: reduceMotion))
         .opacity(hasAppeared ? 1 : 0)
@@ -69,12 +87,12 @@ struct ProgressStatCard<Emblem: View>: View {
 
     private var emblemArea: some View {
         emblem()
-            .frame(height: 88)
+            .frame(height: 84)
             .overlay(alignment: .bottom) {
                 digitDisc
                     .offset(y: 15)
             }
-            .padding(.top, 10)
+            .padding(.top, 22)
     }
 
     private var digitDisc: some View {
