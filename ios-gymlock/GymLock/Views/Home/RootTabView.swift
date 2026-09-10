@@ -33,7 +33,7 @@ struct RootTabView: View {
             }
 
             Tab("Progress", systemImage: "chart.bar.fill", value: RootTab.progress) {
-                ProgressPlaceholderView()
+                ProgressTabView()
             }
 
             Tab("Profile", systemImage: "person.fill", value: RootTab.profile) {
