@@ -95,7 +95,8 @@ private struct MiniSurface<Content: View>: View {
     var body: some View {
         content()
             .padding(metrics.padding)
-            .frame(width: metrics.width, height: metrics.height, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: metrics.height, alignment: .topLeading)
             .background(Theme.surface, in: .rect(cornerRadius: metrics.cornerRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: metrics.cornerRadius)
@@ -216,7 +217,7 @@ struct NextMini: View {
                         .foregroundStyle(Theme.ink)
                 }
             }
-            .frame(height: metrics.height, alignment: .topLeading)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
     }
@@ -266,13 +267,15 @@ struct PathMini: View {
                     )
                 }
             }
-            .frame(height: metrics.height, alignment: .topLeading)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
     }
 
+    /// A path with steps reads as a fraction; a path that is waiting reads as a
+    /// word, with the placeholder carrying the detail underneath it.
     private var valueText: String {
-        guard state.placeholder == nil else { return "—".isEmpty ? "" : "Ready" }
+        guard state.placeholder == nil else { return "Ready" }
         return "\(state.completedSteps) / \(state.totalSteps)"
     }
 }
