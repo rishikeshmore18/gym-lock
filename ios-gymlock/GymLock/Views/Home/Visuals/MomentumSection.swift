@@ -3,284 +3,316 @@ import SwiftUI
 /// The proof layer under the action cards.
 ///
 /// Home has two jobs and this is the second one. The cards above answer "what do
-/// I do now"; this answers "is this actually working for me" — without asking the
-/// user to log anything, and without inventing a single mark. It is deliberately
-/// not a calendar: the columns carry weekdays so a pattern is visible, but the
-/// field reads as accumulated texture rather than a grid of dates.
+/// I do now"; this answers "am I actually doing this" — in one glance, without
+/// asking the user to log anything and without inventing a single mark.
+///
+/// The layout is deliberately split: the claim on the left ("4/5 this week"),
+/// the evidence for it on the right (the seven days that produced the number).
+/// A metric with its own receipt next to it is believed; a metric on its own is
+/// just a number the app is asserting.
 struct MomentumSection: View {
     let field: MomentumField
-    /// Optional destination; without one the section is inert and shows no
+    /// Optional destination; without one the card is inert and shows no
     /// affordance.
     var onTap: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hasRevealed = false
 
+    /// Caps the day dots on wide screens. Past this they stop reading as marks
+    /// and start reading as buttons.
+    private static let maxDot: CGFloat = 30
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            header
-            card
-        }
-        .task {
-            guard !hasRevealed else { return }
-            // A beat after the cards have settled, so the two layers arrive in
-            // order rather than together.
-            try? await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 180))
-            hasRevealed = true
-        }
-    }
-
-    // MARK: Header
-
-    private var header: some View {
-        HStack(spacing: 6) {
-            Text("MOMENTUM")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.5)
-                .foregroundStyle(Theme.inkSecondary)
-
-            if onTap != nil {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Theme.inkTertiary)
+        card
+            .contentShape(.rect(cornerRadius: 22))
+            .onTapGesture {
+                guard let onTap else { return }
+                Haptics.selection()
+                onTap()
             }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, 2)
-        .contentShape(.rect)
-        .onTapGesture {
-            guard let onTap else { return }
-            Haptics.selection()
-            onTap()
-        }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(field.accessibilityText)
+            .accessibilityAddTraits(onTap == nil ? [] : .isButton)
+            .task {
+                guard !hasRevealed else { return }
+                // A beat after the cards above have settled, so the two layers
+                // of home arrive in order rather than all at once.
+                try? await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 220))
+                hasRevealed = true
+            }
     }
 
     // MARK: Card
 
     private var card: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            marks
-            labels
-            Divider().overlay(Theme.border)
-            summary
+        HStack(alignment: .center, spacing: 14) {
+            claim
+            divider
+            week
         }
-        .padding(16)
-        .background(Theme.surface, in: .rect(cornerRadius: 20))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 15)
+        .background(Theme.surface, in: .rect(cornerRadius: 22))
         .overlay {
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: 22)
                 .strokeBorder(Theme.border, lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityText)
+        .shadow(color: .black.opacity(0.045), radius: 10, y: 4)
     }
 
-    /// Four rows of seven. Each mark sizes itself from the column width, so the
-    /// field fills whatever it is given without a single fixed dimension.
-    private var marks: some View {
-        VStack(spacing: 7) {
-            ForEach(field.weeks.indices, id: \.self) { row in
-                HStack(spacing: 7) {
-                    ForEach(field.weeks[row].indices, id: \.self) { column in
-                        MomentumMarkView(
-                            mark: field.weeks[row][column],
-                            isToday: row == field.todayRow && column == field.todayColumn
-                        )
-                        .opacity(hasRevealed ? 1 : 0)
-                        .scaleEffect(hasRevealed ? 1 : 0.55, anchor: .bottom)
-                        .animation(
-                            revealAnimation(index: row * 7 + column),
-                            value: hasRevealed
-                        )
-                    }
+    // MARK: Left — the claim
+
+    private var claim: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                GymLockStatusIcon(systemName: "chart.bar.fill", circleSize: 26)
+
+                Text("MOMENTUM")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.9)
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                if onTap != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Theme.inkTertiary)
                 }
             }
-        }
-    }
 
-    private var labels: some View {
-        HStack(spacing: 7) {
-            ForEach(field.weekdayLabels.indices, id: \.self) { column in
-                let isToday = column == field.todayColumn
+            Text(field.summaryValue)
+                .font(.system(size: 38, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.42, dampingFraction: 0.75), value: field.verifiedCount)
+                .padding(.top, 6)
 
-                Text(field.weekdayLabels[column])
-                    .font(.system(size: 10, weight: isToday ? .bold : .medium))
-                    .foregroundStyle(isToday ? Theme.ink : Theme.inkTertiary)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var summary: some View {
-        if let value = field.summaryValue {
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text(value)
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.ink)
-                    .contentTransition(.numericText())
-
-                Text(field.summaryLabel)
-                    .font(.system(size: 13, weight: .medium))
+            HStack(spacing: 5) {
+                Text(field.caption)
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.9)
                     .foregroundStyle(Theme.inkSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
-                Spacer(minLength: 0)
-
-                if let note = field.preservedNote {
+                // Home sessions are reported next to the metric, never inside
+                // it: they keep momentum, but they are not a trip to the gym.
+                if let note = field.homeNote {
                     Text(note)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.inkTertiary)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
             }
-        } else {
-            Text(field.emptyMessage)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.inkSecondary)
-                .lineLimit(2)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 2)
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
-    // MARK: Motion
+    private var divider: some View {
+        Rectangle()
+            .fill(Theme.border)
+            .frame(width: 1)
+            .frame(maxHeight: .infinity)
+    }
 
-    /// A short stagger across the field, row-major. Under Reduce Motion the
-    /// marks are simply there.
+    // MARK: Right — the evidence
+
+    private var week: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(field.days.enumerated()), id: \.element.id) { index, day in
+                VStack(spacing: 7) {
+                    Text(day.label)
+                        .font(.system(size: 10, weight: day.isToday ? .bold : .medium))
+                        .foregroundStyle(day.isToday ? Theme.ink : Theme.inkTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
+                    MomentumDot(mark: day.mark, isToday: day.isToday)
+                        .frame(maxWidth: Self.maxDot)
+                }
+                .frame(maxWidth: .infinity)
+                .opacity(hasRevealed ? 1 : 0)
+                .scaleEffect(hasRevealed ? 1 : 0.7)
+                .animation(revealAnimation(index: index), value: hasRevealed)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// A short left-to-right cascade, the way the week itself runs. Under
+    /// Reduce Motion the days are simply there.
     private func revealAnimation(index: Int) -> Animation? {
         guard !reduceMotion else { return nil }
-        return .spring(response: 0.42, dampingFraction: 0.8)
-            .delay(Double(index) * 0.008)
-    }
-
-    private var accessibilityText: String {
-        guard let value = field.summaryValue else { return field.emptyMessage }
-        var text = "Last four weeks: \(value) sessions showed up at the gym."
-        if let note = field.preservedNote {
-            text += " \(note)."
-        }
-        return text
+        return .spring(response: 0.44, dampingFraction: 0.78)
+            .delay(Double(index) * 0.035)
     }
 }
 
-// MARK: - One mark
+// MARK: - One day
 
-/// A single day.
+/// A single day of the week.
 ///
-/// Every state is the same silhouette at a different weight, so the field reads
-/// as one material: a full capsule for a day that counted, a stub for a day that
-/// broke, a whisper for a day that was never a session.
-private struct MomentumMarkView: View {
+/// Every state is the same circle at a different weight, so the row reads as one
+/// material: solid for a day that counted, an open ring for one that never
+/// resolved, a small dot for a day nothing was ever asked of.
+private struct MomentumDot: View {
     let mark: MomentumMark
     let isToday: Bool
 
-    /// Taller than wide, like the bars this borrows its language from.
-    private static let aspect: CGFloat = 0.78
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isBreathing = false
 
     var body: some View {
         Color.clear
-            .aspectRatio(Self.aspect, contentMode: .fit)
-            .frame(maxWidth: .infinity)
+            .aspectRatio(1, contentMode: .fit)
             .overlay { shape }
             .overlay {
                 if isToday {
-                    Capsule(style: .continuous)
-                        .strokeBorder(Theme.ink, lineWidth: 1.6)
+                    // Today is circled rather than filled. It has not earned a
+                    // fill yet, and pretending otherwise would be the one lie
+                    // this whole layer exists to avoid.
+                    Circle()
+                        .strokeBorder(Theme.ink, lineWidth: 1.5)
+                        .padding(-3.5)
+                }
+            }
+            .scaleEffect(isBreathing ? 1.05 : 1)
+            .animation(.spring(response: 0.45, dampingFraction: 0.7), value: mark)
+            .task(id: shouldBreathe) {
+                guard shouldBreathe, !reduceMotion else {
+                    isBreathing = false
+                    return
+                }
+                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                    isBreathing = true
                 }
             }
     }
+
+    /// Only today, and only while it is still open. A pulse on a finished day
+    /// would be decoration; here it is the one thing left to do.
+    private var shouldBreathe: Bool { isToday && mark == .planned }
 
     @ViewBuilder
     private var shape: some View {
         switch mark {
         case .verified:
-            Capsule(style: .continuous)
+            Circle()
                 .fill(
                     LinearGradient(
-                        colors: [Theme.accentDeep, Theme.accent],
-                        startPoint: .top,
-                        endPoint: .bottom
+                        colors: [Theme.accentWarm, Theme.accent, Theme.accentDeep],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
                 )
+                .shadow(color: Theme.accent.opacity(0.35), radius: 4, y: 2)
 
         case .preserved:
-            Capsule(style: .continuous)
-                .fill(Theme.accent.opacity(0.18))
+            Circle()
+                .fill(Theme.accent.opacity(0.16))
                 .overlay {
-                    Capsule(style: .continuous)
-                        .strokeBorder(Theme.accent.opacity(0.55), lineWidth: 1.3)
+                    Circle().strokeBorder(Theme.accent.opacity(0.75), lineWidth: 2)
                 }
-
-        case .excused:
-            Capsule(style: .continuous)
-                .fill(Theme.surfaceMuted)
 
         case .missed:
-            Capsule(style: .continuous)
+            // Deflated rather than marked wrong. A red cross on a Tuesday is
+            // the fastest way to lose someone who already feels behind.
+            Circle()
                 .fill(Theme.border)
-                .scaleEffect(x: 1, y: 0.36)
+                .scaleEffect(0.58)
+
+        case .excused:
+            Circle()
+                .fill(Theme.surfaceMuted)
+                .scaleEffect(0.82)
+
+        case .unresolved:
+            Circle()
+                .strokeBorder(Theme.border, lineWidth: 2)
 
         case .planned:
-            Capsule(style: .continuous)
-                .fill(Theme.surface)
-                .overlay {
-                    Capsule(style: .continuous)
-                        .strokeBorder(Theme.border, lineWidth: 1.3)
-                }
+            Circle()
+                .fill(Theme.surfaceMuted)
 
-        case .blank:
-            Capsule(style: .continuous)
-                .fill(Theme.border.opacity(0.55))
-                .scaleEffect(x: 1, y: 0.16)
+        case .rest:
+            Circle()
+                .fill(Theme.border.opacity(0.7))
+                .scaleEffect(0.26)
         }
     }
 }
 
 // MARK: - Previews
 
-#Preview("Momentum · with a record") {
-    let weeks: [[MomentumMark]] = [
-        [.verified, .blank, .verified, .blank, .verified, .blank, .blank],
-        [.verified, .blank, .missed, .blank, .verified, .preserved, .blank],
-        [.verified, .blank, .verified, .blank, .verified, .blank, .blank],
-        [.verified, .blank, .planned, .blank, .planned, .blank, .blank],
-    ]
+#Preview("Momentum · mid-week") {
+    let marks: [MomentumMark] = [.verified, .rest, .verified, .planned, .planned, .rest, .rest]
 
     return MomentumSection(
         field: MomentumField(
-            weeks: weeks,
-            weekdayLabels: ["M", "T", "W", "T", "F", "S", "S"],
-            todayRow: 3,
-            todayColumn: 1,
-            verifiedCount: 9,
-            preservedCount: 1,
-            dueCount: 11,
-            hasHistory: true,
-            emptyMessage: ""
+            days: marks.enumerated().map { index, mark in
+                MomentumDay(
+                    column: index,
+                    label: Weekday.allCases[index].shortLabel,
+                    mark: mark,
+                    isToday: index == 3
+                )
+            },
+            verifiedCount: 2,
+            preservedCount: 0,
+            targetCount: 4,
+            hasSchedule: true
         )
     )
     .padding(18)
     .background(Theme.canvas)
 }
 
-#Preview("Momentum · day one") {
+#Preview("Momentum · mixed week") {
+    let marks: [MomentumMark] = [.verified, .preserved, .verified, .missed, .verified, .rest, .unresolved]
+
+    return MomentumSection(
+        field: MomentumField(
+            days: marks.enumerated().map { index, mark in
+                MomentumDay(
+                    column: index,
+                    label: Weekday.allCases[index].shortLabel,
+                    mark: mark,
+                    isToday: index == 6
+                )
+            },
+            verifiedCount: 3,
+            preservedCount: 1,
+            targetCount: 5,
+            hasSchedule: true
+        ),
+        onTap: {}
+    )
+    .padding(18)
+    .background(Theme.canvas)
+}
+
+#Preview("Momentum · week one") {
     MomentumSection(
         field: MomentumField(
-            weeks: Array(
-                repeating: [.blank, .blank, .blank, .blank, .blank, .blank, .blank],
-                count: 4
-            ),
-            weekdayLabels: ["M", "T", "W", "T", "F", "S", "S"],
-            todayRow: 3,
-            todayColumn: 2,
+            days: (0..<7).map { index in
+                MomentumDay(
+                    column: index,
+                    label: Weekday.allCases[index].shortLabel,
+                    mark: index < 4 ? .planned : .rest,
+                    isToday: index == 0
+                )
+            },
             verifiedCount: 0,
             preservedCount: 0,
-            dueCount: 0,
-            hasHistory: false,
-            emptyMessage: "Your record starts tomorrow."
+            targetCount: 4,
+            hasSchedule: true
         )
     )
     .padding(18)

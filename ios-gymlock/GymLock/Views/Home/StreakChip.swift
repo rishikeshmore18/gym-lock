@@ -24,6 +24,17 @@ struct StreakChip: View {
     /// The orange of the supplied flame artwork, so the resting icon and the
     /// animated one are recognisably the same object.
     private static let flameOrange = Color(red: 1, green: 0.451, blue: 0)
+    /// A hot core at the base fading to a deeper tip — the way a flame is
+    /// actually lit, rather than a symbol filled with one flat colour.
+    private static let flameGradient = LinearGradient(
+        colors: [
+            Color(red: 0.847, green: 0.153, blue: 0.075),
+            flameOrange,
+            Color(red: 1, green: 0.769, blue: 0.180),
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
 
     var body: some View {
         Button {
@@ -46,9 +57,17 @@ struct StreakChip: View {
 
     private var capsule: some View {
         HStack(spacing: 6) {
+            // The flame is always lit. A grey flame at zero reads as "you have
+            // nothing", which punishes someone for opening the app; the zero is
+            // carried by the number alone, and the icon stays the same object
+            // it will be tomorrow, just a little cooler until then.
             Image(systemName: "flame.fill")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(flameTint)
+                .foregroundStyle(Self.flameGradient)
+                // A touch of heat thrown onto the glass behind it, so the icon
+                // sits in the capsule rather than on top of it.
+                .shadow(color: Self.flameOrange.opacity(streak > 0 ? 0.45 : 0.28), radius: 4, y: 1)
+                .saturation(streak > 0 ? 1 : 0.85)
 
             Text("\(streak)")
                 .font(.system(size: 16, weight: .bold))
@@ -61,12 +80,6 @@ struct StreakChip: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
             onCapsuleFrame?($0)
         }
-    }
-
-    /// A zero streak is shown in grey, never red, and never as a broken flame.
-    /// Nobody opens a gym app to be told off by an icon.
-    private var flameTint: Color {
-        streak > 0 ? Self.flameOrange : Theme.inkTertiary
     }
 
     static func accessibilityLabel(for streak: Int) -> String {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// What one day contributed to the record.
+/// What one day contributed to the week.
 ///
 /// The distinction between `verified` and `preserved` is deliberate and is never
 /// blurred: one of them is a trip to the gym, the other is a home session that
@@ -16,71 +16,90 @@ enum MomentumMark: Equatable {
     /// Skipped or rescheduled on purpose, or a technical failure. Neither
     /// credited nor punished.
     case excused
-    /// A training day still ahead.
+    /// A training day still ahead, including today before it resolves.
     case planned
-    /// Not a training day, or before the record began. Drawn as a whisper so
-    /// the field keeps its rhythm without implying anything happened.
-    case blank
+    /// A training day that has passed with nothing recorded. Drawn as an open
+    /// ring, never as a miss: no record is not evidence of a failure.
+    case unresolved
+    /// Not a training day. Drawn as a whisper so the week keeps its rhythm
+    /// without implying anything was expected.
+    case rest
 }
 
-/// Four weeks of the user's record, as marks.
-///
-/// This is the accumulated-proof layer of home. It answers a different question
-/// from the cards above it — not "what do I do now" but "am I becoming someone
-/// who shows up" — and it is built entirely from recorded outcomes. A day with
-/// nothing recorded stays blank: an unrecorded day is not evidence of a miss,
-/// and the app never draws one as if it were.
-struct MomentumField: Equatable {
-    /// Four weeks, oldest first, each exactly seven days Monday-first.
-    var weeks: [[MomentumMark]]
-    /// Single-letter column headers, Monday-first.
-    var weekdayLabels: [String]
-    /// Where today sits in the field, so it can be marked without being counted
-    /// as anything yet.
-    var todayRow: Int
-    var todayColumn: Int
+/// One column of the week.
+struct MomentumDay: Equatable, Identifiable {
+    var id: Int { column }
+    /// 0 = Monday.
+    var column: Int
+    /// Three-letter header, e.g. "Mon".
+    var label: String
+    var mark: MomentumMark
+    var isToday: Bool
+}
 
+/// The current week's record.
+///
+/// This is the proof layer of home. It answers a different question from the
+/// cards above it — not "what do I do now" but "am I actually doing this" — and
+/// it is built entirely from recorded outcomes and the user's own schedule.
+/// Nothing here is estimated, and no day is ever drawn as a miss unless a miss
+/// was recorded.
+struct MomentumField: Equatable {
+    /// Exactly seven days, Monday-first.
+    var days: [MomentumDay]
+    /// Verified gym visits inside this week.
     var verifiedCount: Int
+    /// Home sessions inside this week, reported separately and never folded
+    /// into the headline number.
     var preservedCount: Int
-    /// Days in the window that actually resolved, one way or another.
-    var dueCount: Int
-    var hasHistory: Bool
-    /// Shown in place of the metric until there is a record to show.
-    var emptyMessage: String
+    /// Sessions the user planned for this week — the denominator.
+    var targetCount: Int
+    /// False when no training days are configured, which is the one case where
+    /// there is no honest fraction to show.
+    var hasSchedule: Bool
 
     static let empty = MomentumField(
-        weeks: [],
-        weekdayLabels: [],
-        todayRow: 0,
-        todayColumn: 0,
+        days: [],
         verifiedCount: 0,
         preservedCount: 0,
-        dueCount: 0,
-        hasHistory: false,
-        emptyMessage: "Your record starts with your first session."
+        targetCount: 0,
+        hasSchedule: false
     )
 
     // MARK: Derived copy
 
-    /// The headline metric, or nil while there is nothing honest to count.
-    var summaryValue: String? {
-        guard hasHistory, dueCount > 0 else { return nil }
-        return "\(verifiedCount) / \(dueCount)"
+    /// The headline metric: gym visits against sessions planned this week.
+    var summaryValue: String {
+        guard hasSchedule, targetCount > 0 else { return "—" }
+        return "\(verifiedCount)/\(targetCount)"
     }
 
-    var summaryLabel: String { "showed up" }
+    var caption: String {
+        hasSchedule && targetCount > 0 ? "THIS WEEK" : "NO DAYS SET"
+    }
 
-    /// Home sessions, reported separately rather than folded into the metric.
-    var preservedNote: String? {
+    /// Home sessions get their own line rather than inflating the fraction.
+    var homeNote: String? {
         guard preservedCount > 0 else { return nil }
-        return preservedCount == 1 ? "+1 kept at home" : "+\(preservedCount) kept at home"
+        return preservedCount == 1 ? "+1 at home" : "+\(preservedCount) at home"
+    }
+
+    var accessibilityText: String {
+        guard hasSchedule, targetCount > 0 else {
+            return "Momentum. No training days set yet."
+        }
+        var text = "Momentum. \(verifiedCount) of \(targetCount) planned gym sessions this week."
+        if preservedCount > 0 {
+            text += " Plus \(preservedCount) kept at home."
+        }
+        return text
     }
 
     // MARK: Building
 
-    /// Builds the trailing four weeks from the ledger.
+    /// Builds the current week from the ledger and the user's plan.
     ///
-    /// Weeks are Monday-first regardless of locale so the field lines up with
+    /// The week is Monday-first regardless of locale so the field lines up with
     /// the schedule selector the user configured.
     static func build(
         log: MomentumLog,
@@ -94,98 +113,72 @@ struct MomentumField: Equatable {
 
         let today = calendar.startOfDay(for: now)
 
-        guard let thisWeek = mondayFirst.dateInterval(of: .weekOfYear, for: today),
-              let start = mondayFirst.date(byAdding: .day, value: -21, to: thisWeek.start)
-        else { return .empty }
+        guard let week = mondayFirst.dateInterval(of: .weekOfYear, for: today) else {
+            return .empty
+        }
 
+        // The plan is the source of truth for training days; the schedule is
+        // only a fallback for users who have not built a plan yet.
         var trainingDays = plan.enabledSlots.reduce(into: Set<Weekday>()) { $0.formUnion($1.days) }
         if trainingDays.isEmpty { trainingDays = schedule.trainingDays }
 
         let byDay = Dictionary(grouping: log.outcomes) { calendar.startOfDay(for: $0.date) }
 
-        var weeks: [[MomentumMark]] = []
-        var todayRow = 3
-        var todayColumn = 0
+        var days: [MomentumDay] = []
         var verified = 0
         var preserved = 0
-        var due = 0
 
-        for week in 0..<4 {
-            var row: [MomentumMark] = []
-
-            for column in 0..<7 {
-                guard let day = mondayFirst.date(
-                    byAdding: .day,
-                    value: week * 7 + column,
-                    to: start
-                ) else {
-                    row.append(.blank)
-                    continue
-                }
-
-                if calendar.isDate(day, inSameDayAs: today) {
-                    todayRow = week
-                    todayColumn = column
-                }
-
-                let weekday = Weekday(rawValue: calendar.component(.weekday, from: day))
-                let isTrainingDay = weekday.map { trainingDays.contains($0) } ?? false
-
-                if let outcomes = byDay[day], !outcomes.isEmpty {
-                    let mark = dominantMark(outcomes)
-                    row.append(mark)
-                    due += 1
-                    if mark == .verified { verified += 1 }
-                    if mark == .preserved { preserved += 1 }
-                } else if day >= today {
-                    row.append(isTrainingDay ? .planned : .blank)
-                } else {
-                    // A past day with nothing recorded. Either the ledger had
-                    // not begun or the session was never resolved — neither is
-                    // evidence of a miss, so it stays blank.
-                    row.append(.blank)
-                }
+        for column in 0..<7 {
+            guard let day = mondayFirst.date(byAdding: .day, value: column, to: week.start) else {
+                continue
             }
 
-            weeks.append(row)
+            let weekday = Weekday(rawValue: calendar.component(.weekday, from: day))
+            let isTrainingDay = weekday.map { trainingDays.contains($0) } ?? false
+            let isToday = calendar.isDate(day, inSameDayAs: today)
+
+            let mark: MomentumMark
+            if let outcomes = byDay[day], !outcomes.isEmpty {
+                mark = dominantMark(outcomes)
+                if mark == .verified { verified += 1 }
+                if mark == .preserved { preserved += 1 }
+            } else if !isTrainingDay {
+                mark = .rest
+            } else if day >= today {
+                mark = .planned
+            } else {
+                // A past training day with nothing recorded. Either the ledger
+                // had not begun or the morning was never resolved — neither is
+                // evidence of a miss, so it stays open rather than broken.
+                mark = .unresolved
+            }
+
+            days.append(
+                MomentumDay(
+                    column: column,
+                    label: weekday?.shortLabel ?? "",
+                    mark: mark,
+                    isToday: isToday
+                )
+            )
         }
 
         return MomentumField(
-            weeks: weeks,
-            weekdayLabels: Weekday.allCases.map { String($0.shortLabel.prefix(1)) },
-            todayRow: todayRow,
-            todayColumn: todayColumn,
+            days: days,
             verifiedCount: verified,
             preservedCount: preserved,
-            dueCount: due,
-            hasHistory: !log.outcomes.isEmpty,
-            emptyMessage: startMessage(plan: plan, now: now, calendar: calendar)
+            // A gym visit on an unplanned day still counts, so the denominator
+            // grows to hold it rather than the fraction going above one.
+            targetCount: max(trainingDays.count, verified),
+            hasSchedule: !trainingDays.isEmpty
         )
     }
 
-    /// The best thing a single day can be said to have been.
+    /// The best thing a single day can honestly be said to have been.
     private static func dominantMark(_ outcomes: [SessionOutcome]) -> MomentumMark {
         if outcomes.contains(where: { $0.kind == .showedUp }) { return .verified }
         if outcomes.contains(where: { $0.kind == .homeWorkout }) { return .preserved }
         if outcomes.contains(where: { $0.kind == .missed }) { return .missed }
         return .excused
-    }
-
-    private static func startMessage(
-        plan: MorningPlan,
-        now: Date,
-        calendar: Calendar
-    ) -> String {
-        guard let next = plan.nextOccurrence(after: now, calendar: calendar) else {
-            return "Your record starts with your first session."
-        }
-        if calendar.isDateInToday(next.fireDate) { return "Your record starts today." }
-        if calendar.isDateInTomorrow(next.fireDate) { return "Your record starts tomorrow." }
-
-        let index = calendar.component(.weekday, from: next.fireDate) - 1
-        guard calendar.weekdaySymbols.indices.contains(index) else {
-            return "Your record starts with your first session."
-        }
-        return "Your record starts \(calendar.weekdaySymbols[index])."
     }
 }
