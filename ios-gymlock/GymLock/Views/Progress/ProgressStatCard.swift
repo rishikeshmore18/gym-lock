@@ -141,7 +141,7 @@ private struct PressableTileStyle: ButtonStyle {
             FlameEmblem()
         }
         ProgressStatCard(title: "Badges Earned", count: 0, digitStyle: .dark) {
-            LogoEmblem()
+            BadgeEmblem()
         }
     }
     .padding(20)

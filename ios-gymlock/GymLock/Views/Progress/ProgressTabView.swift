@@ -28,7 +28,7 @@ struct ProgressTabView: View {
                         digitStyle: .dark,
                         appearanceDelay: 0.08
                     ) {
-                        LogoEmblem()
+                        BadgeEmblem()
                     }
                 }
                 .padding(.horizontal, 20)
