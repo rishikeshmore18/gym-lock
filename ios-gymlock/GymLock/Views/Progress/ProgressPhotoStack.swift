@@ -32,6 +32,8 @@ struct ProgressPhotoStack: View {
     @State private var isDragging = false
     /// Whether the current gesture was judged vertical and handed to the page.
     @State private var isScrollingVertically = false
+    /// Which photograph last came to the front mid-drag, for the tick.
+    @State private var tickedSlot: Int?
 
     /// How much of the throw's projected travel counts towards the landing
     /// slot. A full projection sends a firm flick clean past the whole
@@ -40,6 +42,13 @@ struct ProgressPhotoStack: View {
     private static let momentum: CGFloat = 0.72
     /// Resistance applied past the first and last photograph.
     private static let edgeResistance: CGFloat = 0.3
+    /// Movement before a touch is judged a drag rather than a tap.
+    ///
+    /// Small on purpose. The gesture itself starts at zero distance so the deck
+    /// answers the finger on the first frame; this only decides which way the
+    /// gesture is going, and anything larger is felt as the deck hesitating
+    /// before it moves.
+    private static let axisThreshold: CGFloat = 5
 
     private var focusedSlot: Int {
         slides.firstIndex { $0.id == focusedID } ?? max(slides.count - 1, 0)
@@ -80,7 +89,11 @@ struct ProgressPhotoStack: View {
             alignment: .leading
         )
         .contentShape(.rect)
-        .gesture(dragGesture)
+        // Simultaneous, so the page's vertical ScrollView keeps its own pan.
+        // An exclusive gesture at zero distance would swallow the scroll, and
+        // a non-zero distance is exactly what made the deck wait before it
+        // started moving.
+        .simultaneousGesture(dragGesture)
         .accessibilityElement(children: .contain)
     }
 
@@ -95,25 +108,31 @@ struct ProgressPhotoStack: View {
             regionWidth: regionWidth
         )
 
-        return Button {
-            guard !isDragging else { return }
-            withAnimation(settle) { onFocus(slide) }
-        } label: {
-            ProgressPhotoCard(
-                slide: slide,
-                dimming: geometry.opacity,
-                // Only the ends are labelled, and a label on a card buried at
-                // the back is just noise.
-                showsMarker: slide.markerText != nil,
-                width: cardWidth
-            )
-        }
-        .buttonStyle(.plain)
+        // Deliberately not a Button. A button installs its own gesture, and a
+        // child's gesture outranks the container's, so the drag was only
+        // delivered once the button's recogniser gave up — on finger lift.
+        // That is what made the deck jump to its new arrangement after the
+        // gesture instead of moving with the hand. Taps are handled by the one
+        // container gesture below, which can tell a tap from a drag itself.
+        return ProgressPhotoCard(
+            slide: slide,
+            dimming: geometry.opacity,
+            // Only the ends are labelled, and a label on a card buried at
+            // the back is just noise.
+            showsMarker: slide.markerText != nil,
+            width: cardWidth
+        )
         .scaleEffect(geometry.scale)
         .offset(x: geometry.x)
         .zIndex(geometry.zIndex)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel(for: slide))
         .accessibilityAddTraits(slide.id == focusedID ? [.isButton, .isSelected] : .isButton)
+        // Removing the button removed its accessibility action, so the card
+        // brings its own — VoiceOver must still be able to activate it.
+        .accessibilityAction {
+            withAnimation(settle) { onFocus(slide) }
+        }
     }
 
     /// The spring for a tap, where travel is short and known.
@@ -142,36 +161,68 @@ struct ProgressPhotoStack: View {
 
     // MARK: Drag
 
+    /// One gesture for the whole deck, tracking from the very first point.
+    ///
+    /// `minimumDistance: 0` is the heart of it. The deck has to redraw on the
+    /// frame the finger moves, not once a threshold has been cleared and
+    /// certainly not on release — the photographs are meant to move *with* the
+    /// hand. Because there is no per-card button any more, this gesture also
+    /// has to recognise a tap, which it does by measuring how far the touch
+    /// travelled before it was lifted.
     private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 8)
+        DragGesture(minimumDistance: 0)
             .onChanged { value in
                 // The card sits inside a vertical ScrollView, so the axis is
-                // decided once at the start of the gesture and honoured for
-                // the rest of it. Without this, a finger travelling down the
-                // page would also shuffle the photographs.
+                // decided once, as soon as there is enough movement to tell,
+                // and honoured for the rest of the gesture. Without this a
+                // finger travelling down the page would shuffle the photos.
                 if !isDragging, !isScrollingVertically {
-                    isScrollingVertically =
-                        abs(value.translation.height) > abs(value.translation.width)
-                    if !isScrollingVertically { dragStart = CGFloat(focusedSlot) }
-                }
-                guard !isScrollingVertically else { return }
+                    let dx = abs(value.translation.width)
+                    let dy = abs(value.translation.height)
+                    guard max(dx, dy) >= Self.axisThreshold else { return }
 
-                isDragging = true
+                    isScrollingVertically = dy > dx
+                    guard !isScrollingVertically else { return }
+
+                    dragStart = CGFloat(focusedSlot)
+                    tickedSlot = focusedSlot
+                    isDragging = true
+                }
+                guard isDragging, !isScrollingVertically else { return }
+
                 // Dragging left (negative) moves forward in time, matching the
-                // left-to-right chronology of the stack.
-                dragPosition = resisted(dragStart - value.translation.width / slotTravel)
+                // left-to-right chronology of the stack. Written straight to
+                // state with no animation: the finger is the animation, and a
+                // spring here would put the deck behind the hand.
+                let next = resisted(dragStart - value.translation.width / slotTravel)
+                dragPosition = next
+
+                // A tick as each photograph reaches the front, the way a
+                // picker notches. Bounded by the number of photos, so a long
+                // glide cannot buzz continuously.
+                let nearest = Int(next.rounded().clamped(to: 0...lastSlot))
+                if nearest != tickedSlot {
+                    tickedSlot = nearest
+                    Haptics.selection()
+                }
             }
             .onEnded { value in
-                defer {
-                    // Cleared after the gesture resolves so the tap that ends
-                    // a drag cannot also select a card.
-                    Task { @MainActor in
-                        isDragging = false
-                        isScrollingVertically = false
-                    }
-                }
-                guard !isScrollingVertically else {
+                let wasDragging = isDragging
+                let wasVertical = isScrollingVertically
+                isDragging = false
+                isScrollingVertically = false
+                tickedSlot = nil
+
+                guard !wasVertical else {
                     dragPosition = nil
+                    return
+                }
+
+                // Never moved far enough to be a drag, so it was a tap on
+                // whichever card sits under the finger.
+                guard wasDragging else {
+                    dragPosition = nil
+                    handleTap(at: value.startLocation)
                     return
                 }
 
@@ -194,6 +245,41 @@ struct ProgressPhotoStack: View {
                     dragPosition = nil
                 }
             }
+    }
+
+    /// Brings the card under a tap to the front.
+    private func handleTap(at location: CGPoint) {
+        guard let index = slideIndex(at: location.x),
+              let slide = slides[safe: index],
+              slide.id != focusedID
+        else { return }
+        Haptics.selection()
+        withAnimation(settle) { onFocus(slide) }
+    }
+
+    /// Which card is under a horizontal point, front-most first.
+    ///
+    /// The cards overlap, so the test walks them in drawing order and takes the
+    /// nearest to the focus — tapping the visible sliver of Day 0 has to select
+    /// Day 0, not the card lying on top of it.
+    private func slideIndex(at x: CGFloat) -> Int? {
+        let hits = slides.indices.filter { index in
+            let geometry = ProgressPhotoLayout.geometry(
+                index: index,
+                position: position,
+                count: slides.count,
+                cardWidth: cardWidth,
+                regionWidth: regionWidth
+            )
+            // `scaleEffect` scales about the centre, so the drawn edges move
+            // in by half the difference.
+            let inset = cardWidth * (1 - geometry.scale) / 2
+            let left = geometry.x + inset
+            return x >= left && x <= left + cardWidth * geometry.scale
+        }
+        return hits.max { first, second in
+            abs(CGFloat(first) - position) > abs(CGFloat(second) - position)
+        }
     }
 
     /// Softens travel past the ends, so the deck resists rather than stopping

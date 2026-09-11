@@ -24,6 +24,12 @@ final class ProgressPhotoStore {
     private(set) var isImporting = false
     /// Set when an import fails, for the alert. Cleared on dismissal.
     var failureMessage: String?
+    /// A photo held back because that day already has one.
+    ///
+    /// Nothing touches the disk while this is set: the bytes wait in memory
+    /// until the user decides, so declining costs nothing and there is never a
+    /// moment where both photos exist and one has to be cleaned up afterwards.
+    private(set) var pending: PendingProgressPhoto?
 
     private let defaults: UserDefaults
     private static let storageKey = "gymlock.progressPhotos"
@@ -59,7 +65,81 @@ final class ProgressPhotoStore {
         defaults.set(data, forKey: Self.storageKey)
     }
 
+    /// The photo already stored for a given day, if there is one.
+    ///
+    /// One photo per day is what keeps the card meaningful: the stack is a
+    /// comparison across time, and ten photos from one morning are ten copies
+    /// of the same moment crowding out the months on either side of them.
+    func photo(on date: Date) -> ProgressPhoto? {
+        let calendar = Calendar.current
+        return photos.first { calendar.isDate($0.createdAt, inSameDayAs: date) }
+    }
+
     // MARK: - Writing
+
+    /// Takes a photo from any of the three sources.
+    ///
+    /// Stops at the day check and hands the decision back to the user when that
+    /// day is already spoken for; otherwise it writes straight through.
+    func add(
+        imageData: Data,
+        source: ProgressPhotoSource,
+        createdAt: Date?
+    ) async {
+        guard !isImporting, pending == nil else { return }
+
+        let date = createdAt ?? Date()
+        if let existing = photo(on: date) {
+            pending = PendingProgressPhoto(
+                imageData: imageData,
+                source: source,
+                createdAt: date,
+                existing: existing
+            )
+            return
+        }
+
+        await commit(imageData: imageData, source: source, createdAt: date)
+    }
+
+    /// Swaps the day's existing photo for the one waiting.
+    ///
+    /// The replacement is written before the original is deleted, so a failed
+    /// write leaves the user with the photo they already had rather than with
+    /// nothing at all.
+    func replacePending() async {
+        guard let request = pending else { return }
+        pending = nil
+
+        let before = photos.count
+        await commit(
+            imageData: request.imageData,
+            source: request.source,
+            createdAt: request.createdAt
+        )
+        guard photos.count > before else { return }
+        await remove(request.existing)
+    }
+
+    /// Throws the waiting photo away, keeping the one already saved.
+    func discardPending() {
+        pending = nil
+    }
+
+    /// Deletes a photo and the files behind it.
+    func remove(_ photo: ProgressPhoto) async {
+        photos.removeAll { $0.id == photo.id }
+        persist()
+
+        await ProgressPhotoImageLoader.shared.invalidate(photo.thumbnailName)
+
+        let names = [photo.fileName, photo.thumbnailName]
+        await Task.detached(priority: .utility) {
+            for name in names {
+                try? FileManager.default.removeItem(at: Self.url(forFileName: name))
+            }
+        }.value
+    }
 
     /// Decodes, downsamples, writes and records one photo.
     ///
@@ -70,10 +150,10 @@ final class ProgressPhotoStore {
     /// `isImporting` also acts as the re-entrancy guard: SwiftUI can deliver a
     /// picker result more than once as the view reloads, and without this a
     /// single selection could be written twice.
-    func add(
+    private func commit(
         imageData: Data,
         source: ProgressPhotoSource,
-        createdAt: Date?
+        createdAt: Date
     ) async {
         guard !isImporting else { return }
         isImporting = true
@@ -100,7 +180,7 @@ final class ProgressPhotoStore {
 
         let photo = ProgressPhoto(
             id: id,
-            createdAt: createdAt ?? Date(),
+            createdAt: createdAt,
             fileName: fileName,
             thumbnailName: thumbnailName,
             source: source
@@ -201,9 +281,11 @@ final class ProgressPhotoStore {
     #if DEBUG
     /// Fills the store with real files so the photo-count states can be seen.
     ///
-    /// Goes through the same `add` path as a genuine import rather than
-    /// injecting metadata directly — a fixture that skips the write is a
-    /// fixture that cannot catch a bug in the write.
+    /// Writes through `commit`, the same path a genuine import ends on, rather
+    /// than injecting metadata directly — a fixture that skips the write is a
+    /// fixture that cannot catch a bug in the write. It deliberately steps over
+    /// the one-per-day check in `add`, which a dense fixture would otherwise
+    /// trip on its second photo and stall waiting for an answer.
     func debugSeed(count: Int) async {
         await debugClear()
 
@@ -216,7 +298,7 @@ final class ProgressPhotoStore {
                 step * ProgressPhotoDemoArtwork.frameCount / max(count, 1)
             )
             guard let data = frame?.jpegData(compressionQuality: 0.9) else { continue }
-            await add(
+            await commit(
                 imageData: data,
                 source: .camera,
                 createdAt: now.addingTimeInterval(-daysAgo * 86_400)
@@ -231,6 +313,7 @@ final class ProgressPhotoStore {
             try? FileManager.default.removeItem(at: directory)
         }.value
         photos = []
+        pending = nil
         persist()
     }
     #endif

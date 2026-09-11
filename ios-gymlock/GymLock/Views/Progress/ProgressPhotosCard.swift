@@ -185,6 +185,10 @@ struct ProgressPhotosCard: View {
     /// The single way a photograph comes to the front, whether it was tapped
     /// or a drag landed on it. The animation belongs to the caller, which is
     /// what lets a throw glide for longer than a tap.
+    ///
+    /// No haptic here: the stack already ticks as each photograph passes the
+    /// front, both under the finger and on a tap, and ticking again when the
+    /// same change is committed would double up on every gesture.
     private func focus(_ slide: ProgressPhotoSlide) {
         switch slide.content {
         case let .demo(index):
@@ -194,7 +198,5 @@ struct ProgressPhotosCard: View {
             guard photo.id != photos[focusedIndex].id else { return }
             focusedPhotoID = photo.id
         }
-        // One tick per settled change — never per drag frame.
-        Haptics.selection()
     }
 }

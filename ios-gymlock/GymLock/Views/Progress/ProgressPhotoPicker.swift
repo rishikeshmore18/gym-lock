@@ -75,6 +75,7 @@ struct ProgressPhotoImporter: ViewModifier {
             ) {
                 Button("OK", role: .cancel) { store.failureMessage = nil }
             }
+            .progressPhotoDayConflict(store: store)
     }
 
     // MARK: Sources
