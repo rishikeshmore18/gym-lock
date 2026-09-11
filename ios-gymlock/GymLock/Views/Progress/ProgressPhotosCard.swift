@@ -20,7 +20,8 @@ struct ProgressPhotosCard: View {
     @State private var focusedPhotoID: UUID?
     /// Front card while the demonstration stack is showing.
     @State private var demoFocus = ProgressPhotoDemoArtwork.frameCount - 1
-    @State private var isShowingSourceDialog = false
+    /// Raised by the Add Photo menu, consumed by the importer.
+    @State private var pendingSource: ProgressPhotoSourceChoice?
     @State private var contentWidth: CGFloat = 0
     @State private var hasAppeared = false
 
@@ -100,7 +101,7 @@ struct ProgressPhotosCard: View {
                 focusedPhotoID = nil
             }
         }
-        .progressPhotoImporter(store: store, isShowingSourceDialog: $isShowingSourceDialog)
+        .progressPhotoImporter(store: store, pendingSource: $pendingSource)
     }
 
     // MARK: Header
@@ -141,8 +142,7 @@ struct ProgressPhotosCard: View {
                 focusedID: focusedID,
                 regionWidth: width,
                 reduceMotion: reduceMotion,
-                onTap: focus,
-                onStep: step
+                onFocus: focus
             )
         } else {
             // First layout pass, before the width is known. Reserves nothing
@@ -173,36 +173,18 @@ struct ProgressPhotosCard: View {
     }
 
     private var addButton: some View {
-        Button {
-            Haptics.soft()
-            isShowingSourceDialog = true
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "plus")
-                    .font(.system(size: 14, weight: .bold))
-                Text("Add Photo")
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-            }
-            .foregroundStyle(Theme.ink)
-            .padding(.horizontal, 15)
-            // Clears the 44pt minimum target without needing a hit-test hack.
-            .frame(height: 44)
-            .background(Theme.surfaceMuted, in: .capsule)
-            .overlay {
-                Capsule().strokeBorder(Theme.border, lineWidth: 1)
-            }
-            .opacity(store.isImporting ? 0.55 : 1)
-        }
-        .buttonStyle(.plain)
-        .disabled(store.isImporting)
-        .accessibilityLabel("Add progress photo")
-        .accessibilityHint("Choose Camera, Photos, or Files.")
+        ProgressPhotoAddButton(
+            pendingSource: $pendingSource,
+            isBusy: store.isImporting,
+            hasCamera: ProgressPhotoCameraAvailability.hasCamera
+        )
     }
 
     // MARK: Focus
 
+    /// The single way a photograph comes to the front, whether it was tapped
+    /// or a drag landed on it. The animation belongs to the caller, which is
+    /// what lets a throw glide for longer than a tap.
     private func focus(_ slide: ProgressPhotoSlide) {
         switch slide.content {
         case let .demo(index):
@@ -211,20 +193,6 @@ struct ProgressPhotosCard: View {
         case let .photo(photo):
             guard photo.id != photos[focusedIndex].id else { return }
             focusedPhotoID = photo.id
-        }
-        Haptics.selection()
-    }
-
-    /// Moves one photo along the timeline. `+1` is towards today.
-    private func step(_ delta: Int) {
-        if isDemo {
-            let target = min(max(demoFocus + delta, 0), ProgressPhotoDemoArtwork.frameCount - 1)
-            guard target != demoFocus else { return }
-            demoFocus = target
-        } else {
-            let target = min(max(focusedIndex + delta, 0), photos.count - 1)
-            guard target != focusedIndex else { return }
-            focusedPhotoID = photos[target].id
         }
         // One tick per settled change — never per drag frame.
         Haptics.selection()

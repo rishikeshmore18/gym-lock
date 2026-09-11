@@ -82,12 +82,7 @@ private struct StackStage: View {
                 focusedID: activeID,
                 regionWidth: proxy.size.width,
                 reduceMotion: reduceMotion,
-                onTap: { focused = $0.id },
-                onStep: { step in
-                    guard let index = slides.firstIndex(where: { $0.id == activeID }) else { return }
-                    let target = min(max(index + step, 0), slides.count - 1)
-                    focused = slides[target].id
-                }
+                onFocus: { focused = $0.id }
             )
         }
         .frame(height: 210)

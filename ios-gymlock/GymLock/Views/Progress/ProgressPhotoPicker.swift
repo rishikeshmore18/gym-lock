@@ -11,7 +11,8 @@ import UniformTypeIdentifiers
 /// a duplicate from slipping in when SwiftUI re-delivers a picker result.
 struct ProgressPhotoImporter: ViewModifier {
     let store: ProgressPhotoStore
-    @Binding var isShowingSourceDialog: Bool
+    /// Set by the Add Photo menu, cleared as soon as it has been acted on.
+    @Binding var pendingSource: ProgressPhotoSourceChoice?
 
     @State private var isShowingCamera = false
     @State private var isShowingFiles = false
@@ -21,19 +22,12 @@ struct ProgressPhotoImporter: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .confirmationDialog(
-                "Add progress photo",
-                isPresented: $isShowingSourceDialog,
-                titleVisibility: .visible
-            ) {
-                // Offered only where a camera actually exists, so the user is
-                // never sent into a dead end.
-                if ProgressPhotoCameraAvailability.hasCamera {
-                    Button("Take Photo") { present { startCamera() } }
-                }
-                Button("Choose from Photos") { present { isShowingLibrary = true } }
-                Button("Choose from Files") { present { isShowingFiles = true } }
-                Button("Cancel", role: .cancel) {}
+            .onChange(of: pendingSource) { _, choice in
+                guard let choice else { return }
+                // Cleared straight away so picking the same source twice in a
+                // row still registers as a change.
+                pendingSource = nil
+                route(choice)
             }
             .photosPicker(
                 isPresented: $isShowingLibrary,
@@ -85,11 +79,19 @@ struct ProgressPhotoImporter: ViewModifier {
 
     // MARK: Sources
 
-    /// Presents after the confirmation dialog has finished dismissing.
+    private func route(_ choice: ProgressPhotoSourceChoice) {
+        switch choice {
+        case .camera: present { startCamera() }
+        case .library: present { isShowingLibrary = true }
+        case .files: present { isShowingFiles = true }
+        }
+    }
+
+    /// Presents after the menu has finished collapsing.
     ///
-    /// Raising a sheet in the same runloop turn that dismisses another one is
-    /// the classic way to get a presentation silently dropped — the user taps
-    /// "Choose from Photos" and nothing happens.
+    /// Raising a sheet in the same runloop turn that dismisses another
+    /// presentation is the classic way to get it silently dropped — the user
+    /// taps "Choose from Photos" and nothing happens.
     private func present(_ action: @escaping () -> Void) {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
@@ -177,11 +179,9 @@ extension View {
     /// Attaches the photo import flow to a view.
     func progressPhotoImporter(
         store: ProgressPhotoStore,
-        isShowingSourceDialog: Binding<Bool>
+        pendingSource: Binding<ProgressPhotoSourceChoice?>
     ) -> some View {
-        modifier(
-            ProgressPhotoImporter(store: store, isShowingSourceDialog: isShowingSourceDialog)
-        )
+        modifier(ProgressPhotoImporter(store: store, pendingSource: pendingSource))
     }
 }
 

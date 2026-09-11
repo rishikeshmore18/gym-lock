@@ -7,6 +7,12 @@ import SwiftUI
 /// of photos or a deck of cards. That is why there is no "swipe to see your
 /// progress" caption anywhere — a label explaining an interaction is usually a
 /// sign the interaction does not look like one.
+///
+/// The stack is driven by one continuous `position` rather than by a selected
+/// index. Whole numbers are settled arrangements and everything in between is
+/// a real, drawable state, which is what lets a finger drag the deck through
+/// several photographs in one movement instead of nudging it one notch at a
+/// time.
 struct ProgressPhotoStack: View {
     let slides: [ProgressPhotoSlide]
     /// The card currently in front.
@@ -14,21 +20,26 @@ struct ProgressPhotoStack: View {
     /// Width available for the whole stack.
     let regionWidth: CGFloat
     let reduceMotion: Bool
-    let onTap: (ProgressPhotoSlide) -> Void
-    /// +1 moves towards the latest photo, -1 towards Day 0.
-    let onStep: (Int) -> Void
+    /// Called when a card should become the focused one.
+    let onFocus: (ProgressPhotoSlide) -> Void
 
-    /// Live finger travel, in points.
-    @State private var dragTranslation: CGFloat = 0
+    /// Continuous position while a finger is down. `nil` means settled, and
+    /// the focused card is the source of truth again.
+    @State private var dragPosition: CGFloat?
+    /// Where the deck sat when the current gesture began.
+    @State private var dragStart: CGFloat = 0
     /// Set once a drag has travelled far enough to be a drag rather than a tap.
     @State private var isDragging = false
     /// Whether the current gesture was judged vertical and handed to the page.
     @State private var isScrollingVertically = false
 
-    /// Past this, a release changes the focused photo.
-    private static let commitDistance: CGFloat = 48
-    /// A flick shorter than the threshold still commits if it is fast enough.
-    private static let commitVelocity: CGFloat = 320
+    /// How much of the throw's projected travel counts towards the landing
+    /// slot. A full projection sends a firm flick clean past the whole
+    /// history; none at all makes a fast flick and a slow drag land in the
+    /// same place, which is what makes a deck feel nailed down.
+    private static let momentum: CGFloat = 0.55
+    /// Resistance applied past the first and last photograph.
+    private static let edgeResistance: CGFloat = 0.3
 
     private var focusedSlot: Int {
         slides.firstIndex { $0.id == focusedID } ?? max(slides.count - 1, 0)
@@ -38,15 +49,21 @@ struct ProgressPhotoStack: View {
         ProgressPhotoLayout.cardWidth(for: slides.count, in: regionWidth)
     }
 
-    /// Where the stack is between two cards while a finger is down.
+    /// Finger travel that advances the deck by one photograph.
     ///
-    /// Whole numbers are settled positions; the fraction in between is what
-    /// makes the cards track the finger continuously instead of snapping only
-    /// on release.
-    private var livePosition: CGFloat {
-        guard regionWidth > 0 else { return CGFloat(focusedSlot) }
-        let slotTravel = max(cardWidth * 0.55, 1)
-        return CGFloat(focusedSlot) - dragTranslation / slotTravel
+    /// Undamped on purpose: the deck moves with the hand at its own scale
+    /// rather than lagging behind it at a fraction of the speed.
+    private var slotTravel: CGFloat {
+        max(cardWidth * 0.58, 1)
+    }
+
+    /// Where the deck is right now, settled or mid-drag.
+    private var position: CGFloat {
+        dragPosition ?? CGFloat(focusedSlot)
+    }
+
+    private var lastSlot: CGFloat {
+        CGFloat(max(slides.count - 1, 0))
     }
 
     var body: some View {
@@ -70,7 +87,7 @@ struct ProgressPhotoStack: View {
     private func card(_ slide: ProgressPhotoSlide, at index: Int) -> some View {
         let geometry = ProgressPhotoLayout.geometry(
             index: index,
-            position: livePosition,
+            position: position,
             count: slides.count,
             cardWidth: cardWidth,
             regionWidth: regionWidth
@@ -78,7 +95,7 @@ struct ProgressPhotoStack: View {
 
         return Button {
             guard !isDragging else { return }
-            onTap(slide)
+            withAnimation(settle) { onFocus(slide) }
         } label: {
             ProgressPhotoCard(
                 slide: slide,
@@ -93,16 +110,28 @@ struct ProgressPhotoStack: View {
         .scaleEffect(geometry.scale)
         .offset(x: geometry.x)
         .zIndex(geometry.zIndex)
-        .animation(motion, value: focusedID)
-        .animation(motion, value: slides.count)
         .accessibilityLabel(accessibilityLabel(for: slide))
         .accessibilityAddTraits(slide.id == focusedID ? [.isButton, .isSelected] : .isButton)
     }
 
-    /// One spring for every card, so the whole stack rearranges as a single
-    /// movement rather than a set of independent animations.
-    private var motion: Animation? {
-        reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.38, dampingFraction: 0.86)
+    /// The spring for a tap, where travel is short and known.
+    private var settle: Animation {
+        reduceMotion
+            ? .easeInOut(duration: 0.18)
+            : .spring(response: 0.38, dampingFraction: 0.86)
+    }
+
+    /// The spring for a release, stretched according to how far the deck still
+    /// has to travel.
+    ///
+    /// A fixed spring makes a four-card glide look hurried and a small
+    /// correction look sluggish, because both are given the same time. Letting
+    /// the duration grow with the distance is what reads as the deck carrying
+    /// its own weight.
+    private func glide(slots: CGFloat) -> Animation {
+        guard !reduceMotion else { return .easeInOut(duration: 0.18) }
+        let response = min(0.34 + Double(slots) * 0.08, 0.66)
+        return .spring(response: response, dampingFraction: 0.84)
     }
 
     // MARK: Drag
@@ -117,18 +146,17 @@ struct ProgressPhotoStack: View {
                 if !isDragging, !isScrollingVertically {
                     isScrollingVertically =
                         abs(value.translation.height) > abs(value.translation.width)
+                    if !isScrollingVertically { dragStart = CGFloat(focusedSlot) }
                 }
                 guard !isScrollingVertically else { return }
 
                 isDragging = true
-                // Damped: the stack should feel attached to the finger, not
-                // dragged around by it. Full 1:1 travel makes a small hand
-                // movement throw the cards across the card.
-                dragTranslation = value.translation.width * 0.55
+                // Dragging left (negative) moves forward in time, matching the
+                // left-to-right chronology of the stack.
+                dragPosition = resisted(dragStart - value.translation.width / slotTravel)
             }
             .onEnded { value in
                 defer {
-                    withAnimation(motion) { dragTranslation = 0 }
                     // Cleared after the gesture resolves so the tap that ends
                     // a drag cannot also select a card.
                     Task { @MainActor in
@@ -136,20 +164,38 @@ struct ProgressPhotoStack: View {
                         isScrollingVertically = false
                     }
                 }
-                guard !isScrollingVertically else { return }
+                guard !isScrollingVertically else {
+                    dragPosition = nil
+                    return
+                }
 
-                let projected = value.predictedEndTranslation.width
+                // `predictedEndTranslation` is where the system thinks the
+                // finger would coast to, so a throw keeps going after release
+                // instead of stopping dead where contact was lost.
                 let travelled = value.translation.width
-                let isFlick = abs(projected) > Self.commitVelocity
+                let projected = value.predictedEndTranslation.width
+                let carried = travelled + (projected - travelled) * Self.momentum
 
-                // Dragging left (negative) moves forward in time, matching the
-                // left-to-right chronology of the stack.
-                if travelled < -Self.commitDistance || (isFlick && projected < 0) {
-                    onStep(1)
-                } else if travelled > Self.commitDistance || (isFlick && projected > 0) {
-                    onStep(-1)
+                let landing = (dragStart - carried / slotTravel)
+                    .clamped(to: 0...lastSlot)
+                let target = Int(landing.rounded())
+                let remaining = abs(position - CGFloat(target))
+
+                withAnimation(glide(slots: remaining)) {
+                    if let slide = slides[safe: target], slide.id != focusedID {
+                        onFocus(slide)
+                    }
+                    dragPosition = nil
                 }
             }
+    }
+
+    /// Softens travel past the ends, so the deck resists rather than stopping
+    /// dead — the give is what tells the hand it has reached the beginning.
+    private func resisted(_ value: CGFloat) -> CGFloat {
+        if value < 0 { return value * Self.edgeResistance }
+        if value > lastSlot { return lastSlot + (value - lastSlot) * Self.edgeResistance }
+        return value
     }
 
     // MARK: Accessibility
@@ -221,6 +267,8 @@ enum ProgressPhotoLayout {
         let depth = min(abs(delta), 3)
 
         // How far the focused card grows, and how far back the others sit.
+        // Both interpolate continuously with `depth`, so a half-dragged deck
+        // draws a genuine half-way state rather than snapping between looks.
         let scale: CGFloat = ProgressPhotoMetrics.focusScale - depth * 0.045
         let opacity: Double = 1 - Double(depth) * 0.07
 
@@ -260,5 +308,12 @@ enum ProgressPhotoLayout {
 private extension CGFloat {
     func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
         Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+private extension Array {
+    /// Bounds-checked lookup, for the landing slot of a throw.
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
