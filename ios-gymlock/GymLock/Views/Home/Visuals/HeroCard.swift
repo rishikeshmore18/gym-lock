@@ -86,7 +86,7 @@ struct HeroCardView: View {
                 SetupHero(items: items, metrics: metrics)
             case .firstDay(let alarm):
                 ImageHero(
-                    imageName: "HeroMountain",
+                    imageName: "HeroSummit",
                     eyebrow: "YOUR COMMITMENT",
                     headline: [alarm.displayString],
                     support: "Tomorrow",
@@ -96,7 +96,7 @@ struct HeroCardView: View {
                 )
             case .night(let bedtime, let nextAlarm):
                 ImageHero(
-                    imageName: "HeroMountain",
+                    imageName: "HeroRest",
                     eyebrow: "REST NOW",
                     headline: [bedtime.displayString],
                     support: nextAlarm.map { "Tomorrow \($0.displayString)" } ?? "Tomorrow",
@@ -126,7 +126,7 @@ struct HeroCardView: View {
                 )
             case .departed(_, _, let nearGym):
                 ImageHero(
-                    imageName: "HeroRoad",
+                    imageName: "HeroDiscipline",
                     eyebrow: "YOU'RE MOVING",
                     headline: nearGym ? ["Nearly", "there."] : ["Gym next."],
                     support: nearGym ? "Almost at the door" : "Keep going",
@@ -170,7 +170,7 @@ struct HeroCardView: View {
                 ComebackHero(metrics: metrics)
             case .restDay(let nextDay, let nextTime):
                 ImageHero(
-                    imageName: "HeroMountain",
+                    imageName: "HeroRest",
                     eyebrow: "REST DAY",
                     headline: ["Recover", "today."],
                     support: [nextDay, nextTime].compactMap { $0 }.joined(separator: " "),
@@ -211,7 +211,7 @@ struct HeroCardView: View {
                 )
             case .monthComplete(let sessions, let consistency):
                 ImageHero(
-                    imageName: "HeroMountain",
+                    imageName: "HeroSummit",
                     eyebrow: "MONTH COMPLETE",
                     headline: [],
                     support: "Ready for the next one.",
@@ -258,7 +258,7 @@ struct HeroCardView: View {
                 )
             case .latePattern(let momentumDays):
                 ImageHero(
-                    imageName: "HeroMountain",
+                    imageName: "HeroSummit",
                     eyebrow: "PATTERN BUILT",
                     headline: ["You built", "a pattern."],
                     support: "\(momentumDays) day momentum",
