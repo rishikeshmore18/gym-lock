@@ -11,11 +11,16 @@ import SwiftUI
 /// Below them sits the progress chart, which answers the follow-up question —
 /// "am I doing what I planned" — and changes resolution between month and week
 /// in place, without ever presenting a second surface.
+///
+/// The photographs come last, and answer the question the numbers cannot: not
+/// whether the sessions happened, but whether they changed anything.
 struct ProgressTabView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var period = ProgressPeriodModel()
+    /// Owned by the tab so the photos survive the card scrolling out of view.
+    @State private var photos = ProgressPhotoStore()
 
     /// The zoom between the two levels of the chart.
     ///
@@ -58,6 +63,8 @@ struct ProgressTabView: View {
                         onStepMonth: stepMonth,
                         onStepWeek: stepWeek
                     )
+
+                    ProgressPhotosCard(store: photos)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
