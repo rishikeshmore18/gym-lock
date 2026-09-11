@@ -68,30 +68,32 @@ enum ProgressPreviewData {
     }
 }
 
-/// Hosts a fixture card on the app canvas.
+/// Hosts a fixture chart on the app canvas.
+///
+/// `expandWeek` focuses a week so the week level of the chart can be inspected
+/// directly, which is otherwise only reachable by tapping.
 private struct ProgressPreviewStage: View {
     let model: ProgressPeriodModel
     var expandWeek: Int?
-
-    @State private var frames = WeekFrameStore()
 
     var body: some View {
         ZStack {
             Theme.canvas.ignoresSafeArea()
 
-            if let expandWeek, let week = model.month.week(at: expandWeek) {
-                WeeklyProgressCard(week: week) {}
-                    .padding(.horizontal, 20)
-            } else {
-                ProgressPeriodCard(
-                    model: model,
-                    frames: frames,
-                    appearanceDelay: 0,
-                    onSelectWeek: { _ in },
-                    onStepMonth: { _ in }
-                )
-                .padding(.horizontal, 20)
-            }
+            ProgressPeriodCard(
+                model: model,
+                appearanceDelay: 0,
+                onSelectWeek: { model.selectWeek($0) },
+                onCollapseWeek: { model.collapseWeek() },
+                onStepMonth: { _ in },
+                onStepWeek: { model.stepWeek(by: $0) }
+            )
+            .padding(.horizontal, 20)
+        }
+        .task {
+            guard let expandWeek else { return }
+            // Past the model's own bounce guard, which measures from init.
+            model.selectWeek(expandWeek, now: Date().addingTimeInterval(1))
         }
     }
 }

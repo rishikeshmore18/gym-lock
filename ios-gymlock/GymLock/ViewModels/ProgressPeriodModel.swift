@@ -16,8 +16,15 @@ final class ProgressPeriodModel {
     /// Any day inside the displayed month.
     private(set) var monthAnchor: Date
     private(set) var month: ProgressMonthSummary
-    /// Index of the expanded week, if one is open.
+    /// Index of the focused week, if the chart is at the week level.
     private(set) var selectedWeek: Int?
+    /// The week the chart was last focused on.
+    ///
+    /// Kept after a collapse so the day bars still have a week to draw while
+    /// they animate away, and so the month's bars know which column to fold
+    /// back out of. Without it the zoom would have nothing to aim at on the
+    /// way back and the days would simply vanish.
+    private(set) var lastWeekIndex: Int = 0
 
     private var earliestMonth: Date
     private var latestMonth: Date
@@ -92,6 +99,7 @@ final class ProgressPeriodModel {
         guard acceptsToggle(now: now), month.week(at: index) != nil else { return false }
         lastToggle = now
         selectedWeek = index
+        lastWeekIndex = index
         return true
     }
 
@@ -106,6 +114,30 @@ final class ProgressPeriodModel {
 
     private func acceptsToggle(now: Date) -> Bool {
         now.timeIntervalSince(lastToggle) >= Self.transitionLockout
+    }
+
+    // MARK: Week navigation
+
+    /// Whether there is another week to step to at the week level.
+    ///
+    /// Clamped inside the displayed month on purpose: the bars are labelled
+    /// with real dates, so sliding past the edge of the month would show days
+    /// the header is not describing.
+    func canStepWeek(by weeks: Int) -> Bool {
+        guard let selectedWeek else { return false }
+        return month.week(at: selectedWeek + weeks) != nil
+    }
+
+    /// Moves the focused week sideways. Returns false when swallowed.
+    @discardableResult
+    func stepWeek(by weeks: Int, now: Date = Date()) -> Bool {
+        guard weeks != 0, let selectedWeek, acceptsToggle(now: now) else { return false }
+        let target = selectedWeek + weeks
+        guard month.week(at: target) != nil else { return false }
+        lastToggle = now
+        self.selectedWeek = target
+        lastWeekIndex = target
+        return true
     }
 
     // MARK: Month navigation

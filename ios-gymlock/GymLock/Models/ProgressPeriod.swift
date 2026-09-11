@@ -231,14 +231,23 @@ struct ProgressWeekSummary: Identifiable, Hashable, ProgressPeriodPresentation {
         return parts.joined(separator: " ")
     }
 
-    /// Headline under the date in the expanded card.
-    var detailHeadline: String {
+    /// Subtitle for the week level of the chart.
+    ///
+    /// Deliberately *not* the fraction — the ring beside it already carries
+    /// that, and repeating it would waste the one line that can say something
+    /// the chart cannot: what the week was actually made of.
+    var breakdownLabel: String {
         guard tally.hasPlan else { return "No sessions planned" }
-        guard headlineTotal > 0 else {
+
+        var parts: [String] = []
+        if tally.verifiedGym > 0 { parts.append("\(tally.verifiedGym) gym") }
+        if tally.quickWorkout > 0 { parts.append("\(tally.quickWorkout) quick 20") }
+        if tally.missed > 0 { parts.append("\(tally.missed) missed") }
+
+        guard !parts.isEmpty else {
             return "\(tally.slots) planned"
         }
-        let suffix = isLive ? "due completed" : "completed"
-        return "\(tally.completed) of \(headlineTotal) \(suffix) · \(percentText)"
+        return parts.joined(separator: " · ")
     }
 }
 
