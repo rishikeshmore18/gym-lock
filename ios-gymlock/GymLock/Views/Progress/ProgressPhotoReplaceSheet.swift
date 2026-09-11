@@ -17,12 +17,28 @@ struct ProgressPhotoReplaceSheet: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The stored photo, loaded from disk.
-    @State private var existingImage: UIImage?
-    @State private var hasAppeared = false
+    /// What a pane has to draw.
+    ///
+    /// Three states, not an optional. An optional collapses "still reading the
+    /// file" and "this file cannot be opened" into the same `nil`, and the pane
+    /// drew a spinner for it — so a photo whose bytes had gone missing left the
+    /// user watching an indicator that could never finish, with no way to tell
+    /// that waiting was pointless.
+    private enum PaneState {
+        case loading
+        case ready(UIImage)
+        case unavailable
+    }
 
-    /// The incoming photo, decoded from the preview prepared by the store.
-    private var newImage: UIImage? { UIImage(data: pending.previewData) }
+    /// The stored photo, loaded from disk.
+    @State private var existing: PaneState = .loading
+    /// The incoming photo, decoded once.
+    ///
+    /// Held in state rather than computed in `body`: SwiftUI re-evaluates a
+    /// body on every state change, and decoding a screen-sized JPEG each time
+    /// was work done over and over for a result that never changes.
+    @State private var incoming: PaneState = .loading
+    @State private var hasAppeared = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,7 +47,10 @@ struct ProgressPhotoReplaceSheet: View {
             actions
         }
         .background(Theme.canvas)
+        // Two independent tasks rather than one: whichever photo resolves
+        // first draws immediately instead of waiting on the other.
         .task { await loadExisting() }
+        .task { await loadIncoming() }
         .task {
             guard !hasAppeared else { return }
             if reduceMotion {
@@ -92,14 +111,14 @@ struct ProgressPhotoReplaceSheet: View {
                 title: "Current",
                 subtitle: pending.existing.createdAt
                     .formatted(.dateTime.month(.abbreviated).day()),
-                image: existingImage,
+                state: existing,
                 isNew: false
             )
 
             pane(
                 title: "New",
                 subtitle: "Just added",
-                image: newImage,
+                state: incoming,
                 isNew: true
             )
         }
@@ -112,7 +131,7 @@ struct ProgressPhotoReplaceSheet: View {
     private func pane(
         title: String,
         subtitle: String,
-        image: UIImage?,
+        state: PaneState,
         isNew: Bool
     ) -> some View {
         VStack(spacing: 10) {
@@ -122,13 +141,16 @@ struct ProgressPhotoReplaceSheet: View {
             Color(white: 0.93)
                 .aspectRatio(ProgressPhotoMetrics.aspectRatio, contentMode: .fit)
                 .overlay {
-                    if let image {
+                    switch state {
+                    case .loading:
+                        ProgressView().tint(Theme.inkTertiary)
+                    case let .ready(image):
                         Image(uiImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                             .allowsHitTesting(false)
-                    } else {
-                        ProgressView().tint(Theme.inkTertiary)
+                    case .unavailable:
+                        unavailableArtwork
                     }
                 }
                 .clipShape(.rect(cornerRadius: 18))
@@ -152,11 +174,41 @@ struct ProgressPhotoReplaceSheet: View {
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            isNew
-                ? "New photo, just added"
-                : "Current photo from \(subtitle), the one that would be replaced"
-        )
+        .accessibilityLabel(accessibilityLabel(state: state, subtitle: subtitle, isNew: isNew))
+    }
+
+    /// Shown when a stored photo's file cannot be read.
+    ///
+    /// Says so plainly instead of spinning. A photo that will not open is also
+    /// the strongest possible argument for replacing it, so the decision this
+    /// sheet is asking for still makes sense — it just makes itself.
+    private var unavailableArtwork: some View {
+        VStack(spacing: 7) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Theme.inkTertiary)
+            Text("Can't open\nthis photo")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(Theme.inkSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(8)
+        .allowsHitTesting(false)
+    }
+
+    private func accessibilityLabel(
+        state: PaneState,
+        subtitle: String,
+        isNew: Bool
+    ) -> String {
+        if case .unavailable = state {
+            return isNew
+                ? "New photo, could not be opened"
+                : "Current photo from \(subtitle), could not be opened"
+        }
+        return isNew
+            ? "New photo, just added"
+            : "Current photo from \(subtitle), the one that would be replaced"
     }
 
     // MARK: Actions
@@ -188,12 +240,46 @@ struct ProgressPhotoReplaceSheet: View {
         .padding(.bottom, 8)
     }
 
+    /// Loads the stored photo, best copy first, and never gives up silently.
+    ///
+    /// The full-size copy is preferred because this is a comparison the user is
+    /// being asked to judge, and a 600px thumbnail stretched across half an
+    /// iPhone would be judged on its softness. But the thumbnail is shown
+    /// first when it is already warm in the cache, so the pane draws something
+    /// real on the first frame instead of an indicator, and it is also the
+    /// fallback if the full copy has gone missing — a slightly soft photograph
+    /// is worth far more here than a perfect one that never appears.
     private func loadExisting() async {
-        // The full-size copy rather than the card thumbnail: this is a
-        // comparison the user is being asked to judge, and a 600px thumbnail
-        // stretched across half an iPhone would be judged on its softness.
-        existingImage = await ProgressPhotoImageLoader.shared
-            .image(named: pending.existing.fileName)
+        let loader = ProgressPhotoImageLoader.shared
+        let photo = pending.existing
+
+        if let warm = loader.cached(photo.thumbnailName) {
+            existing = .ready(warm)
+        }
+
+        if let full = await loader.image(named: photo.fileName) {
+            existing = .ready(full)
+            return
+        }
+
+        if let thumbnail = await loader.image(named: photo.thumbnailName) {
+            existing = .ready(thumbnail)
+            return
+        }
+
+        // Nothing on disk could be opened. Keep a warm thumbnail if one is
+        // already on screen rather than replacing a visible photo with an
+        // error.
+        if case .ready = existing { return }
+        existing = .unavailable
+    }
+
+    private func loadIncoming() async {
+        let data = pending.previewData
+        let decoded = await Task.detached(priority: .userInitiated) {
+            UIImage(data: data)
+        }.value
+        incoming = decoded.map(PaneState.ready) ?? .unavailable
     }
 }
 

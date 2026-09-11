@@ -23,9 +23,24 @@ final class ProgressPhotoCameraModel: NSObject {
     private(set) var availability: Availability = .preparing
     private(set) var isCapturing = false
 
+    /// Which lens is live.
+    ///
+    /// Starts on the front camera because that is how a progress photo is
+    /// actually taken — arm out, looking at yourself, checking the framing
+    /// before you commit. Opening on the rear lens means every single user
+    /// has to find a flip control before they can take the photo they came for.
+    private(set) var position: AVCaptureDevice.Position = .front
+    /// Whether there is a second lens worth offering.
+    ///
+    /// Drives whether the flip control is drawn at all: a control that cannot
+    /// change anything is worse than no control, and the simulator publishes a
+    /// single external webcam with no opposite to switch to.
+    private(set) var canFlip = false
+
     let session = AVCaptureSession()
 
     private let photoOutput = AVCapturePhotoOutput()
+    private var input: AVCaptureDeviceInput?
     private var isConfigured = false
     private var onCaptured: ((Data) -> Void)?
     private var onFailure: ((String) -> Void)?
@@ -72,7 +87,10 @@ final class ProgressPhotoCameraModel: NSObject {
     private func configureIfNeeded() -> Bool {
         guard !isConfigured else { return true }
 
-        guard let camera = Self.preferredCamera() else {
+        // Prefer the intended lens, but never refuse to open a camera just
+        // because the preferred one is absent — an iPad with only a rear
+        // camera should still be able to take the photo.
+        guard let camera = Self.camera(at: position) ?? Self.anyCamera() else {
             availability = .noCameraFound
             return false
         }
@@ -89,17 +107,79 @@ final class ProgressPhotoCameraModel: NSObject {
         }
 
         session.addInput(input)
+        self.input = input
         if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
         session.commitConfiguration()
+
+        position = camera.position
         isConfigured = true
+        canFlip = Self.camera(at: .front) != nil && Self.camera(at: .back) != nil
+        applyMirroring()
         return true
     }
 
-    /// Back camera first: a progress photo is usually taken in a mirror or by
-    /// someone else, and the rear lens is the better one. Falls back to
-    /// whatever exists, including the simulator's injected external webcam.
-    private static func preferredCamera() -> AVCaptureDevice? {
-        let discovery = AVCaptureDevice.DiscoverySession(
+    /// Swaps between the front and rear lens on a live session.
+    ///
+    /// Reconfiguring in place rather than tearing the session down and building
+    /// a new one: the preview stays up through the swap, which is what makes it
+    /// feel like the system camera instead of a reload. If the new input cannot
+    /// be opened the previous one is put back, so a failed flip leaves a
+    /// working viewfinder rather than a black screen.
+    func flip() {
+        guard canFlip, !isCapturing, isConfigured else { return }
+
+        let next: AVCaptureDevice.Position = position == .front ? .back : .front
+        guard let device = Self.camera(at: next),
+              let replacement = try? AVCaptureDeviceInput(device: device)
+        else { return }
+
+        Haptics.tap()
+        session.beginConfiguration()
+
+        let previous = input
+        if let previous { session.removeInput(previous) }
+
+        guard session.canAddInput(replacement) else {
+            if let previous, session.canAddInput(previous) { session.addInput(previous) }
+            session.commitConfiguration()
+            return
+        }
+
+        session.addInput(replacement)
+        input = replacement
+        session.commitConfiguration()
+
+        position = next
+        applyMirroring()
+    }
+
+    /// Makes the saved photo match the viewfinder on the front camera.
+    ///
+    /// The preview layer mirrors the front lens, so an unmirrored capture hands
+    /// back a photo that is flipped relative to the one the user just framed
+    /// and approved. For a feature whose whole purpose is comparing photographs
+    /// of the same body over months, a silent left-right flip between shots is
+    /// not a cosmetic detail — it makes the comparison misleading.
+    private func applyMirroring() {
+        guard let connection = photoOutput.connection(with: .video),
+              connection.isVideoMirroringSupported
+        else { return }
+        connection.automaticallyAdjustsVideoMirroring = false
+        connection.isVideoMirrored = position == .front
+    }
+
+    private static func camera(at position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        discovered().first { $0.position == position }
+    }
+
+    /// Any usable camera, including the cloud simulator's injected webcam,
+    /// which reports an unspecified position.
+    private static func anyCamera() -> AVCaptureDevice? {
+        discovered().first
+    }
+
+    private static func discovered() -> [AVCaptureDevice] {
+        AVCaptureDevice.DiscoverySession(
             deviceTypes: [
                 .builtInWideAngleCamera,
                 .builtInDualWideCamera,
@@ -108,11 +188,7 @@ final class ProgressPhotoCameraModel: NSObject {
             ],
             mediaType: .video,
             position: .unspecified
-        )
-        let devices = discovery.devices
-        return devices.first { $0.position == .back }
-            ?? devices.first { $0.position == .front }
-            ?? devices.first
+        ).devices
     }
 
     // MARK: Capture
@@ -121,6 +197,9 @@ final class ProgressPhotoCameraModel: NSObject {
         guard availability == .ready, !isCapturing else { return }
         isCapturing = true
         Haptics.medium()
+        // Reasserted here as well as after configuration: adding the output can
+        // hand back a fresh connection whose mirroring defaults are its own.
+        applyMirroring()
         photoOutput.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
     }
 

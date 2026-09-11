@@ -22,6 +22,8 @@ struct ProgressPhotoStack: View {
     let reduceMotion: Bool
     /// Called when a card should become the focused one.
     let onFocus: (ProgressPhotoSlide) -> Void
+    /// Called to delete a real photograph. Absent while the demo stack shows.
+    var onDelete: ((ProgressPhoto) -> Void)?
 
     /// Continuous position while a finger is down. `nil` means settled, and
     /// the focused card is the source of truth again.
@@ -133,6 +135,7 @@ struct ProgressPhotoStack: View {
         .accessibilityAction {
             withAnimation(settle) { onFocus(slide) }
         }
+        .photoDeleteMenu(slide: slide, onDelete: onDelete)
     }
 
     /// The spring for a tap, where travel is short and known.
@@ -440,6 +443,39 @@ enum ProgressPhotoLayout {
 
         let gaps = weights.map { $0 / total * slack }
         return gaps.prefix(index).reduce(0, +)
+    }
+}
+
+// MARK: - Delete
+
+private extension View {
+    /// Long-press to delete, on real photographs only.
+    ///
+    /// A context menu rather than a visible delete control on every card: this
+    /// is a destructive action on something the user cannot get back, and it
+    /// should take a deliberate press rather than sit under the thumb that is
+    /// busy dragging the deck. Long-press is also where iOS users already
+    /// reach to delete a photo.
+    ///
+    /// A matching accessibility action is attached alongside it, because a
+    /// long press is not a gesture VoiceOver users can rely on.
+    @ViewBuilder
+    func photoDeleteMenu(
+        slide: ProgressPhotoSlide,
+        onDelete: ((ProgressPhoto) -> Void)?
+    ) -> some View {
+        if let onDelete, case let .photo(photo) = slide.content {
+            contextMenu {
+                Button(role: .destructive) {
+                    onDelete(photo)
+                } label: {
+                    Label("Delete Photo", systemImage: "trash")
+                }
+            }
+            .accessibilityAction(named: "Delete Photo") { onDelete(photo) }
+        } else {
+            self
+        }
     }
 }
 

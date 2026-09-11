@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// Full-screen viewfinder for a progress photo, with the system camera's own
@@ -115,10 +116,45 @@ struct ProgressPhotoCaptureSheet: View {
                     .foregroundStyle(.white.opacity(0.75))
                     .padding(.bottom, 18)
 
-                shutter
+                controls
                     .padding(.bottom, 30)
             }
         }
+    }
+
+    /// The shutter, with the lens switch beside it.
+    ///
+    /// The shutter stays centred on the screen rather than centred in the row,
+    /// because it is the control the thumb aims for without looking. The flip
+    /// sits in the right-hand margin, where the system camera puts it.
+    private var controls: some View {
+        ZStack {
+            shutter
+
+            if camera.canFlip {
+                HStack {
+                    Spacer()
+                    flipButton
+                }
+                .padding(.horizontal, 34)
+            }
+        }
+    }
+
+    private var flipButton: some View {
+        Button {
+            camera.flip()
+        } label: {
+            Image(systemName: "arrow.triangle.2.circlepath.camera.fill")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(.ultraThinMaterial, in: .circle)
+        }
+        .disabled(camera.isCapturing)
+        .accessibilityLabel(
+            camera.position == .front ? "Switch to rear camera" : "Switch to front camera"
+        )
     }
 
     private var shutter: some View {

@@ -321,14 +321,15 @@ final class ProgressPhotoStore {
             try full.write(to: fileURL, options: .atomic)
             try thumbnail.write(to: thumbURL, options: .atomic)
 
-            // Read the thumbnail back before declaring the photo saved. The
-            // card draws from this file, so a row whose thumbnail cannot be
-            // decoded is indistinguishable, on screen, from a photo that was
-            // never taken — which is the worst possible outcome for a feature
-            // built on the user trusting that their photos are kept.
-            guard let written = try? Data(contentsOf: thumbURL),
-                  UIImage(data: written) != nil
-            else {
+            // Read BOTH files back before declaring the photo saved. The card
+            // draws from the thumbnail and the comparison sheet draws from the
+            // full copy, so a row whose files cannot be decoded is
+            // indistinguishable, on screen, from a photo that was never taken
+            // — which is the worst possible outcome for a feature built on the
+            // user trusting that their photos are kept. Verifying only the
+            // thumbnail is what let a photo look saved on the card and then
+            // have nothing to show when it was compared against.
+            guard isReadable(fileURL), isReadable(thumbURL) else {
                 try? FileManager.default.removeItem(at: fileURL)
                 try? FileManager.default.removeItem(at: thumbURL)
                 return false
@@ -341,6 +342,12 @@ final class ProgressPhotoStore {
             try? FileManager.default.removeItem(at: thumbURL)
             return false
         }
+    }
+
+    /// Whether a written file exists and decodes back into an image.
+    private nonisolated static func isReadable(_ url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return false }
+        return UIImage(data: data) != nil
     }
 
     /// Re-encodes any image the system can read into an upright JPEG.

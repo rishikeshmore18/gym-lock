@@ -24,6 +24,8 @@ struct ProgressPhotosCard: View {
     @State private var pendingSource: ProgressPhotoSourceChoice?
     @State private var contentWidth: CGFloat = 0
     @State private var hasAppeared = false
+    /// A photo the user has asked to delete, awaiting confirmation.
+    @State private var photoPendingDeletion: ProgressPhoto?
 
     private var photos: [ProgressPhoto] { store.photos }
     private var isDemo: Bool { photos.isEmpty }
@@ -106,6 +108,23 @@ struct ProgressPhotosCard: View {
             }
         }
         .progressPhotoImporter(store: store, pendingSource: $pendingSource)
+        .confirmationDialog(
+            "Delete this photo?",
+            isPresented: Binding(
+                get: { photoPendingDeletion != nil },
+                set: { if !$0 { photoPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Photo", role: .destructive) {
+                guard let photo = photoPendingDeletion else { return }
+                photoPendingDeletion = nil
+                Task { await store.remove(photo) }
+            }
+            Button("Cancel", role: .cancel) { photoPendingDeletion = nil }
+        } message: {
+            Text("This can't be undone.")
+        }
     }
 
     // MARK: Header
@@ -146,7 +165,10 @@ struct ProgressPhotosCard: View {
                 focusedID: focusedID,
                 regionWidth: width,
                 reduceMotion: reduceMotion,
-                onFocus: focus
+                onFocus: focus,
+                // Only real photographs can be deleted; the demonstration
+                // stack has nothing behind it to remove.
+                onDelete: isDemo ? nil : { photoPendingDeletion = $0 }
             )
         } else {
             // First layout pass, before the width is known. Reserves nothing
