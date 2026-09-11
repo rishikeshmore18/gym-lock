@@ -296,6 +296,7 @@ struct ProgressPhotoStack: View {
         var parts: [String] = []
         switch slide.marker {
         case .dayZero: parts.append("Day 0 progress photo")
+        case .first: parts.append("First progress photo")
         case .latest: parts.append("Latest progress photo")
         case nil: parts.append("Progress photo")
         }

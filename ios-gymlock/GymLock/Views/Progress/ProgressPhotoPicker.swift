@@ -36,6 +36,9 @@ struct ProgressPhotoImporter: ViewModifier {
                 photoLibrary: .shared()
             )
             .fullScreenCover(isPresented: $isShowingCamera) {
+                // The sheet only calls back once the user has reviewed the
+                // frame and tapped Use Photo, so everything arriving here is
+                // already confirmed.
                 ProgressPhotoCaptureSheet { data in
                     isShowingCamera = false
                     deliver(data: data, source: .camera, createdAt: Date())
@@ -75,7 +78,7 @@ struct ProgressPhotoImporter: ViewModifier {
             ) {
                 Button("OK", role: .cancel) { store.failureMessage = nil }
             }
-            .progressPhotoDayConflict(store: store)
+            .progressPhotoReplaceSheet(store: store)
     }
 
     // MARK: Sources
@@ -166,8 +169,16 @@ struct ProgressPhotoImporter: ViewModifier {
         await store.add(imageData: data, source: .files, createdAt: created)
     }
 
+    /// Hands one confirmed image to the store.
+    ///
+    /// Waits for the camera to finish dismissing first. `add` may decide the
+    /// day is taken and raise the comparison sheet, and a sheet presented in
+    /// the same runloop turn that dismisses a full-screen cover is silently
+    /// dropped — the user would tap Use Photo and see nothing happen at all.
     private func deliver(data: Data, source: ProgressPhotoSource, createdAt: Date?) {
-        Task { await store.add(imageData: data, source: source, createdAt: createdAt) }
+        present {
+            Task { await store.add(imageData: data, source: source, createdAt: createdAt) }
+        }
     }
 
     private func openSettings() {

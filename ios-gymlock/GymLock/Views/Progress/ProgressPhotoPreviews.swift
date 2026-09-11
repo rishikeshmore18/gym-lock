@@ -24,7 +24,11 @@ private enum PhotoFixture {
     ///
     /// The files deliberately do not exist: this doubles as the missing-file
     /// case, proving the card degrades to a placeholder rather than crashing.
-    static func store(count: Int) -> ProgressPhotoStore {
+    ///
+    /// `startedOnInstallDay` is what decides whether the opening card reads
+    /// "Day 0" or "1st", so both are previewable without waiting for a real
+    /// install to age.
+    static func store(count: Int, startedOnInstallDay: Bool = true) -> ProgressPhotoStore {
         let defaults = scratchDefaults()
         let now = Date()
         let photos = (0..<count).map { index -> ProgressPhoto in
@@ -40,6 +44,11 @@ private enum PhotoFixture {
         if let data = try? JSONEncoder().encode(photos) {
             defaults.set(data, forKey: "gymlock.progressPhotos")
         }
+        // Installed either on the day of the oldest photo, or long before it.
+        let install = startedOnInstallDay
+            ? (photos.first?.createdAt ?? now)
+            : now.addingTimeInterval(-200 * 86_400)
+        defaults.set(install, forKey: AppInstallDate.key)
         return ProgressPhotoStore(defaults: defaults)
     }
 
@@ -50,13 +59,16 @@ private enum PhotoFixture {
 
     /// Demonstration slides trimmed to a given count, with the end labels
     /// recomputed so a two-card stack still reads Day 0 → Latest.
-    static func slides(_ count: Int) -> [ProgressPhotoSlide] {
+    static func slides(
+        _ count: Int,
+        opening: ProgressPhotoSlide.Marker = .dayZero
+    ) -> [ProgressPhotoSlide] {
         let clamped = min(max(count, 1), ProgressPhotoDemoArtwork.frameCount)
         return (0..<clamped).map { index in
             ProgressPhotoSlide(
                 id: "demo-\(index)",
                 content: .demo(index: index),
-                marker: index == 0 ? .dayZero : (index == clamped - 1 ? .latest : nil),
+                marker: index == 0 ? opening : (index == clamped - 1 ? .latest : nil),
                 date: nil
             )
         }
@@ -123,6 +135,12 @@ private struct StackStage: View {
     StackStage(slides: PhotoFixture.slides(4), reduceMotion: true)
 }
 
+/// A user who started photographing themselves after installing, so the oldest
+/// photo is honestly "1st" rather than a Day 0 they never took.
+#Preview("Stack · no genuine Day 0") {
+    StackStage(slides: PhotoFixture.slides(4, opening: .first))
+}
+
 // MARK: - The whole card
 
 #Preview("Card · no photos (demo stack)") {
@@ -141,10 +159,37 @@ private struct StackStage: View {
     .background(Theme.canvas)
 }
 
+#Preview("Card · two real photos") {
+    ScrollView {
+        ProgressPhotosCard(store: PhotoFixture.store(count: 2), appearanceDelay: 0)
+            .padding(20)
+    }
+    .background(Theme.canvas)
+}
+
+#Preview("Card · three real photos") {
+    ScrollView {
+        ProgressPhotosCard(store: PhotoFixture.store(count: 3), appearanceDelay: 0)
+            .padding(20)
+    }
+    .background(Theme.canvas)
+}
+
 #Preview("Card · many photos (sampled)") {
     ScrollView {
         ProgressPhotosCard(store: PhotoFixture.store(count: 24), appearanceDelay: 0)
             .padding(20)
+    }
+    .background(Theme.canvas)
+}
+
+#Preview("Card · started after install (1st)") {
+    ScrollView {
+        ProgressPhotosCard(
+            store: PhotoFixture.store(count: 6, startedOnInstallDay: false),
+            appearanceDelay: 0
+        )
+        .padding(20)
     }
     .background(Theme.canvas)
 }

@@ -1,61 +1,85 @@
 import SwiftUI
 
-/// Full-screen viewfinder for a progress photo.
+/// Full-screen viewfinder for a progress photo, with the system camera's own
+/// two-step rhythm: shoot, then look at what you got and decide.
 ///
-/// Reuses the `CameraPreview` layer-backed view already built for Day 0 rather
-/// than declaring a second one, and keeps the same dark, chrome-free treatment
-/// so capturing a progress photo feels like the same act as capturing Day 0.
+/// The review step is not a nicety. A progress photo is taken at arm's length,
+/// in a mirror, often with a timer — the odds of the first frame being the one
+/// the user wants are poor. Apple's Camera app answers this with Retake and Use
+/// Photo, and this screen keeps those exact words and positions, because the
+/// muscle memory is already there.
+///
+/// Retake returns to the live viewfinder rather than dismissing: the user is
+/// still taking a photo, and being thrown back to the Progress tab to start
+/// again would punish them for looking.
 struct ProgressPhotoCaptureSheet: View {
     let onCaptured: (Data) -> Void
     let onCancel: () -> Void
 
+    /// Shoot or review. Modelled as one value with the image attached, so there
+    /// is no way to be reviewing without something to review.
+    private enum Phase: Equatable {
+        case capturing
+        case reviewing(data: Data, image: UIImage)
+    }
+
     @State private var camera = ProgressPhotoCameraModel()
+    @State private var phase: Phase = .capturing
     @State private var errorMessage: String?
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            switch camera.availability {
-            case .preparing:
-                ProgressView().tint(.white)
-            case .ready:
-                viewfinder
-            case .permissionDenied:
-                message(
-                    icon: "lock.fill",
-                    title: "Camera access is off",
-                    body: "GymLock needs the camera to take a progress photo. Nothing leaves this iPhone.",
-                    actionTitle: "Open Settings",
-                    action: openSettings
-                )
-            case .noCameraFound:
-                message(
-                    icon: "camera.fill",
-                    title: "No camera available",
-                    body: "This device doesn't have a camera GymLock can use. You can add a photo from Photos or Files instead.",
-                    actionTitle: nil,
-                    action: nil
-                )
-            case let .failed(reason):
-                message(
-                    icon: "exclamationmark.triangle.fill",
-                    title: "Camera unavailable",
-                    body: reason,
-                    actionTitle: nil,
-                    action: nil
-                )
+            switch phase {
+            case .capturing:
+                capturing
+            case let .reviewing(data, image):
+                review(data: data, image: image)
             }
-
-            closeButton
         }
         .preferredColorScheme(.dark)
-        .onAppear {
-            camera.start(onCaptured: onCaptured) { message in
-                errorMessage = message
-            }
-        }
+        .animation(.easeInOut(duration: 0.22), value: phase)
+        .onAppear(perform: startCamera)
         .onDisappear { camera.stop() }
+    }
+
+    // MARK: Capture
+
+    @ViewBuilder
+    private var capturing: some View {
+        switch camera.availability {
+        case .preparing:
+            ProgressView().tint(.white)
+        case .ready:
+            viewfinder
+        case .permissionDenied:
+            message(
+                icon: "lock.fill",
+                title: "Camera access is off",
+                body: "GymLock needs the camera to take a progress photo. Nothing leaves this iPhone.",
+                actionTitle: "Open Settings",
+                action: openSettings
+            )
+        case .noCameraFound:
+            message(
+                icon: "camera.fill",
+                title: "No camera available",
+                body: "This device doesn't have a camera GymLock can use. You can add a photo from Photos or Files instead.",
+                actionTitle: nil,
+                action: nil
+            )
+        case let .failed(reason):
+            message(
+                icon: "exclamationmark.triangle.fill",
+                title: "Camera unavailable",
+                body: reason,
+                actionTitle: nil,
+                action: nil
+            )
+        }
+
+        closeButton
     }
 
     private var viewfinder: some View {
@@ -114,26 +138,93 @@ struct ProgressPhotoCaptureSheet: View {
         .accessibilityLabel("Take progress photo")
     }
 
+    // MARK: Review
+
+    /// The captured frame, shown whole rather than cropped.
+    ///
+    /// `.fit`, not `.fill`: the user is about to decide whether this photograph
+    /// is the one, and a preview that quietly crops their head off would make
+    /// that decision on false information.
+    private func review(data: Data, image: UIImage) -> some View {
+        VStack(spacing: 0) {
+            Text("use this photo?")
+                .font(.system(size: 13, weight: .semibold))
+                .textCase(.uppercase)
+                .kerning(0.8)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: .capsule)
+                .padding(.top, 14)
+
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.vertical, 16)
+                .transition(.opacity)
+
+            HStack {
+                Button {
+                    Haptics.tap()
+                    // Straight back to the live feed. The session was never
+                    // stopped, so this is instant rather than a second launch.
+                    phase = .capturing
+                } label: {
+                    Text("Retake")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 96, minHeight: 44, alignment: .leading)
+                }
+
+                Spacer()
+
+                Button {
+                    Haptics.tap()
+                    onCaptured(data)
+                } label: {
+                    Text("Use Photo")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 22)
+                        .frame(height: 48)
+                        .background(.white, in: .capsule)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 30)
+        }
+        .overlay(alignment: .topTrailing) {
+            closeControl.padding(.horizontal, 18).padding(.top, 10)
+        }
+    }
+
+    // MARK: Chrome
+
     private var closeButton: some View {
         VStack {
             HStack {
                 Spacer()
-                Button {
-                    Haptics.tap()
-                    onCancel()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
-                        .background(.ultraThinMaterial, in: .circle)
-                }
-                .accessibilityLabel("Close")
+                closeControl
             }
             Spacer()
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
+    }
+
+    private var closeControl: some View {
+        Button {
+            Haptics.tap()
+            onCancel()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(.ultraThinMaterial, in: .circle)
+        }
+        .accessibilityLabel("Close")
     }
 
     private func message(
@@ -166,6 +257,23 @@ struct ProgressPhotoCaptureSheet: View {
             }
         }
         .padding(.horizontal, 40)
+    }
+
+    // MARK: Wiring
+
+    private func startCamera() {
+        camera.start { data in
+            // The photo is held here, not handed to the store. Nothing is
+            // written until the user has seen it and said yes.
+            guard let image = UIImage(data: data) else {
+                errorMessage = "That photo didn't save. Try again?"
+                return
+            }
+            errorMessage = nil
+            phase = .reviewing(data: data, image: image)
+        } onFailure: { message in
+            errorMessage = message
+        }
     }
 
     private func openSettings() {

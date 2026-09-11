@@ -16,7 +16,7 @@ final class ProgressPhotoStore {
     /// Everything the user has saved, oldest first.
     ///
     /// Sorted on the way in so the rest of the app can trust the order without
-    /// re-sorting, and so "oldest" and "latest" always mean what they say even
+    /// re-sorting, and so "first" and "latest" always mean what they say even
     /// if a photo is imported with an older capture date than one already
     /// stored.
     private(set) var photos: [ProgressPhoto] = []
@@ -26,22 +26,35 @@ final class ProgressPhotoStore {
     var failureMessage: String?
     /// A photo held back because that day already has one.
     ///
-    /// Nothing touches the disk while this is set: the bytes wait in memory
-    /// until the user decides, so declining costs nothing and there is never a
-    /// moment where both photos exist and one has to be cleaned up afterwards.
-    private(set) var pending: PendingProgressPhoto?
+    /// Nothing touches the disk while this is set: the new photo waits in
+    /// memory until the user has compared the two and decided, so backing out
+    /// costs nothing and neither photograph can be lost by accident.
+    private(set) var pendingReplacement: PendingProgressPhoto?
+
+    /// The day the user started, which is what "Day 0" actually refers to.
+    let installDate: Date
 
     private let defaults: UserDefaults
     private static let storageKey = "gymlock.progressPhotos"
+    private static let dayZeroImportKey = "gymlock.progressPhotos.day0Imported"
     /// Longest edge of the stored thumbnail, in pixels.
     ///
     /// The card draws a photo at roughly 120pt wide; 600px covers that at 3x
     /// with room for the focused card's scale-up, and is a fraction of the
     /// 48-megapixel original it is made from.
-    private static let thumbnailPixels: CGFloat = 600
+    private nonisolated static let thumbnailPixels: CGFloat = 600
+    /// Longest edge of the stored full-size copy.
+    ///
+    /// Large enough for a full-screen comparison on any iPhone, and far
+    /// smaller than a modern camera original — a user photographing themselves
+    /// every day for a year should not quietly fill their device.
+    private nonisolated static let fullPixels: CGFloat = 2400
+    /// Longest edge of the preview shown in the replace comparison.
+    private nonisolated static let previewPixels: CGFloat = 1200
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        installDate = AppInstallDate.resolve(defaults)
         load()
     }
 
@@ -51,7 +64,19 @@ final class ProgressPhotoStore {
     var hasPhotos: Bool { !photos.isEmpty }
 
     /// The cards the resting stack shows.
-    var slides: [ProgressPhotoSlide] { ProgressPhotoSlide.slides(for: photos) }
+    var slides: [ProgressPhotoSlide] {
+        ProgressPhotoSlide.slides(for: photos, installDate: installDate)
+    }
+
+    /// The photo already stored for a given day, if there is one.
+    ///
+    /// One photo per day is what keeps the card meaningful: the stack is a
+    /// comparison across time, and ten photos from one morning are ten copies
+    /// of the same moment crowding out the months on either side of them.
+    func photo(on date: Date) -> ProgressPhoto? {
+        let calendar = Calendar.current
+        return photos.first { calendar.isDate($0.createdAt, inSameDayAs: date) }
+    }
 
     private func load() {
         guard let data = defaults.data(forKey: Self.storageKey),
@@ -65,16 +90,6 @@ final class ProgressPhotoStore {
         defaults.set(data, forKey: Self.storageKey)
     }
 
-    /// The photo already stored for a given day, if there is one.
-    ///
-    /// One photo per day is what keeps the card meaningful: the stack is a
-    /// comparison across time, and ten photos from one morning are ten copies
-    /// of the same moment crowding out the months on either side of them.
-    func photo(on date: Date) -> ProgressPhoto? {
-        let calendar = Calendar.current
-        return photos.first { calendar.isDate($0.createdAt, inSameDayAs: date) }
-    }
-
     // MARK: - Writing
 
     /// Takes a photo from any of the three sources.
@@ -84,13 +99,14 @@ final class ProgressPhotoStore {
     func add(
         imageData: Data,
         source: ProgressPhotoSource,
-        createdAt: Date?
+        createdAt: Date?,
+        isDayZero: Bool = false
     ) async {
-        guard !isImporting, pending == nil else { return }
+        guard !isImporting, pendingReplacement == nil else { return }
 
         let date = createdAt ?? Date()
         if let existing = photo(on: date) {
-            pending = PendingProgressPhoto(
+            await holdForComparison(
                 imageData: imageData,
                 source: source,
                 createdAt: date,
@@ -99,31 +115,76 @@ final class ProgressPhotoStore {
             return
         }
 
-        await commit(imageData: imageData, source: source, createdAt: date)
+        await commit(
+            imageData: imageData,
+            source: source,
+            createdAt: date,
+            isDayZero: isDayZero
+        )
+    }
+
+    /// Prepares the side-by-side comparison without writing anything.
+    ///
+    /// The preview is built here, off the main actor, rather than in the sheet:
+    /// decoding a 48-megapixel camera photo while a sheet is animating in is
+    /// exactly how a presentation ends up dropping frames.
+    private func holdForComparison(
+        imageData: Data,
+        source: ProgressPhotoSource,
+        createdAt: Date,
+        existing: ProgressPhoto
+    ) async {
+        isImporting = true
+        let pixels = Self.previewPixels
+        let preview = await Task.detached(priority: .userInitiated) {
+            Self.uprightJPEG(from: imageData, maxPixels: pixels)
+        }.value
+        isImporting = false
+
+        guard let preview else {
+            failureMessage = "Couldn't add this photo."
+            return
+        }
+
+        pendingReplacement = PendingProgressPhoto(
+            imageData: imageData,
+            previewData: preview,
+            source: source,
+            createdAt: createdAt,
+            existing: existing
+        )
     }
 
     /// Swaps the day's existing photo for the one waiting.
     ///
     /// The replacement is written before the original is deleted, so a failed
     /// write leaves the user with the photo they already had rather than with
-    /// nothing at all.
-    func replacePending() async {
-        guard let request = pending else { return }
-        pending = nil
+    /// nothing at all. Nothing here is reachable until the user has explicitly
+    /// confirmed in the comparison sheet.
+    func confirmReplacement() async {
+        guard let request = pendingReplacement else { return }
+        pendingReplacement = nil
 
         let before = photos.count
         await commit(
             imageData: request.imageData,
             source: request.source,
-            createdAt: request.createdAt
+            createdAt: request.createdAt,
+            // A replacement inherits the standing of the photo it replaces: if
+            // the user is redoing their Day 0, the new one is still Day 0.
+            isDayZero: request.existing.isDayZero
         )
         guard photos.count > before else { return }
         await remove(request.existing)
     }
 
     /// Throws the waiting photo away, keeping the one already saved.
-    func discardPending() {
-        pending = nil
+    ///
+    /// Deliberately synchronous and total: the new photo only ever existed in
+    /// memory, so declining leaves the stored one untouched by construction
+    /// rather than by careful cleanup.
+    func cancelReplacement() {
+        pendingReplacement = nil
     }
 
     /// Deletes a photo and the files behind it.
@@ -132,6 +193,7 @@ final class ProgressPhotoStore {
         persist()
 
         await ProgressPhotoImageLoader.shared.invalidate(photo.thumbnailName)
+        await ProgressPhotoImageLoader.shared.invalidate(photo.fileName)
 
         let names = [photo.fileName, photo.thumbnailName]
         await Task.detached(priority: .utility) {
@@ -143,9 +205,10 @@ final class ProgressPhotoStore {
 
     /// Decodes, downsamples, writes and records one photo.
     ///
-    /// The whole operation is funnelled through here — camera, library and
-    /// files all end up on this path — so there is exactly one place where a
-    /// photo can be created and exactly one definition of "saved".
+    /// The whole operation is funnelled through here — camera, library, files
+    /// and the onboarding capture all end up on this path — so there is exactly
+    /// one place where a photo can be created and exactly one definition of
+    /// "saved".
     ///
     /// `isImporting` also acts as the re-entrancy guard: SwiftUI can deliver a
     /// picker result more than once as the view reloads, and without this a
@@ -153,7 +216,8 @@ final class ProgressPhotoStore {
     private func commit(
         imageData: Data,
         source: ProgressPhotoSource,
-        createdAt: Date
+        createdAt: Date,
+        isDayZero: Bool
     ) async {
         guard !isImporting else { return }
         isImporting = true
@@ -183,7 +247,8 @@ final class ProgressPhotoStore {
             createdAt: createdAt,
             fileName: fileName,
             thumbnailName: thumbnailName,
-            source: source
+            source: source,
+            isDayZero: isDayZero
         )
 
         photos.append(photo)
@@ -192,7 +257,43 @@ final class ProgressPhotoStore {
         Haptics.commit()
     }
 
-    /// Writes the original and its thumbnail, cleaning up if either fails.
+    // MARK: - Day 0
+
+    /// Brings the onboarding Day 0 photograph into the stack, once.
+    ///
+    /// The user took that photo as their before-picture; making them take
+    /// another one to start the comparison would be asking for the same thing
+    /// twice. Video captures are skipped — the stack compares stills, and a
+    /// frame grabbed from a clip is not what the user framed.
+    ///
+    /// Guarded by a flag rather than by "is there already a Day 0", so a user
+    /// who deliberately deletes it does not have it silently reappear.
+    func adoptDayZeroIfNeeded(_ media: Day0Media?) async {
+        guard let media,
+              media.kind == .photo,
+              !defaults.bool(forKey: Self.dayZeroImportKey),
+              let url = media.fileURL,
+              let data = try? Data(contentsOf: url)
+        else { return }
+
+        defaults.set(true, forKey: Self.dayZeroImportKey)
+
+        // Straight to `commit`: this is the day-0 photo by definition, so it
+        // cannot be in conflict with itself, and a comparison sheet appearing
+        // unprompted on first open of the Progress tab would be baffling.
+        guard photo(on: media.capturedAt) == nil else { return }
+        await commit(
+            imageData: data,
+            source: .camera,
+            createdAt: media.capturedAt,
+            isDayZero: true
+        )
+    }
+
+    // MARK: - Files
+
+    /// Writes the full-size copy and its thumbnail, cleaning up if either
+    /// fails.
     ///
     /// Returning a bool rather than throwing keeps the failure handling in one
     /// place: the caller only ever has to answer "is there a usable pair of
@@ -213,20 +314,26 @@ final class ProgressPhotoStore {
                 withIntermediateDirectories: true
             )
 
-            // Re-encoding normalises orientation. A photo carrying an EXIF
-            // rotation flag would otherwise draw sideways in the card, because
-            // the flag travels with the file and not with the pixels.
-            guard let decoded = UIImage(data: imageData),
-                  let normalised = decoded.normalizedJPEGData()
+            guard let full = uprightJPEG(from: imageData, maxPixels: fullPixels),
+                  let thumbnail = uprightJPEG(from: imageData, maxPixels: thumbnailPixels)
             else { return false }
 
-            try normalised.write(to: fileURL, options: .atomic)
+            try full.write(to: fileURL, options: .atomic)
+            try thumbnail.write(to: thumbURL, options: .atomic)
 
-            guard let thumbnail = downsampledJPEG(from: imageData) else {
+            // Read the thumbnail back before declaring the photo saved. The
+            // card draws from this file, so a row whose thumbnail cannot be
+            // decoded is indistinguishable, on screen, from a photo that was
+            // never taken — which is the worst possible outcome for a feature
+            // built on the user trusting that their photos are kept.
+            guard let written = try? Data(contentsOf: thumbURL),
+                  UIImage(data: written) != nil
+            else {
                 try? FileManager.default.removeItem(at: fileURL)
+                try? FileManager.default.removeItem(at: thumbURL)
                 return false
             }
-            try thumbnail.write(to: thumbURL, options: .atomic)
+
             return true
         } catch {
             // Never leave one half of the pair behind.
@@ -236,33 +343,36 @@ final class ProgressPhotoStore {
         }
     }
 
-    /// Builds the card-sized copy with ImageIO.
+    /// Re-encodes any image the system can read into an upright JPEG.
     ///
-    /// `CGImageSourceCreateThumbnailAtIndex` decodes straight to the requested
-    /// size, so a 48-megapixel HEIC never has to exist in memory at full size.
-    /// Handing the original to `UIImage` and scaling it afterwards would
-    /// allocate close to 200MB for the same result.
-    private nonisolated static func downsampledJPEG(from data: Data) -> Data? {
+    /// Built on ImageIO rather than `UIImage(data:)` on purpose. ImageIO reads
+    /// the formats a camera actually produces — HEIC, HEIF, ProRAW — decodes
+    /// straight to the requested size so a 48-megapixel original never exists
+    /// in memory at full size, and bakes the EXIF rotation into the pixels so
+    /// the card cannot draw a portrait photo on its side.
+    ///
+    /// `UIImage` remains as a fallback for the rare source ImageIO declines,
+    /// so an unusual file degrades to a slower path instead of to a photo the
+    /// user is told could not be added.
+    nonisolated static func uprightJPEG(from data: Data, maxPixels: CGFloat) -> Data? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
-        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
-            return nil
+        if let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) {
+            let options = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                // Applies the EXIF rotation to the pixels themselves.
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+            ] as [CFString: Any] as CFDictionary
+
+            if let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) {
+                return UIImage(cgImage: image).jpegData(compressionQuality: 0.85)
+            }
         }
 
-        let options = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            // Applies the EXIF rotation to the pixels themselves.
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: thumbnailPixels,
-        ] as [CFString: Any] as CFDictionary
-
-        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
-            return nil
-        }
-        return UIImage(cgImage: thumbnail).jpegData(compressionQuality: 0.82)
+        guard let fallback = UIImage(data: data) else { return nil }
+        return fallback.uprightJPEGData(maxPixels: maxPixels)
     }
-
-    // MARK: - Files
 
     /// The app-owned directory holding every progress photo.
     ///
@@ -301,7 +411,8 @@ final class ProgressPhotoStore {
             await commit(
                 imageData: data,
                 source: .camera,
-                createdAt: now.addingTimeInterval(-daysAgo * 86_400)
+                createdAt: now.addingTimeInterval(-daysAgo * 86_400),
+                isDayZero: step == 0
             )
         }
     }
@@ -313,7 +424,7 @@ final class ProgressPhotoStore {
             try? FileManager.default.removeItem(at: directory)
         }.value
         photos = []
-        pending = nil
+        pendingReplacement = nil
         persist()
     }
     #endif
@@ -322,19 +433,23 @@ final class ProgressPhotoStore {
 // MARK: - Orientation
 
 private extension UIImage {
-    /// Redraws the image with its orientation baked into the pixels.
+    /// Redraws the image upright and no larger than `maxPixels` on its longest
+    /// edge, baking the orientation into the pixels.
     ///
-    /// Returns the data unchanged when it is already upright, avoiding a
-    /// pointless re-encode of an untouched camera photo.
-    func normalizedJPEGData(quality: CGFloat = 0.92) -> Data? {
-        guard imageOrientation != .up else { return jpegData(compressionQuality: quality) }
+    /// `nonisolated` so it can run on the import task alongside the ImageIO
+    /// path it backs up; drawing into an off-screen renderer needs no main
+    /// actor.
+    nonisolated func uprightJPEGData(maxPixels: CGFloat, quality: CGFloat = 0.85) -> Data? {
+        let longest = max(size.width, size.height)
+        let ratio = longest > maxPixels ? maxPixels / longest : 1
+        let target = CGSize(width: size.width * ratio, height: size.height * ratio)
 
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = scale
+        format.scale = 1
         format.opaque = true
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        let renderer = UIGraphicsImageRenderer(size: target, format: format)
         let upright = renderer.image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
+            draw(in: CGRect(origin: .zero, size: target))
         }
         return upright.jpegData(compressionQuality: quality)
     }

@@ -76,6 +76,10 @@ struct ProgressTabView: View {
         }
         .tint(Theme.accent)
         .task(id: refreshKey) { refresh() }
+        // The Day 0 photograph the user took during onboarding is their real
+        // before-picture; the stack starts from it rather than asking for the
+        // same thing a second time. Runs once — the store keeps its own flag.
+        .task { await photos.adoptDayZeroIfNeeded(store.profile.day0Media) }
     }
 
     // MARK: Actions

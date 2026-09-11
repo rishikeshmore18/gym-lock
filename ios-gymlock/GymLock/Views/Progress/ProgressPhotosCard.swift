@@ -42,7 +42,8 @@ struct ProgressPhotosCard: View {
     private var slides: [ProgressPhotoSlide] {
         isDemo ? ProgressPhotoSlide.demoSlides : ProgressPhotoSlide.slides(
             for: photos,
-            focus: focusedIndex
+            focus: focusedIndex,
+            installDate: store.installDate
         )
     }
 
@@ -94,7 +95,10 @@ struct ProgressPhotosCard: View {
                 withAnimation(Theme.settle.delay(appearanceDelay)) { hasAppeared = true }
             }
         }
-        .onChange(of: photos.count) { _, _ in
+        // Keyed on the photos themselves, not just the count: a replacement
+        // swaps one photo for another and leaves the count unchanged, and the
+        // card still has to bring the new photograph to the front.
+        .onChange(of: photos) { _, _ in
             // A newly added photo takes the front. Clearing the explicit
             // choice is enough — focus falls back to the newest.
             withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {

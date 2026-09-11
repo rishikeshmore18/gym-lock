@@ -16,7 +16,11 @@ import UIKit
 actor ProgressPhotoImageLoader {
     static let shared = ProgressPhotoImageLoader()
 
-    private let cache = NSCache<NSString, UIImage>()
+    /// `nonisolated` because `NSCache` is already thread-safe, and the
+    /// synchronous `cached(_:)` peek below has to be callable from a view body
+    /// without hopping onto the actor — which would defeat its whole purpose
+    /// of drawing a known image on the very first frame.
+    private nonisolated let cache = NSCache<NSString, UIImage>()
     /// In-flight decodes, so two cards asking for the same file at the same
     /// moment share one read instead of racing.
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
