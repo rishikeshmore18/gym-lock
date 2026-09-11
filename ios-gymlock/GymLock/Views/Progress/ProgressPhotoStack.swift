@@ -37,7 +37,7 @@ struct ProgressPhotoStack: View {
     /// slot. A full projection sends a firm flick clean past the whole
     /// history; none at all makes a fast flick and a slow drag land in the
     /// same place, which is what makes a deck feel nailed down.
-    private static let momentum: CGFloat = 0.55
+    private static let momentum: CGFloat = 0.72
     /// Resistance applied past the first and last photograph.
     private static let edgeResistance: CGFloat = 0.3
 
@@ -52,9 +52,11 @@ struct ProgressPhotoStack: View {
     /// Finger travel that advances the deck by one photograph.
     ///
     /// Undamped on purpose: the deck moves with the hand at its own scale
-    /// rather than lagging behind it at a fraction of the speed.
+    /// rather than lagging behind it at a fraction of the speed. Deliberately
+    /// shorter than a card, so one comfortable thumb sweep crosses the whole
+    /// history instead of advancing one photograph per swipe.
     private var slotTravel: CGFloat {
-        max(cardWidth * 0.58, 1)
+        max(cardWidth * 0.5, 1)
     }
 
     /// Where the deck is right now, settled or mid-drag.
@@ -130,8 +132,12 @@ struct ProgressPhotoStack: View {
     /// its own weight.
     private func glide(slots: CGFloat) -> Animation {
         guard !reduceMotion else { return .easeInOut(duration: 0.18) }
-        let response = min(0.34 + Double(slots) * 0.08, 0.66)
-        return .spring(response: response, dampingFraction: 0.84)
+        let response = min(0.36 + Double(slots) * 0.09, 0.7)
+        // Slightly less damped the further it has to travel, so a long glide
+        // arrives carrying a trace of momentum rather than stopping dead on
+        // the slot the way a snapped index would.
+        let damping = max(0.86 - Double(slots) * 0.03, 0.76)
+        return .spring(response: response, dampingFraction: damping)
     }
 
     // MARK: Drag
@@ -237,24 +243,56 @@ enum ProgressPhotoLayout {
         guard regionWidth > 0 else { return ProgressPhotoMetrics.preferredCardWidth }
         let fraction: CGFloat = switch count {
         case 0, 1: 0.74
-        case 2: 0.62
-        case 3: 0.56
-        default: 0.44
+        case 2: 0.64
+        case 3: 0.58
+        default: 0.48
         }
         // Capped so the stack never outgrows the space it was given, and never
         // shrinks below something you could actually recognise a body in.
         return min(max(regionWidth * fraction, 62), regionWidth)
     }
 
-    /// Relative widths of the gaps between cards, oldest first.
+    /// Relative widths of the gaps between cards when the newest photo leads,
+    /// oldest first.
     ///
     /// Deliberately lopsided. The oldest photo gets by far the widest gap so it
-    /// stays around three-quarters visible, because it is the card the newest
-    /// one is being compared against — a Day 0 reduced to a sliver defeats the
-    /// point of the whole component. The middle two give up their space for it
-    /// and sit tightly overlapped, which is also what makes the stack read as
-    /// depth rather than as four evenly spaced thumbnails.
-    private static let gapWeights: [CGFloat] = [1.8, 0.66, 0.54]
+    /// stays around two-thirds visible, because it is the card the newest one
+    /// is being compared against — a Day 0 reduced to a sliver defeats the
+    /// point of the whole component. The middle cards give up their space for
+    /// it and sit tightly overlapped, which is also what makes the stack read
+    /// as depth rather than as four evenly spaced thumbnails.
+    private static func restWeights(count: Int) -> [CGFloat] {
+        switch count {
+        case ...1: []
+        case 2: [1.0]
+        case 3: [1.5, 0.8]
+        default: [1.8, 0.66] + Array(repeating: 0.54, count: count - 3)
+        }
+    }
+
+    /// The gaps for a given deck position, which is what makes a drag feel like
+    /// a deck instead of a slideshow.
+    ///
+    /// The resting arrangement is built around the newest photo leading. Its
+    /// mirror image is the arrangement for the oldest photo leading, and every
+    /// position in between is a real blend of the two. So the space itself
+    /// migrates from one end of the stack to the other as the finger moves:
+    /// cards ahead of the focus close up and cards behind it fan open,
+    /// continuously, at every intermediate frame.
+    ///
+    /// Without this the gaps were constant and only the scale changed, which is
+    /// exactly what made the motion read as rigid — the photographs stayed put
+    /// while the deck was supposedly being dragged through them.
+    static func gapWeights(count: Int, position: CGFloat) -> [CGFloat] {
+        let rest = restWeights(count: count)
+        guard rest.count > 1 else { return rest }
+
+        // 0 with the newest card in front, 1 with the oldest in front.
+        let progress = 1 - (position / CGFloat(count - 1)).clamped(to: 0...1)
+        return zip(rest, rest.reversed()).map { near, far in
+            near * (1 - progress) + far * progress
+        }
+    }
 
     static func geometry(
         index: Int,
@@ -272,10 +310,17 @@ enum ProgressPhotoLayout {
         let scale: CGFloat = ProgressPhotoMetrics.focusScale - depth * 0.045
         let opacity: Double = 1 - Double(depth) * 0.07
 
-        var x = baseX(index: index, count: count, cardWidth: cardWidth, regionWidth: regionWidth)
-        // Cards ease away from whichever one is coming forward, so the stack
-        // opens around the focus instead of every card sliding as a block.
-        x += delta.clamped(to: -2...2) * 4.5
+        var x = baseX(
+            index: index,
+            position: position,
+            count: count,
+            cardWidth: cardWidth,
+            regionWidth: regionWidth
+        )
+        // A last nudge away from whichever card is coming forward. Small now
+        // that the gaps themselves travel — this only softens the moment a
+        // card takes the front.
+        x += delta.clamped(to: -2...2) * 3
 
         return CardGeometry(
             x: x,
@@ -286,9 +331,15 @@ enum ProgressPhotoLayout {
         )
     }
 
-    /// Resting position of a card before any focus adjustment.
+    /// Position of a card for the deck's current position.
+    ///
+    /// The gaps are normalised against the slack in the region, so the last
+    /// card always lands flush with the right edge no matter how the space is
+    /// currently distributed. The stack breathes internally without the deck as
+    /// a whole drifting sideways.
     private static func baseX(
         index: Int,
+        position: CGFloat,
         count: Int,
         cardWidth: CGFloat,
         regionWidth: CGFloat
@@ -296,7 +347,7 @@ enum ProgressPhotoLayout {
         guard count > 1 else { return (regionWidth - cardWidth) / 2 }
 
         let slack = max(regionWidth - cardWidth, 0)
-        let weights = Array(gapWeights.prefix(count - 1))
+        let weights = gapWeights(count: count, position: position)
         let total = weights.reduce(0, +)
         guard total > 0 else { return 0 }
 
