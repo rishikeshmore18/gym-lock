@@ -56,6 +56,7 @@ final class ProgressPhotoStore {
         self.defaults = defaults
         installDate = AppInstallDate.resolve(defaults)
         load()
+        reconcile()
     }
 
     // MARK: - Reading
@@ -73,9 +74,17 @@ final class ProgressPhotoStore {
     /// One photo per day is what keeps the card meaningful: the stack is a
     /// comparison across time, and ten photos from one morning are ten copies
     /// of the same moment crowding out the months on either side of them.
+    ///
+    /// Returns the *newest* photo of that day, not the oldest. This has to
+    /// agree with the card, which labels the newest one "Latest" and draws it
+    /// in front — answering with the oldest meant the comparison sheet showed
+    /// the user a photograph that was not the one on their screen, and then
+    /// replaced that one instead. It also made the duplicate permanent: if a
+    /// day ever held two photos, every new photo replaced the older of them
+    /// and the day was left holding two again.
     func photo(on date: Date) -> ProgressPhoto? {
         let calendar = Calendar.current
-        return photos.first { calendar.isDate($0.createdAt, inSameDayAs: date) }
+        return photos.last { calendar.isDate($0.createdAt, inSameDayAs: date) }
     }
 
     private func load() {
@@ -88,6 +97,77 @@ final class ProgressPhotoStore {
     private func persist() {
         guard let data = try? JSONEncoder().encode(photos) else { return }
         defaults.set(data, forKey: Self.storageKey)
+    }
+
+    /// Repairs a history that earlier versions could leave inconsistent.
+    ///
+    /// Two faults are cleaned up here, both of which the user could see and
+    /// neither of which they could fix:
+    ///
+    /// - **Rows with no files behind them.** These drew as a permanent grey
+    ///   placeholder in the stack and as "Can't open this photo" in the
+    ///   comparison. There is nothing to recover — the image is gone — so the
+    ///   row goes too rather than occupying one of the four cards forever.
+    /// - **More than one photo on a day.** The day rule is enforced on the way
+    ///   in, but a history that predates the fix above still holds duplicates,
+    ///   and the rule alone would never remove them.
+    ///
+    /// Runs at load, so a user who already has a broken stack is repaired by
+    /// opening the app rather than by reinstalling it.
+    private func reconcile() {
+        let kept = Self.collapsingDuplicateDays(in: photos.filter(Self.hasFiles))
+        guard kept != photos else { return }
+
+        let discarded = photos.filter { photo in !kept.contains { $0.id == photo.id } }
+        photos = kept
+        persist()
+
+        // Only the bytes of rows we dropped, and only after the index is
+        // already consistent — a crash mid-cleanup must not be able to leave a
+        // row pointing at a file that is no longer there.
+        let names = discarded.flatMap { [$0.fileName, $0.thumbnailName] }
+        Task.detached(priority: .utility) {
+            for name in names {
+                try? FileManager.default.removeItem(at: Self.url(forFileName: name))
+            }
+        }
+    }
+
+    /// Whether both files backing a photo are still on disk.
+    ///
+    /// Existence only, deliberately — not a decode. Reading and decoding every
+    /// photo at launch would put the user's whole history through ImageIO
+    /// before the first frame, and a transient read failure must never be
+    /// grounds for deleting someone's photograph.
+    private nonisolated static func hasFiles(_ photo: ProgressPhoto) -> Bool {
+        let manager = FileManager.default
+        return manager.fileExists(atPath: url(forFileName: photo.fileName).path)
+            && manager.fileExists(atPath: url(forFileName: photo.thumbnailName).path)
+    }
+
+    /// Reduces each day to its newest photo.
+    ///
+    /// The newest wins because it is the one the card has been showing as
+    /// "Latest", so the repair removes the photos the user was not looking at.
+    /// Day 0 standing is carried over to the survivor: the fact that a day is
+    /// the user's before-picture belongs to the day, not to whichever file
+    /// happened to be kept.
+    private nonisolated static func collapsingDuplicateDays(
+        in photos: [ProgressPhoto]
+    ) -> [ProgressPhoto] {
+        let calendar = Calendar.current
+        var byDay: [Date: ProgressPhoto] = [:]
+
+        for photo in photos.sorted(by: { $0.createdAt < $1.createdAt }) {
+            let day = calendar.startOfDay(for: photo.createdAt)
+            var winner = photo
+            if let previous = byDay[day] {
+                winner.isDayZero = previous.isDayZero || photo.isDayZero
+            }
+            byDay[day] = winner
+        }
+
+        return byDay.values.sorted { $0.createdAt < $1.createdAt }
     }
 
     // MARK: - Writing
@@ -276,18 +356,29 @@ final class ProgressPhotoStore {
               let data = try? Data(contentsOf: url)
         else { return }
 
-        defaults.set(true, forKey: Self.dayZeroImportKey)
+        // Already represented for that day: mark it done and leave the
+        // existing photo alone. Straight to `commit` below rather than `add`,
+        // because a comparison sheet appearing unprompted on first open of the
+        // Progress tab would be baffling.
+        guard photo(on: media.capturedAt) == nil else {
+            defaults.set(true, forKey: Self.dayZeroImportKey)
+            return
+        }
 
-        // Straight to `commit`: this is the day-0 photo by definition, so it
-        // cannot be in conflict with itself, and a comparison sheet appearing
-        // unprompted on first open of the Progress tab would be baffling.
-        guard photo(on: media.capturedAt) == nil else { return }
+        let before = photos.count
         await commit(
             imageData: data,
             source: .camera,
             createdAt: media.capturedAt,
             isDayZero: true
         )
+
+        // The flag is only set once the photo is genuinely stored. Setting it
+        // up front meant an adoption that lost the re-entrancy race — `commit`
+        // returns silently while another import is in flight — was recorded as
+        // done, and the user's before-picture was dropped for good.
+        guard photos.count > before else { return }
+        defaults.set(true, forKey: Self.dayZeroImportKey)
     }
 
     // MARK: - Files
