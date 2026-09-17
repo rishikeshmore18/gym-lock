@@ -291,7 +291,14 @@ extension View {
     /// A sheet at a large detent rather than a full-screen cover: the card
     /// underneath stays faintly visible, which keeps the decision anchored to
     /// the place it came from instead of feeling like a separate screen.
-    func progressPhotoReplaceSheet(store: ProgressPhotoStore) -> some View {
+    ///
+    /// `onReplaced` reports the photo that was actually written, so a caller
+    /// that was on its way to the Story editor can carry on with the right
+    /// one. Cancelling reports nothing: there is nothing new to share.
+    func progressPhotoReplaceSheet(
+        store: ProgressPhotoStore,
+        onReplaced: ((ProgressPhoto) -> Void)? = nil
+    ) -> some View {
         sheet(
             item: Binding(
                 get: { store.pendingReplacement },
@@ -301,7 +308,10 @@ extension View {
             )
         ) { pending in
             ProgressPhotoReplaceSheet(pending: pending) {
-                Task { await store.confirmReplacement() }
+                Task {
+                    guard let replaced = await store.confirmReplacement() else { return }
+                    onReplaced?(replaced)
+                }
             } onCancel: {
                 store.cancelReplacement()
             }

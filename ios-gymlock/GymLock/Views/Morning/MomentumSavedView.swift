@@ -9,10 +9,12 @@ import SwiftUI
 /// Two numbers, never conflated: momentum is maintained, the gym visit is not
 /// counted.
 struct MomentumSavedView: View {
-    let momentumStreak: Int
+    let momentumWeeks: Int
     let recentMomentum: [Bool]
     let onKeepGoing: () -> Void
     let onDone: () -> Void
+    /// Opens the Story editor for this morning — offered, never pushed.
+    var onShare: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hasAppeared = false
@@ -50,7 +52,19 @@ struct MomentumSavedView: View {
                     onKeepGoing()
                 }
                 .padding(.horizontal, Theme.pageMargin)
-                .padding(.bottom, 14)
+                .padding(.bottom, onShare == nil ? 14 : 4)
+
+                if let onShare {
+                    Button("share this") {
+                        Haptics.tap()
+                        onShare()
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.inkTertiary)
+                    .frame(minHeight: 36)
+                    .padding(.bottom, 8)
+                    .accessibilityLabel("Share this morning")
+                }
             }
         }
         .task {
@@ -114,13 +128,13 @@ struct MomentumSavedView: View {
                     .background(Theme.accent, in: .circle)
                     .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 14 }
 
-                Text("\(momentumStreak)")
+                Text("\(momentumWeeks)")
                     .font(.system(size: 52, weight: .bold))
                     .monospacedDigit()
                     .foregroundStyle(Theme.accent)
                     .contentTransition(.numericText())
 
-                Text("day streak")
+                Text("week streak")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Theme.inkSecondary)
 

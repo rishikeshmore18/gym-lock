@@ -69,6 +69,20 @@ final class ProgressPhotoStore {
         ProgressPhotoSlide.slides(for: photos, installDate: installDate)
     }
 
+    /// The photograph that earned the words "Day 0", if the user has one.
+    ///
+    /// The onboarding capture, or failing that the oldest photo if it was taken
+    /// on the install day — the same rule the stack's opening card uses, so
+    /// the Journey frame and the card can never disagree about which photo
+    /// that is.
+    var dayZeroPhoto: ProgressPhoto? {
+        if let flagged = photos.first(where: \.isDayZero) { return flagged }
+        guard let oldest = photos.first,
+              ProgressPhotoSlide.openingMarker(for: oldest, installDate: installDate) == .dayZero
+        else { return nil }
+        return oldest
+    }
+
     /// The photo already stored for a given day, if there is one.
     ///
     /// One photo per day is what keeps the card meaningful: the stack is a
@@ -172,35 +186,50 @@ final class ProgressPhotoStore {
 
     // MARK: - Writing
 
+    /// What happened to a photo handed to `add`.
+    ///
+    /// The caller needs to know which, because sharing saves first and then
+    /// opens the editor on the photo that was actually written — and when the
+    /// day is already taken there is no such photo until the user has decided.
+    enum AddResult: Equatable {
+        case saved(ProgressPhoto)
+        /// Held back; `pendingReplacement` is set and the comparison sheet
+        /// will resolve it through `confirmReplacement` or `cancelReplacement`.
+        case needsDecision
+        case failed
+    }
+
     /// Takes a photo from any of the three sources.
     ///
     /// Stops at the day check and hands the decision back to the user when that
     /// day is already spoken for; otherwise it writes straight through.
+    @discardableResult
     func add(
         imageData: Data,
         source: ProgressPhotoSource,
         createdAt: Date?,
         isDayZero: Bool = false
-    ) async {
-        guard !isImporting, pendingReplacement == nil else { return }
+    ) async -> AddResult {
+        guard !isImporting, pendingReplacement == nil else { return .failed }
 
         let date = createdAt ?? Date()
         if let existing = photo(on: date) {
-            await holdForComparison(
+            let held = await holdForComparison(
                 imageData: imageData,
                 source: source,
                 createdAt: date,
                 existing: existing
             )
-            return
+            return held ? .needsDecision : .failed
         }
 
-        await commit(
+        let saved = await commit(
             imageData: imageData,
             source: source,
             createdAt: date,
             isDayZero: isDayZero
         )
+        return saved.map(AddResult.saved) ?? .failed
     }
 
     /// Prepares the side-by-side comparison without writing anything.
@@ -213,7 +242,7 @@ final class ProgressPhotoStore {
         source: ProgressPhotoSource,
         createdAt: Date,
         existing: ProgressPhoto
-    ) async {
+    ) async -> Bool {
         isImporting = true
         let pixels = Self.previewPixels
         let preview = await Task.detached(priority: .userInitiated) {
@@ -223,7 +252,7 @@ final class ProgressPhotoStore {
 
         guard let preview else {
             failureMessage = "Couldn't add this photo."
-            return
+            return false
         }
 
         pendingReplacement = PendingProgressPhoto(
@@ -233,6 +262,7 @@ final class ProgressPhotoStore {
             createdAt: createdAt,
             existing: existing
         )
+        return true
     }
 
     /// Swaps the day's existing photo for the one waiting.
@@ -241,21 +271,21 @@ final class ProgressPhotoStore {
     /// write leaves the user with the photo they already had rather than with
     /// nothing at all. Nothing here is reachable until the user has explicitly
     /// confirmed in the comparison sheet.
-    func confirmReplacement() async {
-        guard let request = pendingReplacement else { return }
+    @discardableResult
+    func confirmReplacement() async -> ProgressPhoto? {
+        guard let request = pendingReplacement else { return nil }
         pendingReplacement = nil
 
-        let before = photos.count
-        await commit(
+        guard let saved = await commit(
             imageData: request.imageData,
             source: request.source,
             createdAt: request.createdAt,
             // A replacement inherits the standing of the photo it replaces: if
             // the user is redoing their Day 0, the new one is still Day 0.
             isDayZero: request.existing.isDayZero
-        )
-        guard photos.count > before else { return }
+        ) else { return nil }
         await remove(request.existing)
+        return saved
     }
 
     /// Throws the waiting photo away, keeping the one already saved.
@@ -293,13 +323,14 @@ final class ProgressPhotoStore {
     /// `isImporting` also acts as the re-entrancy guard: SwiftUI can deliver a
     /// picker result more than once as the view reloads, and without this a
     /// single selection could be written twice.
+    @discardableResult
     private func commit(
         imageData: Data,
         source: ProgressPhotoSource,
         createdAt: Date,
         isDayZero: Bool
-    ) async {
-        guard !isImporting else { return }
+    ) async -> ProgressPhoto? {
+        guard !isImporting else { return nil }
         isImporting = true
         defer { isImporting = false }
 
@@ -319,7 +350,7 @@ final class ProgressPhotoStore {
 
         guard outcome else {
             failureMessage = "Couldn't add this photo."
-            return
+            return nil
         }
 
         let photo = ProgressPhoto(
@@ -334,7 +365,10 @@ final class ProgressPhotoStore {
         photos.append(photo)
         photos.sort { $0.createdAt < $1.createdAt }
         persist()
+        // The one success haptic for a save. The Story editor's "saved" toast
+        // deliberately does not fire its own — this is the same event.
         Haptics.commit()
+        return photo
     }
 
     // MARK: - Day 0
@@ -365,8 +399,7 @@ final class ProgressPhotoStore {
             return
         }
 
-        let before = photos.count
-        await commit(
+        let saved = await commit(
             imageData: data,
             source: .camera,
             createdAt: media.capturedAt,
@@ -377,7 +410,7 @@ final class ProgressPhotoStore {
         // up front meant an adoption that lost the re-entrancy race — `commit`
         // returns silently while another import is in flight — was recorded as
         // done, and the user's before-picture was dropped for good.
-        guard photos.count > before else { return }
+        guard saved != nil else { return }
         defaults.set(true, forKey: Self.dayZeroImportKey)
     }
 

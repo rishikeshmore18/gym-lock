@@ -48,7 +48,7 @@ struct TodayHomeView: View {
     private static let bubbleRelease: Animation = .spring(response: 0.17, dampingFraction: 0.62)
     private static let bubbleReturn: Animation = .spring(response: 0.24, dampingFraction: 0.9)
 
-    private var streak: Int { store.log.momentumStreak }
+    private var streak: Int { store.streak.weeks }
 
     private var isMeasured: Bool { rootFrame.width > 0 && chipFrame.width > 0 }
 
@@ -312,13 +312,14 @@ struct TodayHomeView: View {
 
     private var cardContents: some View {
         StreakCardContent(
-            streak: streak,
+            streak: store.streak,
             metrics: metrics,
             // Plays for the whole time the card is out, including its journey
             // home; parked on one frame while it rests behind the header.
             isAnimated: intro.isMounted && !reduceMotion,
             showsClose: intro.showsCloseButton,
-            onClose: { intro.close(reduceMotion: reduceMotion) }
+            onClose: { intro.close(reduceMotion: reduceMotion) },
+            onArmFreeze: { store.armFreezeForThisWeek() }
         )
         .opacity(intro.isExpanded ? 1 : 0)
         .animation(contentFade, value: intro.isExpanded)

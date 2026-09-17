@@ -26,6 +26,7 @@ final class AppStore {
         static let gym = "gymlock.primaryGym"
         static let events = "gymlock.sessionEvents"
         static let blockedAppsConfigured = "gymlock.blockedAppsConfigured"
+        static let streakVault = "gymlock.streakVault"
     }
 
     private let defaults: UserDefaults
@@ -39,7 +40,10 @@ final class AppStore {
     }
 
     var schedule: GymSchedule {
-        didSet { persistSchedule() }
+        didSet {
+            persistSchedule()
+            refreshStreak()
+        }
     }
 
     /// Everything the user told GymLock while building their system.
@@ -53,13 +57,34 @@ final class AppStore {
     /// what the user said about themselves; the plan is the schedule they are
     /// actually running, seeded from those answers.
     var plan: MorningPlan {
-        didSet { persist(plan, forKey: Key.plan) }
+        didSet {
+            persist(plan, forKey: Key.plan)
+            refreshStreak()
+        }
     }
 
     /// The honest ledger of what happened on each planned session.
     var log: MomentumLog {
-        didSet { persist(log, forKey: Key.log) }
+        didSet {
+            persist(log, forKey: Key.log)
+            refreshStreak()
+        }
     }
+
+    /// What the streak remembers between evaluations: banked freezes and the
+    /// weeks they protected. The count itself is never stored — see `streak`.
+    private(set) var streakVault: StreakVault {
+        didSet { persist(streakVault, forKey: Key.streakVault) }
+    }
+
+    /// The streak, in kept weeks, as every screen shows it.
+    ///
+    /// Derived from the ledger by `StreakEngine` and refreshed whenever the
+    /// ledger, the plan or the schedule changes, and on every foreground so a
+    /// week that ended overnight is ruled on before anyone reads the number.
+    /// Held as stored state rather than recomputed in every view body because
+    /// evaluation can *spend* a freeze, and a side effect belongs in one place.
+    private(set) var streak: StreakSnapshot = .empty
 
     /// The gym the user actually goes to.
     ///
@@ -153,8 +178,54 @@ final class AppStore {
             events = .empty
         }
 
+        if let data = defaults.data(forKey: Key.streakVault),
+           let decoded = try? JSONDecoder().decode(StreakVault.self, from: data) {
+            streakVault = decoded
+        } else {
+            streakVault = .empty
+        }
+
         hasConfiguredBlockedApps = defaults.bool(forKey: Key.blockedAppsConfigured)
         lastDepartureMessageIndex = defaults.object(forKey: Key.departureMessage) as? Int
+
+        refreshStreak()
+    }
+
+    // MARK: - Streak
+
+    /// Re-derives the streak and settles any weeks that completed since the
+    /// last evaluation.
+    ///
+    /// The vault is only written back when evaluation actually changed it, so
+    /// the common case — nothing new to rule on — costs one pass over the
+    /// ledger and no disk write.
+    func refreshStreak(now: Date = Date()) {
+        var vault = streakVault
+        let snapshot = StreakEngine.evaluate(
+            log: log,
+            plan: plan,
+            schedule: schedule,
+            vault: &vault,
+            now: now
+        )
+        if vault != streakVault { streakVault = vault }
+        if snapshot != streak { streak = snapshot }
+    }
+
+    /// Spends one banked freeze on the current week, ahead of time.
+    ///
+    /// The Ladder behaviour: a user who already knows this week is lost can
+    /// protect the streak now instead of hoping the automatic freeze catches
+    /// it. Refunded by the engine if the week turns out kept after all.
+    @discardableResult
+    func armFreezeForThisWeek(now: Date = Date()) -> Bool {
+        guard streak.canArmFreeze else { return false }
+        var vault = streakVault
+        vault.freezesAvailable -= 1
+        vault.preArmedWeekStart = streak.liveWeekStart
+        streakVault = vault
+        refreshStreak(now: now)
+        return true
     }
 
     // MARK: - Events
@@ -278,6 +349,8 @@ final class AppStore {
         primaryGym = nil
         hasConfiguredBlockedApps = false
         lastDepartureMessageIndex = nil
+        streakVault = .empty
+        refreshStreak()
         stage = .onboarding
     }
 

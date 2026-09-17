@@ -256,12 +256,12 @@ struct HeroCardView: View {
                         .frame(width: metrics.width * 0.34)
                     }
                 )
-            case .latePattern(let momentumDays):
+            case .latePattern(let momentumWeeks):
                 ImageHero(
                     imageName: "HeroSummit",
                     eyebrow: "PATTERN BUILT",
                     headline: ["You built", "a pattern."],
-                    support: "\(momentumDays) day momentum",
+                    support: "\(momentumWeeks) week momentum",
                     metrics: metrics,
                     showsCTA: onCTA != nil,
                     onCTA: onCTA

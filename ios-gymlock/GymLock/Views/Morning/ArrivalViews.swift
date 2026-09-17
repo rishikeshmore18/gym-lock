@@ -194,10 +194,14 @@ struct ArrivalTroubleView: View {
 struct GymArrivedView: View {
     let session: GymSession
     let gymName: String?
-    let momentumStreak: Int
+    let momentumWeeks: Int
     let gymVisitsThisMonth: Int
     let shieldCapability: ShieldCapability
     let onDone: () -> Void
+    /// Opens the Story editor for this morning. The peak of the product is
+    /// the one place sharing is worth offering, and it is offered, not pushed:
+    /// a text link under the primary action, in the style of "having trouble?".
+    var onShare: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hasAppeared = false
@@ -236,7 +240,19 @@ struct GymArrivedView: View {
                     onDone()
                 }
                 .padding(.horizontal, Theme.pageMargin)
-                .padding(.bottom, 14)
+                .padding(.bottom, onShare == nil ? 14 : 4)
+
+                if let onShare {
+                    Button("share this") {
+                        Haptics.tap()
+                        onShare()
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.inkTertiary)
+                    .frame(minHeight: 36)
+                    .padding(.bottom, 8)
+                    .accessibilityLabel("Share this morning")
+                }
             }
         }
         .task { withAnimation(Theme.settle) { hasAppeared = true } }
@@ -379,7 +395,7 @@ struct GymArrivedView: View {
 
     private var statsRow: some View {
         HStack(spacing: 12) {
-            statTile(value: "\(momentumStreak)", label: "momentum", icon: "flame.fill")
+            statTile(value: "\(momentumWeeks)", label: "week streak", icon: "flame.fill")
             statTile(value: "\(gymVisitsThisMonth)", label: "gym visits", icon: "dumbbell.fill")
         }
         .opacity(hasAppeared ? 1 : 0)

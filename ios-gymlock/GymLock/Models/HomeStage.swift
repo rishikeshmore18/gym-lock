@@ -61,7 +61,7 @@ enum HeroStage: Equatable {
     /// Mid-month progress with a linear bar.
     case midMonth(done: Int, of: Int, percent: Int)
     /// Late month: the streak has become an identity.
-    case latePattern(momentumDays: Int)
+    case latePattern(momentumWeeks: Int)
 }
 
 /// One row of the setup checklist.
@@ -164,7 +164,7 @@ enum HomeCardDeriver {
             switch outcome.kind {
             case .showedUp, .homeWorkout:
                 return resolvedModel(
-                    streak: store.log.momentumStreak,
+                    streak: store.streak.weeks,
                     store: store, coordinator: coordinator, now: now, calendar: calendar
                 )
             case .missed:
@@ -254,7 +254,7 @@ enum HomeCardDeriver {
         calendar: Calendar
     ) -> HomeCardModel {
         let total = 4
-        let streak = store.log.momentumStreak
+        let streak = store.streak.weeks
 
         let hero: HeroStage
         let pathSteps: Int
@@ -615,13 +615,14 @@ enum HomeCardDeriver {
             )
         }
 
-        // Late month: identity, backed by a real streak.
+        // Late month: identity, backed by a real streak. Four kept weeks is
+        // the first point a pattern is a pattern rather than a good month.
         if dayOfMonth >= 20 {
-            let streak = store.log.momentumStreak
-            guard streak >= 10 else { return nil }
+            let streak = store.streak.weeks
+            guard streak >= 4 else { return nil }
             return monthModel(
                 store: store, coordinator: coordinator,
-                hero: .latePattern(momentumDays: streak),
+                hero: .latePattern(momentumWeeks: streak),
                 now: now, calendar: calendar
             )
         }

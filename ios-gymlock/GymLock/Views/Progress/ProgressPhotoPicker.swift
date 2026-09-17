@@ -3,22 +3,45 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// An imported image waiting on the review screen.
+///
+/// Held in memory only. Nothing reaches the store until the user has looked at
+/// the photograph and chosen what to do with it.
+private struct PendingReview: Identifiable {
+    let id = UUID()
+    let data: Data
+    let image: UIImage
+    let source: ProgressPhotoSource
+    let createdAt: Date?
+    /// Which picker to reopen if the user asks for another.
+    let choice: ProgressPhotoSourceChoice
+}
+
 /// Everything needed to get one image into the store, from any of the three
 /// sources, attached to the Progress Photos card as a single modifier.
 ///
 /// The three import paths are deliberately funnelled into one `deliver` call:
 /// there is exactly one place where a photo becomes real, which is what keeps
-/// a duplicate from slipping in when SwiftUI re-delivers a picker result.
+/// a duplicate from slipping in when SwiftUI re-delivers a picker result. And
+/// since the review step, every path also passes through exactly one review.
 struct ProgressPhotoImporter: ViewModifier {
     let store: ProgressPhotoStore
     /// Set by the Add Photo menu, cleared as soon as it has been acted on.
     @Binding var pendingSource: ProgressPhotoSourceChoice?
+    /// Opens the Story editor on a photo that has just been saved.
+    let onShare: (ProgressPhoto) -> Void
 
     @State private var isShowingCamera = false
     @State private var isShowingFiles = false
     @State private var isShowingLibrary = false
     @State private var libraryItem: PhotosPickerItem?
     @State private var cameraDenied = false
+    /// A Photos or Files import on the review screen.
+    @State private var review: PendingReview?
+    /// Set when the user chose Share and the day turned out to be taken. The
+    /// comparison sheet decides; if it confirms, the editor opens on the
+    /// photo that was actually written.
+    @State private var wantsShareAfterReplacement = false
 
     func body(content: Content) -> some View {
         content
@@ -37,14 +60,39 @@ struct ProgressPhotoImporter: ViewModifier {
             )
             .fullScreenCover(isPresented: $isShowingCamera) {
                 // The sheet only calls back once the user has reviewed the
-                // frame and tapped Use Photo, so everything arriving here is
-                // already confirmed.
-                ProgressPhotoCaptureSheet { data in
+                // frame and chosen, so everything arriving here is already
+                // approved.
+                ProgressPhotoCaptureSheet(isSaving: store.isImporting) { data, intent in
                     isShowingCamera = false
-                    deliver(data: data, source: .camera, createdAt: Date())
+                    deliver(data: data, source: .camera, createdAt: Date(), intent: intent)
                 } onCancel: {
                     isShowingCamera = false
                 }
+            }
+            .fullScreenCover(item: $review) { pending in
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    ProgressPhotoReviewView(
+                        image: pending.image,
+                        retakeTitle: "Choose another",
+                        isBusy: store.isImporting,
+                        onRetake: {
+                            review = nil
+                            present { route(pending.choice) }
+                        },
+                        onChoose: { intent in
+                            review = nil
+                            deliver(
+                                data: pending.data,
+                                source: pending.source,
+                                createdAt: pending.createdAt,
+                                intent: intent
+                            )
+                        },
+                        onCancel: { review = nil }
+                    )
+                }
+                .preferredColorScheme(.dark)
             }
             .fileImporter(
                 isPresented: $isShowingFiles,
@@ -78,7 +126,13 @@ struct ProgressPhotoImporter: ViewModifier {
             ) {
                 Button("OK", role: .cancel) { store.failureMessage = nil }
             }
-            .progressPhotoReplaceSheet(store: store)
+            .progressPhotoReplaceSheet(store: store) { replaced in
+                guard wantsShareAfterReplacement else { return }
+                wantsShareAfterReplacement = false
+                // The comparison sheet is still dismissing; same rule as
+                // everywhere else, or the editor is silently dropped.
+                present { onShare(replaced) }
+            }
     }
 
     // MARK: Sources
@@ -135,7 +189,7 @@ struct ProgressPhotoImporter: ViewModifier {
             // PhotosPicker hands over the chosen asset without the app ever
             // holding library-wide permission, so no authorisation is
             // requested here.
-            await store.add(imageData: data, source: .library, createdAt: nil)
+            await openReview(data: data, source: .library, createdAt: nil, choice: .library)
         }
     }
 
@@ -166,18 +220,71 @@ struct ProgressPhotoImporter: ViewModifier {
         }
 
         let created = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
-        await store.add(imageData: data, source: .files, createdAt: created)
+        await openReview(data: data, source: .files, createdAt: created, choice: .files)
     }
 
-    /// Hands one confirmed image to the store.
+    /// Puts an imported image on the review screen.
     ///
-    /// Waits for the camera to finish dismissing first. `add` may decide the
+    /// The image is decoded once here, off the main actor, so the cover has
+    /// something to draw on its first frame rather than a black screen while
+    /// a large file is read. A file the system cannot decode fails here, with
+    /// the same alert a failed save would show.
+    private func openReview(
+        data: Data,
+        source: ProgressPhotoSource,
+        createdAt: Date?,
+        choice: ProgressPhotoSourceChoice
+    ) async {
+        let image = await Task.detached(priority: .userInitiated) {
+            UIImage(data: data)
+        }.value
+
+        guard let image else {
+            store.failureMessage = "Couldn't add this photo."
+            return
+        }
+
+        present {
+            review = PendingReview(
+                data: data,
+                image: image,
+                source: source,
+                createdAt: createdAt,
+                choice: choice
+            )
+        }
+    }
+
+    /// Hands one approved image to the store, then does what the user asked.
+    ///
+    /// Waits for the review to finish dismissing first. `add` may decide the
     /// day is taken and raise the comparison sheet, and a sheet presented in
     /// the same runloop turn that dismisses a full-screen cover is silently
     /// dropped — the user would tap Use Photo and see nothing happen at all.
-    private func deliver(data: Data, source: ProgressPhotoSource, createdAt: Date?) {
+    ///
+    /// Sharing always saves first. The editor only ever opens on a photo the
+    /// store has actually written, and a failed save shows the failure alert
+    /// and no editor.
+    private func deliver(
+        data: Data,
+        source: ProgressPhotoSource,
+        createdAt: Date?,
+        intent: ProgressPhotoIntent
+    ) {
         present {
-            Task { await store.add(imageData: data, source: source, createdAt: createdAt) }
+            Task {
+                let result = await store.add(imageData: data, source: source, createdAt: createdAt)
+                guard intent == .saveAndShare else { return }
+
+                switch result {
+                case let .saved(photo):
+                    onShare(photo)
+                case .needsDecision:
+                    wantsShareAfterReplacement = true
+                case .failed:
+                    break
+                }
+            }
         }
     }
 
@@ -191,9 +298,10 @@ extension View {
     /// Attaches the photo import flow to a view.
     func progressPhotoImporter(
         store: ProgressPhotoStore,
-        pendingSource: Binding<ProgressPhotoSourceChoice?>
+        pendingSource: Binding<ProgressPhotoSourceChoice?>,
+        onShare: @escaping (ProgressPhoto) -> Void
     ) -> some View {
-        modifier(ProgressPhotoImporter(store: store, pendingSource: pendingSource))
+        modifier(ProgressPhotoImporter(store: store, pendingSource: pendingSource, onShare: onShare))
     }
 }
 

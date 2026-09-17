@@ -137,7 +137,7 @@ private struct PressableTileStyle: ButtonStyle {
 
 #Preview("Stat cards") {
     HStack(spacing: 12) {
-        ProgressStatCard(title: "Day Streak", count: 12) {
+        ProgressStatCard(title: "Week Streak", count: 12) {
             FlameEmblem()
         }
         ProgressStatCard(title: "Badges Earned", count: 0, digitStyle: .dark) {

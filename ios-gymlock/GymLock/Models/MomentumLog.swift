@@ -81,13 +81,17 @@ struct SessionOutcome: Codable, Hashable, Identifiable {
 ///
 /// Two numbers are tracked separately and never conflated:
 ///
-/// - **Momentum streak** — consecutive days on which the user did something they
-///   agreed counts. A home fallback keeps it.
+/// - **Momentum streak** — kept weeks in a row, derived from this ledger by
+///   `StreakEngine`. A home fallback keeps it.
 /// - **Verified gym visits** — only real, verified trips to the gym.
 ///
 /// Calling the first one a "gym streak" while a living-room workout maintains it
 /// would be a lie the user would eventually catch, and the whole product rests
 /// on them believing the numbers.
+///
+/// The streak itself is deliberately *not* a property here. It depends on the
+/// plan and on banked freezes as well as on these outcomes, so it lives on
+/// `AppStore.streak`, where all three meet.
 struct MomentumLog: Codable, Hashable {
     var outcomes: [SessionOutcome]
 
@@ -105,26 +109,6 @@ struct MomentumLog: Codable, Hashable {
     }
 
     // MARK: Momentum
-
-    /// Consecutive days, counting back from the most recent recorded day, on
-    /// which momentum was preserved.
-    ///
-    /// Rest days do not break it: only a *recorded* day that failed to preserve
-    /// momentum does. Someone training three times a week is not on a broken
-    /// streak for not training on Tuesday.
-    var momentumStreak: Int {
-        let calendar = Calendar.current
-        let byDay = Dictionary(grouping: outcomes) { calendar.startOfDay(for: $0.date) }
-        let days = byDay.keys.sorted(by: >)
-
-        var streak = 0
-        for day in days {
-            let dayOutcomes = byDay[day] ?? []
-            guard dayOutcomes.contains(where: { $0.kind.preservesMomentum }) else { break }
-            streak += 1
-        }
-        return streak
-    }
 
     /// Verified gym visits inside the current calendar month.
     var verifiedGymVisitsThisMonth: Int {

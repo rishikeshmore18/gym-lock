@@ -192,7 +192,7 @@ private let sampleWeekdayLabels = ["M", "T", "W", "T", "F", "S", "S"]
 
 #Preview("18 · Late month pattern") {
     StageCanvas(
-        stage: .latePattern(momentumDays: 18),
+        stage: .latePattern(momentumWeeks: 6),
         protection: ProtectionCard(mood: .ready, appCount: 3, detail: "armed for the alarm"),
         path: PathCard(completedSteps: 0, placeholder: "Pattern holding")
     )

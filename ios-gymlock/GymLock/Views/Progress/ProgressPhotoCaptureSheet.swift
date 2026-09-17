@@ -14,7 +14,11 @@ import SwiftUI
 /// still taking a photo, and being thrown back to the Progress tab to start
 /// again would punish them for looking.
 struct ProgressPhotoCaptureSheet: View {
-    let onCaptured: (Data) -> Void
+    /// Whether the store is mid-write, so the review can hold its buttons.
+    let isSaving: Bool
+    /// Called once the user has reviewed the frame and chosen what to do with
+    /// it. Nothing is written before this.
+    let onApproved: (Data, ProgressPhotoIntent) -> Void
     let onCancel: () -> Void
 
     /// Shoot or review. Modelled as one value with the image attached, so there
@@ -27,6 +31,10 @@ struct ProgressPhotoCaptureSheet: View {
     @State private var camera = ProgressPhotoCameraModel()
     @State private var phase: Phase = .capturing
     @State private var errorMessage: String?
+    /// Whether the zoom readout is showing. Shown while pinching and for a
+    /// moment after, then gone, as the Camera app does it.
+    @State private var isShowingZoomReadout = false
+    @State private var readoutFade: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -35,14 +43,32 @@ struct ProgressPhotoCaptureSheet: View {
             switch phase {
             case .capturing:
                 capturing
-            case let .reviewing(data, image):
-                review(data: data, image: image)
+            case let .reviewing(_, image):
+                ProgressPhotoReviewView(
+                    image: image,
+                    retakeTitle: "Retake",
+                    isBusy: isSaving,
+                    onRetake: {
+                        // Straight back to the live feed. The session was
+                        // never stopped, so this is instant rather than a
+                        // second launch.
+                        phase = .capturing
+                    },
+                    onChoose: { intent in
+                        guard case let .reviewing(data, _) = phase else { return }
+                        onApproved(data, intent)
+                    },
+                    onCancel: onCancel
+                )
             }
         }
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.22), value: phase)
         .onAppear(perform: startCamera)
-        .onDisappear { camera.stop() }
+        .onDisappear {
+            readoutFade?.cancel()
+            camera.stop()
+        }
     }
 
     // MARK: Capture
@@ -87,6 +113,10 @@ struct ProgressPhotoCaptureSheet: View {
         ZStack {
             CameraPreview(session: camera.session)
                 .ignoresSafeArea()
+                // Two fingers zoom the lens, exactly as in Camera. The pinch
+                // is read from where it started rather than accumulated, so
+                // lifting and re-pinching does not compound.
+                .gesture(pinch)
 
             VStack {
                 Text("progress photo")
@@ -96,7 +126,7 @@ struct ProgressPhotoCaptureSheet: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: .capsule)
+                    .viewfinderGlass(in: .capsule)
                     .padding(.top, 12)
 
                 Spacer()
@@ -107,7 +137,15 @@ struct ProgressPhotoCaptureSheet: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
-                        .background(.ultraThinMaterial, in: .capsule)
+                        .viewfinderGlass(in: .capsule)
+                        .padding(.bottom, 14)
+                }
+
+                zoomReadout
+                    .padding(.bottom, 10)
+
+                if !camera.lensOptions.isEmpty {
+                    lensChips
                         .padding(.bottom, 14)
                 }
 
@@ -119,6 +157,82 @@ struct ProgressPhotoCaptureSheet: View {
                 controls
                     .padding(.bottom, 30)
             }
+        }
+    }
+
+    // MARK: Zoom
+
+    private var pinch: some Gesture {
+        MagnifyGesture(minimumScaleDelta: 0)
+            .onChanged { value in
+                if !isShowingZoomReadout {
+                    camera.beginPinch()
+                    readoutFade?.cancel()
+                    withAnimation(.easeOut(duration: 0.12)) { isShowingZoomReadout = true }
+                }
+                camera.pinch(magnification: value.magnification)
+            }
+            .onEnded { _ in
+                scheduleReadoutFade()
+            }
+    }
+
+    /// The "1.7×" capsule the Camera app shows mid-pinch.
+    ///
+    /// Held in the layout at zero opacity rather than inserted and removed, so
+    /// the chips below never shift when it appears.
+    private var zoomReadout: some View {
+        Text("\(LensOption.format(camera.displayZoom))×")
+            .font(.system(size: 15, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .viewfinderGlass(in: .capsule)
+            .opacity(isShowingZoomReadout ? 1 : 0)
+            .accessibilityHidden(!isShowingZoomReadout)
+    }
+
+    /// Lens chips, derived from the device (see `ProgressPhotoCameraModel`).
+    ///
+    /// The "×" appears on the selected chip only, as in Camera; the others
+    /// read as plain factors so the row stays quiet.
+    private var lensChips: some View {
+        HStack(spacing: 6) {
+            ForEach(camera.lensOptions) { lens in
+                let isSelected = camera.selectedLens == lens
+                Button {
+                    camera.select(lens)
+                } label: {
+                    Text(isSelected ? "\(lens.label)×" : lens.label)
+                        .font(.system(size: isSelected ? 13 : 12, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(isSelected ? Color(red: 1, green: 0.8, blue: 0.2) : .white)
+                        .frame(minWidth: isSelected ? 36 : 30, minHeight: isSelected ? 36 : 30)
+                        .background(Color.black.opacity(isSelected ? 0.55 : 0.35), in: .circle)
+                        // The whole chip clears 44 pt for the thumb even
+                        // though the drawn circle is smaller.
+                        .frame(width: 44, height: 44)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .animation(Theme.stateChange, value: isSelected)
+                .accessibilityLabel("\(lens.label)× lens")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .viewfinderGlass(in: .capsule)
+        .disabled(camera.isCapturing)
+    }
+
+    private func scheduleReadoutFade() {
+        readoutFade?.cancel()
+        readoutFade = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { isShowingZoomReadout = false }
         }
     }
 
@@ -149,7 +263,7 @@ struct ProgressPhotoCaptureSheet: View {
                 .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
-                .background(.ultraThinMaterial, in: .circle)
+                .viewfinderGlass(in: .circle)
         }
         .disabled(camera.isCapturing)
         .accessibilityLabel(
@@ -174,93 +288,18 @@ struct ProgressPhotoCaptureSheet: View {
         .accessibilityLabel("Take progress photo")
     }
 
-    // MARK: Review
-
-    /// The captured frame, shown whole rather than cropped.
-    ///
-    /// `.fit`, not `.fill`: the user is about to decide whether this photograph
-    /// is the one, and a preview that quietly crops their head off would make
-    /// that decision on false information.
-    private func review(data: Data, image: UIImage) -> some View {
-        VStack(spacing: 0) {
-            Text("use this photo?")
-                .font(.system(size: 13, weight: .semibold))
-                .textCase(.uppercase)
-                .kerning(0.8)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: .capsule)
-                .padding(.top, 14)
-
-            Image(uiImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.vertical, 16)
-                .transition(.opacity)
-
-            HStack {
-                Button {
-                    Haptics.tap()
-                    // Straight back to the live feed. The session was never
-                    // stopped, so this is instant rather than a second launch.
-                    phase = .capturing
-                } label: {
-                    Text("Retake")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(minWidth: 96, minHeight: 44, alignment: .leading)
-                }
-
-                Spacer()
-
-                Button {
-                    Haptics.tap()
-                    onCaptured(data)
-                } label: {
-                    Text("Use Photo")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 22)
-                        .frame(height: 48)
-                        .background(.white, in: .capsule)
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 30)
-        }
-        .overlay(alignment: .topTrailing) {
-            closeControl.padding(.horizontal, 18).padding(.top, 10)
-        }
-    }
-
     // MARK: Chrome
 
     private var closeButton: some View {
         VStack {
             HStack {
                 Spacer()
-                closeControl
+                ViewfinderCloseButton(action: onCancel)
             }
             Spacer()
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
-    }
-
-    private var closeControl: some View {
-        Button {
-            Haptics.tap()
-            onCancel()
-        } label: {
-            Image(systemName: "xmark")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(.ultraThinMaterial, in: .circle)
-        }
-        .accessibilityLabel("Close")
     }
 
     private func message(

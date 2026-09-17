@@ -15,22 +15,28 @@ struct StreakCardMetrics: Equatable {
     var numberSize: CGFloat { size.width * 0.17 }
 
     var labelSize: CGFloat { 15 }
+    /// The "2 of 3 this week" line and the freeze row under the label.
+    var detailSize: CGFloat { 13 }
 
     var topPadding: CGFloat { 26 }
     var bottomPadding: CGFloat { 24 }
     var numberToFlame: CGFloat { 8 }
     var flameToLabel: CGFloat { 6 }
+    var labelToDetail: CGFloat { 4 }
 
     /// Height of the flame the user can actually see — not of the square canvas
     /// it is drawn on, which is mostly empty.
     ///
-    /// Takes everything the card has left after the number and the label, and
-    /// is capped so the flame never runs wider than three quarters of the card.
+    /// Takes everything the card has left after the number, the label and the
+    /// two detail lines, and is capped so the flame never runs wider than three
+    /// quarters of the card.
     var flameHeight: CGFloat {
         let chrome = numberSize * 1.2
             + numberToFlame
             + flameToLabel
             + labelSize * 1.35
+            + labelToDetail
+            + detailSize * 1.35 * 2
             + topPadding
             + bottomPadding
 
@@ -56,7 +62,7 @@ struct StreakCardMetrics: Equatable {
 /// the same surface as the header capsule and has to travel and reshape
 /// independently of what is printed on it.
 struct StreakCardContent: View {
-    let streak: Int
+    let streak: StreakSnapshot
     let metrics: StreakCardMetrics
     /// Whether the flame is playing. False under Reduce Motion, and while the
     /// card is resting unseen behind the header — either way the flame is held
@@ -65,6 +71,10 @@ struct StreakCardContent: View {
     /// Only a card the user opened themselves offers a way to close it.
     let showsClose: Bool
     let onClose: () -> Void
+    /// Spends a freeze on the live week. Confirmed first — see `freezeRow`.
+    let onArmFreeze: () -> Void
+
+    @State private var isConfirmingFreeze = false
 
     var body: some View {
         ZStack {
@@ -88,7 +98,7 @@ struct StreakCardContent: View {
     /// instead of an animation it cannot describe.
     private var figure: some View {
         VStack(spacing: 0) {
-            Text("\(streak)")
+            Text("\(streak.weeks)")
                 .font(.system(size: metrics.numberSize, weight: .bold))
                 .monospacedDigit()
                 .foregroundStyle(Theme.ink)
@@ -97,22 +107,87 @@ struct StreakCardContent: View {
                 // Clears the close button even at three digits.
                 .padding(.horizontal, 56)
                 .padding(.top, metrics.topPadding)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(StreakChip.accessibilityLabel(for: streak.weeks))
+                // Focused first, so VoiceOver reads the streak before offering
+                // the close button.
+                .accessibilitySortPriority(1)
 
             FlameFigure(visibleHeight: metrics.flameHeight, isAnimating: isAnimated)
                 .padding(.top, metrics.numberToFlame)
+                .accessibilityHidden(true)
 
-            Text("day streak")
+            Text("\(streak.weeksLabel) · \(streak.thisWeekLabel)")
                 .font(.system(size: metrics.labelSize, weight: .semibold))
                 .foregroundStyle(Theme.inkSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, 24)
                 .padding(.top, metrics.flameToLabel)
+
+            freezeRow
+                .padding(.top, metrics.labelToDetail)
 
             Spacer(minLength: 0)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(StreakChip.accessibilityLabel(for: streak))
-        // Focused first, so VoiceOver reads the streak before offering the
-        // close button.
-        .accessibilitySortPriority(1)
+    }
+
+    /// The freeze bank, and the one way to spend from it.
+    ///
+    /// One row, one confirmation. The confirmation exists because arming is
+    /// irreversible until the week ends — the freeze is refunded if the week is
+    /// kept, but it cannot be un-armed by hand — and a single accidental tap
+    /// should not be able to spend something that took a month to earn.
+    @ViewBuilder
+    private var freezeRow: some View {
+        if streak.lastCompletedWeekWasFrozen {
+            detail("streak frozen · \(freezeCountLabel) left")
+        } else if streak.isLiveWeekPreArmed {
+            detail("this week frozen · \(freezeCountLabel) left")
+        } else if streak.canArmFreeze {
+            Button {
+                Haptics.tap()
+                isConfirmingFreeze = true
+            } label: {
+                Text("\(freezeCountLabel) · freeze this week")
+                    .font(.system(size: metrics.detailSize, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(minHeight: 32)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Freeze this week. \(freezeCountLabel) available.")
+            .accessibilityHint("Protects the streak if this week is not kept.")
+            .confirmationDialog(
+                "Freeze this week?",
+                isPresented: $isConfirmingFreeze,
+                titleVisibility: .visible
+            ) {
+                Button("Freeze This Week") {
+                    Haptics.commit()
+                    onArmFreeze()
+                }
+                Button("Not Now", role: .cancel) {}
+            } message: {
+                Text("Uses one freeze. You get it back if you keep the week anyway.")
+            }
+        } else if streak.freezesAvailable > 0 {
+            detail(freezeCountLabel)
+        } else {
+            // Holds the line so the flame does not jump when a freeze arrives.
+            detail(" ").accessibilityHidden(true)
+        }
+    }
+
+    private var freezeCountLabel: String {
+        "\(streak.freezesAvailable) \(streak.freezesAvailable == 1 ? "freeze" : "freezes")"
+    }
+
+    private func detail(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: metrics.detailSize, weight: .medium))
+            .foregroundStyle(Theme.inkTertiary)
+            .frame(minHeight: 32)
     }
 
     private var closeButton: some View {
@@ -141,11 +216,21 @@ struct StreakCardContent: View {
         Color.black.opacity(0.4).ignoresSafeArea()
 
         StreakCardContent(
-            streak: 12,
+            streak: StreakSnapshot(
+                weeks: 6,
+                weeklyGoal: 3,
+                thisWeekSessionDays: 2,
+                isThisWeekKept: false,
+                freezesAvailable: 2,
+                lastCompletedWeekWasFrozen: false,
+                isLiveWeekPreArmed: false,
+                liveWeekStart: Date()
+            ),
             metrics: metrics,
             isAnimated: true,
             showsClose: true,
-            onClose: {}
+            onClose: {},
+            onArmFreeze: {}
         )
         .background(Theme.surface, in: .rect(cornerRadius: metrics.cornerRadius))
         .shadow(color: .black.opacity(0.18), radius: 40, y: 18)

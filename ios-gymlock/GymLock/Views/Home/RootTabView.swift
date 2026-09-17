@@ -62,8 +62,11 @@ struct RootTabView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                // A week may have ended while the app was away; rule on it
+                // before the streak is read anywhere on this screen.
+                store.refreshStreak()
                 intro.sceneBecameActive(
-                    streak: store.log.momentumStreak,
+                    streak: store.streak.weeks,
                     reduceMotion: reduceMotion,
                     isHomeVisible: selection == .home
                 )
@@ -74,7 +77,7 @@ struct RootTabView: View {
         .fullScreenCover(isPresented: $isRunningSetup) {
             MorningSetupFlowView {
                 isRunningSetup = false
-                intro.resume(streak: store.log.momentumStreak, reduceMotion: reduceMotion)
+                intro.resume(streak: store.streak.weeks, reduceMotion: reduceMotion)
                 Task {
                     await coordinator.requestAlarmAuthorization()
                     await coordinator.syncAlarms()

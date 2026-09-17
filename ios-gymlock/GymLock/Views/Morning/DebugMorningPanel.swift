@@ -71,7 +71,8 @@ struct DebugMorningPanel: View {
             row("window", "\(store.plan.rhythm.windowMinutes) min")
             row("planned / 28d", "\(store.plan.plannedSessionsPer28Days)")
             row("skips", "\(coordinator.easySkipsUsed) of \(coordinator.easySkipAllowance)")
-            row("momentum", "\(store.log.momentumStreak) days")
+            row("momentum", "\(store.streak.weeks) weeks · \(store.streak.thisWeekLabel)")
+            row("freezes", "\(store.streak.freezesAvailable)")
             row("gym visits (month)", "\(store.log.verifiedGymVisitsThisMonth)")
         }
         .padding(16)

@@ -13,6 +13,10 @@ struct MorningFlowView: View {
     @Environment(GymSessionCoordinator.self) private var coordinator
 
     @State private var verifier: any WorkoutVerificationProviding = WorkoutVerificationFactory.make()
+    /// Raised by the two success screens. The morning flow is itself a
+    /// full-screen cover, so the editor is presented from here rather than
+    /// from the tab shell underneath it, which is not on screen.
+    @State private var shareOrigin: ShareOrigin?
 
     private var session: GymSession? { coordinator.session }
 
@@ -27,6 +31,7 @@ struct MorningFlowView: View {
             }
         }
         .animation(Theme.settle, value: coordinator.route)
+        .storyEditor(origin: $shareOrigin)
         // The nudge is a sheet rather than a route: the countdown underneath is
         // still the truth, and the user should be able to dismiss back onto it.
         .sheet(isPresented: nudgeBinding) {
@@ -115,10 +120,11 @@ struct MorningFlowView: View {
 
         case .momentumSaved:
             MomentumSavedView(
-                momentumStreak: store.log.momentumStreak,
+                momentumWeeks: store.streak.weeks,
                 recentMomentum: store.log.recentMomentum(),
                 onKeepGoing: { coordinator.acknowledgeResult() },
-                onDone: { coordinator.acknowledgeResult() }
+                onDone: { coordinator.acknowledgeResult() },
+                onShare: { shareOrigin = .session(day: session.day) }
             )
 
         case .cantToday:
@@ -153,10 +159,11 @@ struct MorningFlowView: View {
             GymArrivedView(
                 session: session,
                 gymName: store.primaryGym?.name,
-                momentumStreak: store.log.momentumStreak,
+                momentumWeeks: store.streak.weeks,
                 gymVisitsThisMonth: store.log.verifiedGymVisitsThisMonth,
                 shieldCapability: coordinator.shieldCapability,
-                onDone: { coordinator.acknowledgeResult() }
+                onDone: { coordinator.acknowledgeResult() },
+                onShare: { shareOrigin = .session(day: session.day) }
             )
         }
     }

@@ -393,12 +393,12 @@ struct HomeView: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Theme.accent)
 
-                Text("\(store.log.momentumStreak)")
+                Text("\(store.streak.weeks)")
                     .font(.system(size: 30, weight: .bold))
                     .monospacedDigit()
                     .foregroundStyle(Theme.ink)
 
-                Text("momentum streak")
+                Text("week streak")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.inkSecondary)
                     .multilineTextAlignment(.center)

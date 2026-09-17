@@ -39,8 +39,8 @@ struct ProgressTabView: View {
                 VStack(spacing: 14) {
                     HStack(alignment: .top, spacing: 12) {
                         ProgressStatCard(
-                            title: "Day Streak",
-                            count: store.log.momentumStreak,
+                            title: "Week Streak",
+                            count: store.streak.weeks,
                             appearanceDelay: 0
                         ) {
                             FlameEmblem()

@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// This is the resting state of the streak, and the place the expanded card
 /// comes out of and returns to. It stays quiet: a flame, a number, and nothing
-/// else. The words "day streak" belong in the expanded card, not in a capsule
+/// else. The words "week streak" belong in the expanded card, not in a capsule
 /// the user sees every time they open the app.
 struct StreakChip: View {
     let streak: Int
@@ -83,7 +83,7 @@ struct StreakChip: View {
     }
 
     static func accessibilityLabel(for streak: Int) -> String {
-        "Current gym streak, \(streak) \(streak == 1 ? "day" : "days")"
+        "Current streak, \(streak) \(streak == 1 ? "week" : "weeks")"
     }
 }
 
