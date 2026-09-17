@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import SwiftUI
 
-/// The four states the streak can be in.
+/// The states the streak can be in.
 ///
 /// One enum rather than a set of booleans, because the states are genuinely
 /// exclusive and several of them differ only in ways that booleans would blur:
@@ -12,10 +12,6 @@ import SwiftUI
 enum StreakPresentation: Equatable {
     /// Resting: just the capsule in the header.
     case compact
-    /// Mounted, but still exactly the capsule: same size, same place, same
-    /// shape. Lasts a frame or two and exists so there is a rendered starting
-    /// point to animate away from.
-    case arming
     /// Playing the entrance on its own. No close button, closes itself.
     case autoPresenting
     /// Opened by the user. Has a close button, stays until dismissed.
@@ -36,11 +32,14 @@ enum StreakPresentation: Equatable {
 final class StreakIntroController {
     private(set) var state: StreakPresentation = .compact
 
-    /// Whether the card should exist in the hierarchy at all.
+    /// Whether the card layers should be visible.
     ///
-    /// Held true through the collapse so the animation has something to
-    /// animate, then dropped — which is what unloads the Lottie player rather
-    /// than leaving it rendering behind the header.
+    /// The layers themselves never leave the hierarchy — see
+    /// `TodayHomeView.streakOverlay`. Kept permanently, they always have a
+    /// rendered capsule-sized starting point for the expansion to animate
+    /// from, and the flame player is already built by the time the user taps.
+    /// Held true through the collapse so the journey home is visible, then
+    /// dropped, which snaps the header capsule back and pauses the flame.
     var isMounted: Bool { state != .compact }
 
     /// Drives the morph. True while the card is out at full size.
@@ -59,18 +58,6 @@ final class StreakIntroController {
     /// end of its journey.
     private(set) var absorbPulse = 0
 
-    /// True for the first beat of a tap-to-open, while the card shell is
-    /// already on screen but the flame has not been mounted yet.
-    ///
-    /// Mounting the Lottie player is the one genuinely expensive step of
-    /// opening — the layer tree is built on the main thread the frame it
-    /// appears — so it is kept off the frame that has to show the user their
-    /// tap landed. The shell never waits on it.
-    private(set) var isFlameDeferred = false
-
-    /// Whether the card should currently contain the flame.
-    var showsFlame: Bool { isMounted && !isFlameDeferred }
-
     /// Set while a full-screen flow is covering home. The entrance is not spent
     /// playing to nobody behind a cover.
     var isSuspended = false
@@ -88,30 +75,19 @@ final class StreakIntroController {
 
     // MARK: - Motion
 
-    /// High damping throughout: this is a soft expansion, not a bounce. The
-    /// response values are long enough to read as travel rather than a pop.
-    static let expand: Animation = .spring(response: 0.62, dampingFraction: 0.92)
-    static let collapse: Animation = .spring(response: 0.55, dampingFraction: 0.95)
+    /// Quick off the mark, settling with the faintest overshoot. The capsule
+    /// should be visibly stretching on the first frame after the tap and land
+    /// like liquid finding its shape — not slide into place, and not bounce.
+    static let expand: Animation = .spring(response: 0.46, dampingFraction: 0.8)
+
+    /// Home is brisk and fully damped: the capsule's own pulse as it takes the
+    /// card back is what gives the landing its life, so the travel itself
+    /// should not compete with it.
+    static let collapse: Animation = .spring(response: 0.42, dampingFraction: 0.9)
 
     /// Reduce Motion keeps the same beats but drops the journey.
     static let reducedExpand: Animation = .easeOut(duration: 0.30)
     static let reducedCollapse: Animation = .easeIn(duration: 0.28)
-
-    /// The tap-to-open entrance: the card appears in place, fading and growing
-    /// the last few percent. Short and ease-out, so the very first frame after
-    /// the tap is already visibly the card arriving.
-    static let manualOpen: Animation = .easeOut(duration: 0.2)
-    /// The flame coming alive inside a card that is already there.
-    static let flameReveal: Animation = .easeOut(duration: 0.22)
-    /// How long after a tap the flame mounts. Late enough that the shell's
-    /// entrance has its first frames to itself, early enough to land while the
-    /// card is still settling.
-    private static let flameDelayMilliseconds = 120
-
-    /// Long enough to guarantee the capsule-sized state is rendered before
-    /// anything moves. Two frames at 60Hz, so it holds on a display that misses
-    /// one.
-    private static let armingFrames = 32
 
     /// How far into the collapse the capsule reacts. Slightly before the card
     /// lands, so the capsule is already opening as it arrives instead of
@@ -121,8 +97,9 @@ final class StreakIntroController {
     /// The phases of the automatic entrance, in milliseconds.
     ///
     /// Most of the budget is deliberately spent while the flame is large and
-    /// on screen — that is the part worth watching. The travel either side is
-    /// long enough to follow and short enough not to feel slow.
+    /// on screen — that is the part worth watching. The travel either side
+    /// matches the springs above: long enough to follow, short enough to feel
+    /// like a response rather than a sequence.
     struct Timing {
         var settle: Int
         var expandTravel: Int
@@ -130,10 +107,10 @@ final class StreakIntroController {
         var hold: Int
         var collapseTravel: Int
 
-        /// ~3.0s standard, ~2.9s with Reduce Motion — the shorter travel is
+        /// ~2.8s standard, ~2.9s with Reduce Motion — the shorter travel is
         /// given back to the hold so the flame still gets its full moment.
         static let standard = Timing(
-            settle: 240, expandTravel: 620, flameMoment: 1100, hold: 520, collapseTravel: 560
+            settle: 240, expandTravel: 480, flameMoment: 1100, hold: 520, collapseTravel: 440
         )
         static let reducedMotion = Timing(
             settle: 200, expandTravel: 340, flameMoment: 1100, hold: 900, collapseTravel: 340
@@ -191,6 +168,11 @@ final class StreakIntroController {
     /// Available whether or not the automatic entrance has already run, and it
     /// takes over from one that is still playing — the user asking for it beats
     /// a presentation that was about to close itself.
+    ///
+    /// One animated write and nothing else. There is no intermediate state, no
+    /// sleep, no task between the tap and the expansion: the card's layers are
+    /// already rendered at the capsule's geometry, so the first frame SwiftUI
+    /// draws after this returns is the capsule already stretching.
     func open(reduceMotion: Bool) {
         switch state {
         case .manuallyExpanded:
@@ -202,32 +184,11 @@ final class StreakIntroController {
             playback = nil
             state = .manuallyExpanded
         default:
-            present(reduceMotion: reduceMotion)
-        }
-    }
-
-    /// Puts the card up the instant the user asks for it.
-    ///
-    /// No arming frame and no travel: the state goes straight to expanded in
-    /// one animated transaction, so the shell's insertion transition starts on
-    /// the very next frame. The flame follows a beat later, once the shell is
-    /// already moving, so building the player can never hold the card back.
-    private func present(reduceMotion: Bool) {
-        playback?.cancel()
-        isFlameDeferred = true
-
-        withAnimation(Self.manualOpen) {
-            state = .manuallyExpanded
-        }
-
-        playback = Task { [weak self] in
-            guard await self?.sleep(Self.flameDelayMilliseconds) == true else { return }
-            guard let self, state == .manuallyExpanded else { return }
-
-            withAnimation(reduceMotion ? nil : Self.flameReveal) {
-                isFlameDeferred = false
-            }
+            playback?.cancel()
             playback = nil
+            withAnimation(reduceMotion ? Self.reducedExpand : Self.expand) {
+                state = .manuallyExpanded
+            }
         }
     }
 
@@ -254,7 +215,6 @@ final class StreakIntroController {
     func normalizeImmediately() {
         playback?.cancel()
         playback = nil
-        isFlameDeferred = false
         state = .compact
     }
 
@@ -283,10 +243,7 @@ final class StreakIntroController {
 
         // Let the screen settle first, so the card grows out of a header that
         // has already arrived rather than racing it.
-        guard await sleep(timing.settle) else { return }
-
-        state = .arming
-        guard await sleep(Self.armingFrames), state == .arming else { return }
+        guard await sleep(timing.settle), state == .compact else { return }
 
         withAnimation(reduceMotion ? Self.reducedExpand : Self.expand) {
             state = .autoPresenting
@@ -304,8 +261,8 @@ final class StreakIntroController {
         collapse(reduceMotion: reduceMotion, userInitiated: false)
     }
 
-    /// Runs the shared collapse, hands the capsule its cue, and unmounts once
-    /// the card has finished travelling.
+    /// Runs the shared collapse, hands the capsule its cue, and hides the
+    /// layers once the card has finished travelling.
     private func collapse(reduceMotion: Bool, userInitiated: Bool) {
         let travel = (reduceMotion ? Timing.reducedMotion : Timing.standard).collapseTravel
         let absorbAt = Int(Double(travel) * Self.absorbPoint)
@@ -325,7 +282,6 @@ final class StreakIntroController {
             if userInitiated { Haptics.tap(intensity: 0.45) }
 
             guard await sleep(travel - absorbAt), state == .collapsing else { return }
-            isFlameDeferred = false
             state = .compact
             playback = nil
         }

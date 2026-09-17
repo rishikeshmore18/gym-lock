@@ -58,14 +58,12 @@ struct StreakCardMetrics: Equatable {
 struct StreakCardContent: View {
     let streak: Int
     let metrics: StreakCardMetrics
-    /// False under Reduce Motion, which holds the flame on a single frame.
+    /// Whether the flame is playing. False under Reduce Motion, and while the
+    /// card is resting unseen behind the header — either way the flame is held
+    /// on a single frame rather than torn down.
     let isAnimated: Bool
     /// Only a card the user opened themselves offers a way to close it.
     let showsClose: Bool
-    /// False for the first beat after a tap, while the shell is already up but
-    /// the Lottie player has not been mounted yet. The slot keeps its size so
-    /// the number and label never move when the flame arrives.
-    var showsFlame: Bool = true
     let onClose: () -> Void
 
     var body: some View {
@@ -100,17 +98,8 @@ struct StreakCardContent: View {
                 .padding(.horizontal, 56)
                 .padding(.top, metrics.topPadding)
 
-            ZStack {
-                if showsFlame {
-                    FlameFigure(visibleHeight: metrics.flameHeight, isAnimating: isAnimated)
-                        .transition(.opacity)
-                }
-            }
-            .frame(
-                width: metrics.flameHeight * FlameArtwork.aspect,
-                height: metrics.flameHeight
-            )
-            .padding(.top, metrics.numberToFlame)
+            FlameFigure(visibleHeight: metrics.flameHeight, isAnimating: isAnimated)
+                .padding(.top, metrics.numberToFlame)
 
             Text("day streak")
                 .font(.system(size: metrics.labelSize, weight: .semibold))

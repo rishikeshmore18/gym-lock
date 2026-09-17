@@ -7,12 +7,15 @@ import SwiftUI
 /// aspect ratio — a flame stretched to fill a rectangle reads as a bug no
 /// matter how good the rest of the screen is.
 ///
-/// The view is only ever mounted while the streak intro is on screen. Taking it
-/// out of the hierarchy is what stops playback: there is no paused player left
-/// running behind the home screen.
+/// The view lives in the hierarchy for as long as home does, invisible and
+/// paused whenever the streak is compact. Building the player is the one
+/// genuinely expensive step of showing the flame — the whole layer tree is
+/// assembled on the main thread the moment the animation lands — and doing it
+/// once, behind the launch fade-in, is what keeps it off the frame the user is
+/// waiting on when they tap. A paused Core Animation player costs nothing.
 struct FlameAnimationView: View {
-    /// Whether to play. When false the flame is held at a representative frame,
-    /// which is what Reduce Motion gets.
+    /// Whether to play. When false the flame is held at a representative frame:
+    /// what Reduce Motion shows, and where the hidden flame waits at rest.
     var isAnimating: Bool = true
 
     /// The source animation runs about 4.4s. At this speed roughly one full
@@ -25,33 +28,27 @@ struct FlameAnimationView: View {
     private static let restingProgress: CGFloat = 0.55
 
     var body: some View {
-        animation.accessibilityHidden(true)
-    }
-
-    /// `resizable()` and the aspect lock are applied inside each branch because
-    /// they are `LottieView`'s own modifiers, and the branch erases the type.
-    @ViewBuilder
-    private var animation: some View {
-        if isAnimating {
-            base
-                .playbackMode(.playing(.fromProgress(0, toProgress: 1, loopMode: .loop)))
-                .configure { $0.animationSpeed = Self.playbackSpeed }
-                .resizable()
-                .aspectRatio(1, contentMode: .fit)
-        } else {
-            base
-                .currentProgress(Self.restingProgress)
-                .resizable()
-                .aspectRatio(1, contentMode: .fit)
-        }
-    }
-
-    private var base: LottieView<FlameGlow> {
         LottieView {
             await FlameAsset.resolved()
         } placeholder: {
             FlameGlow()
         }
+        .playbackMode(playbackMode)
+        .configure { $0.animationSpeed = Self.playbackSpeed }
+        .resizable()
+        .aspectRatio(1, contentMode: .fit)
+        .accessibilityHidden(true)
+    }
+
+    /// One player, one mode. A branch here would hand SwiftUI two views to
+    /// swap between, which tears the player down and rebuilds it every time the
+    /// flame starts or stops — precisely the cost this view exists to pay once.
+    /// Playing always restarts from the ignition, so the frame the flame was
+    /// resting on is irrelevant.
+    private var playbackMode: LottiePlaybackMode {
+        isAnimating
+            ? .playing(.fromProgress(0, toProgress: 1, loopMode: .loop))
+            : .paused(at: .progress(Self.restingProgress))
     }
 }
 

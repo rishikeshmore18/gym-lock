@@ -113,9 +113,11 @@ struct TodayHomeView: View {
             }
             withAnimation(.easeOut(duration: 0.28)) { hasSettled = true }
 
-            // Parse the flame before anything needs to move, so the expansion
-            // never waits on a file read. After the fade-in is started, not
-            // before it — home appearing must not depend on this finishing.
+            // Parse the flame while home is fading in. The player is already
+            // in the hierarchy, paused behind the header, and picks this up
+            // the moment it lands — so a tap never waits on a file read or on
+            // the layer tree being built. Started after the fade-in, not
+            // before it: home appearing must not depend on this finishing.
             await FlameAsset.prepare()
         }
         .onChange(of: isMeasured, initial: true) { _, measured in
@@ -189,6 +191,10 @@ struct TodayHomeView: View {
             // in either direction: the morph draws the identical capsule at the
             // identical position, so the swap has nothing to show.
             .opacity(isChipHidden ? 0 : 1)
+            // The handover now happens inside the same animated transaction
+            // as the expansion, so it has to be told explicitly not to fade —
+            // a cross-fade here would show two capsules at once.
+            .animation(nil, value: isChipHidden)
             .disabled(intro.isMounted)
             .scaleEffect(bubbleScale)
         }
@@ -202,49 +208,27 @@ struct TodayHomeView: View {
 
     /// The dimmed home, and the capsule on its way to becoming the card.
     ///
-    /// Mounted only while the streak is out, so there is no scrim and no Lottie
-    /// player left in the hierarchy the rest of the time.
+    /// Permanently in the hierarchy, invisible and inert while the streak is
+    /// compact — and that is the whole performance story. A view that already
+    /// exists at the capsule's geometry has a rendered value for SwiftUI to
+    /// animate *from*, so a tap goes straight into the expansion with no
+    /// intermediate frame to wait for. And the flame player underneath is built
+    /// once, behind the launch fade-in, instead of on the frame the user is
+    /// watching. At rest this costs a handful of fully transparent layers and a
+    /// paused player; the alternative cost a visible pause on every tap.
     ///
     /// Four layers, all pinned to the same travelling rectangle: the surface,
     /// which is the bubble itself growing; the capsule's own contents, which
     /// fade out as it opens; and the card's contents, which fade in. Nothing
     /// here appears or disappears independently of the surface — that is the
     /// whole point.
-    ///
-    /// The automatic entrance mounts this un-animated at the capsule's geometry
-    /// and morphs from there. A tap mounts it inside an animated transaction
-    /// already at full size, so the insertion transitions below are what the
-    /// user sees: the scrim fading up and the card fading in while growing the
-    /// last few percent. Removal is `.identity` both ways, because the collapse
-    /// morphs back into the capsule before unmounting and must not fade on top
-    /// of that.
-    @ViewBuilder
     private var streakOverlay: some View {
-        // Two siblings rather than one wrapping stack, so each is inserted
-        // with its own transition: the scrim must fade only, never scale.
-        if intro.isMounted {
+        ZStack {
             scrim
-                .transition(.asymmetric(insertion: .opacity, removal: .identity))
-
-            ZStack {
-                surface
-                capsuleContents
-                cardContents
-            }
-            .transition(.asymmetric(insertion: cardEntrance, removal: .identity))
+            surface
+            capsuleContents
+            cardContents
         }
-    }
-
-    /// Opacity plus a small scale, anchored on the card's own centre so the
-    /// growth reads as the card arriving rather than the screen zooming. Under
-    /// Reduce Motion the scale is dropped.
-    private var cardEntrance: AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        let anchor = UnitPoint(
-            x: 0.5,
-            y: rootFrame.height > 0 ? expandedRect.midY / rootFrame.height : 0.5
-        )
-        return .opacity.combined(with: .scale(scale: 0.96, anchor: anchor))
     }
 
     /// A flat colour rather than a blur of the whole screen. It costs one
@@ -278,6 +262,16 @@ struct TodayHomeView: View {
                 RoundedRectangle(cornerRadius: surfaceRadius, style: .continuous)
                     .strokeBorder(Theme.border, lineWidth: 1)
             }
+            // Present or absent, never fading. The moment it appears it is
+            // drawn exactly over the header capsule, and the moment it goes the
+            // header capsule is drawn exactly over it, so a fade would only
+            // show two capsules at once. Scoped to the shape alone: the
+            // geometry applied after this is what travels, and it must not be
+            // caught. The corner radius is caught, and that is fine — it is
+            // clamped to a capsule at capsule heights, so snapping it to its
+            // final value changes nothing anyone can see.
+            .opacity(intro.isMounted ? 1 : 0)
+            .animation(nil, value: intro.isMounted)
             // No shadow at capsule size: the capsule draws its own, and two
             // would show as a smudge at the moment of handover.
             .shadow(
@@ -303,20 +297,27 @@ struct TodayHomeView: View {
     /// header's real capsule can be handed back without a crossfade.
     private var capsuleContents: some View {
         StreakChip(streak: streak)
+            // Same snap as the surface, for the same reason.
+            .opacity(intro.isMounted ? 1 : 0)
+            .animation(nil, value: intro.isMounted)
             .opacity(intro.isExpanded || reduceMotion ? 0 : 1)
             .animation(capsuleFade, value: intro.isExpanded)
             .scaleEffect(capsuleScale * bubbleScale)
             .position(x: surfaceRect.midX, y: surfaceRect.midY)
             .allowsHitTesting(false)
+            // A drawing of the capsule, not the capsule. The real one in the
+            // header is what VoiceOver has.
+            .accessibilityHidden(true)
     }
 
     private var cardContents: some View {
         StreakCardContent(
             streak: streak,
             metrics: metrics,
-            isAnimated: !reduceMotion,
+            // Plays for the whole time the card is out, including its journey
+            // home; parked on one frame while it rests behind the header.
+            isAnimated: intro.isMounted && !reduceMotion,
             showsClose: intro.showsCloseButton,
-            showsFlame: intro.showsFlame,
             onClose: { intro.close(reduceMotion: reduceMotion) }
         )
         .opacity(intro.isExpanded ? 1 : 0)
@@ -329,6 +330,8 @@ struct TodayHomeView: View {
         // Only the close button takes touches; everything else falls through to
         // the surface underneath.
         .allowsHitTesting(intro.isInteractive)
+        // What cannot be seen should not be read out either.
+        .accessibilityHidden(!intro.isMounted)
     }
 
     // MARK: - Morph geometry
@@ -383,9 +386,12 @@ struct TodayHomeView: View {
         return min(max(surfaceRect.width / localChipRect.width, 1), 1.6)
     }
 
+    /// In as soon as the surface is big enough to hold it — the number should
+    /// be resolving while the card is still landing, not after — and out fast
+    /// on the way home.
     private var contentFade: Animation {
         intro.isExpanded
-            ? .easeOut(duration: 0.26).delay(0.14)
+            ? .easeOut(duration: 0.24).delay(0.10)
             : .easeIn(duration: 0.16)
     }
 
