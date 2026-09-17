@@ -54,14 +54,6 @@ final class StreakIntroController {
     /// The close button belongs only to the card the user opened themselves.
     var showsCloseButton: Bool { state == .manuallyExpanded }
 
-    /// Whether the header capsule should stop taking touches.
-    ///
-    /// Not simply `isMounted`: the card is now mounted while the user's finger
-    /// is still down on the capsule, and disabling a button mid-press cancels
-    /// the press, so the tap that was meant to open the card would never
-    /// arrive.
-    var isChipDisabled: Bool { isMounted && state != .arming }
-
     /// Bumped the moment the returning card reaches the capsule, so the capsule
     /// can visibly take it back rather than the card simply vanishing at the
     /// end of its journey.
@@ -74,20 +66,6 @@ final class StreakIntroController {
     private var hasPlayedThisSession = false
     private var leftForegroundAt: Date?
     private var playback: Task<Void, Never>?
-
-    /// When the card was mounted at capsule size.
-    private var armedAt: Date?
-    private var prearmCleanup: Task<Void, Never>?
-
-    /// One frame. All the morph needs is for the capsule-sized state to have
-    /// been rendered once, so the spring has a previous value to travel from.
-    private static let minimumArmedMilliseconds = 16
-
-    /// How long an armed card waits for the tap that should follow it.
-    ///
-    /// A press abandoned by sliding off the capsule reports a release but never
-    /// a tap, so the mount has to time out rather than wait forever.
-    private static let abandonedPressMilliseconds = 220
 
     private let defaults: UserDefaults
     private static let lastSeenStreakKey = "gymlock.home.lastSeenStreak"
@@ -102,15 +80,6 @@ final class StreakIntroController {
     /// response values are long enough to read as travel rather than a pop.
     static let expand: Animation = .spring(response: 0.62, dampingFraction: 0.92)
     static let collapse: Animation = .spring(response: 0.55, dampingFraction: 0.95)
-
-    /// The spring for a card the user actually asked for.
-    ///
-    /// Noticeably quicker off the mark than the automatic entrance. A tap is a
-    /// direct request and has to answer under the finger; the unprompted
-    /// entrance is ambient and can afford to drift in. Driving both from one
-    /// spring meant the tap inherited a pace designed for something nobody
-    /// asked for, which is most of why it felt like a delay.
-    static let manualExpand: Animation = .spring(response: 0.44, dampingFraction: 0.86)
 
     /// Reduce Motion keeps the same beats but drops the journey.
     static let reducedExpand: Animation = .easeOut(duration: 0.30)
@@ -194,49 +163,12 @@ final class StreakIntroController {
 
     // MARK: - Manual presentation
 
-    /// Mounts the card, invisibly and at capsule size, the moment the finger
-    /// lands — before we know whether it will become a tap.
-    ///
-    /// The expansion used to begin with a scripted pause: mount, wait a frame
-    /// or two for that mount to render, then start moving. That pause is dead
-    /// time the user reads as lag, and it sat directly between their tap and
-    /// anything happening. A press lasts far longer than the frame the morph
-    /// needs, so the work is done inside the press instead — the render the
-    /// spring animates from, and the flame's layer tree, are both ready before
-    /// the finger lifts. Nothing is shown: at this point the card is the
-    /// capsule, exactly where the capsule already is.
-    func prearm() {
-        guard state == .compact else { return }
-        prearmCleanup?.cancel()
-        prearmCleanup = nil
-        playback?.cancel()
-        playback = nil
-        state = .arming
-        armedAt = Date()
-    }
-
-    /// The finger lifted. If no open follows almost immediately the press was
-    /// abandoned, and the standby mount is given back.
-    func releasePrearm() {
-        guard state == .arming else { return }
-        prearmCleanup?.cancel()
-        prearmCleanup = Task { [weak self] in
-            guard await self?.sleep(Self.abandonedPressMilliseconds) == true else { return }
-            guard let self, state == .arming else { return }
-            state = .compact
-            armedAt = nil
-        }
-    }
-
     /// Opens the card because the user tapped the capsule.
     ///
     /// Available whether or not the automatic entrance has already run, and it
     /// takes over from one that is still playing — the user asking for it beats
     /// a presentation that was about to close itself.
     func open(reduceMotion: Bool) {
-        prearmCleanup?.cancel()
-        prearmCleanup = nil
-
         switch state {
         case .manuallyExpanded:
             return
@@ -246,32 +178,8 @@ final class StreakIntroController {
             playback?.cancel()
             playback = nil
             state = .manuallyExpanded
-        case .arming:
-            // Standing by from the press. Expand with no pause at all.
-            expandFromArmed(reduceMotion: reduceMotion)
         default:
             arm(into: .manuallyExpanded, reduceMotion: reduceMotion)
-        }
-    }
-
-    /// Expands a card that is already mounted, waiting only for whatever is
-    /// left of the single frame the morph needs — almost always nothing, since
-    /// even a fast press outlasts a frame.
-    private func expandFromArmed(reduceMotion: Bool) {
-        let animation = reduceMotion ? Self.reducedExpand : Self.manualExpand
-        let elapsed = armedAt.map { Date().timeIntervalSince($0) * 1000 } ?? 0
-        let remaining = Int(max(Double(Self.minimumArmedMilliseconds) - elapsed, 0).rounded())
-
-        guard remaining > 0 else {
-            withAnimation(animation) { state = .manuallyExpanded }
-            return
-        }
-
-        playback?.cancel()
-        playback = Task { [weak self] in
-            guard await self?.sleep(remaining) == true else { return }
-            guard let self, state == .arming else { return }
-            withAnimation(animation) { state = .manuallyExpanded }
         }
     }
 
@@ -285,13 +193,12 @@ final class StreakIntroController {
     private func arm(into destination: StreakPresentation, reduceMotion: Bool) {
         playback?.cancel()
         state = .arming
-        armedAt = Date()
 
         playback = Task { [weak self] in
             guard await self?.sleep(Self.armingFrames) == true else { return }
             guard let self, state == .arming else { return }
 
-            withAnimation(reduceMotion ? Self.reducedExpand : Self.manualExpand) {
+            withAnimation(reduceMotion ? Self.reducedExpand : Self.expand) {
                 state = destination
             }
         }
@@ -320,9 +227,6 @@ final class StreakIntroController {
     func normalizeImmediately() {
         playback?.cancel()
         playback = nil
-        prearmCleanup?.cancel()
-        prearmCleanup = nil
-        armedAt = nil
         state = .compact
     }
 
