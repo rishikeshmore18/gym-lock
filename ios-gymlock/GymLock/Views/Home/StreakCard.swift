@@ -62,7 +62,36 @@ struct StreakCardContent: View {
     let isAnimated: Bool
     /// Only a card the user opened themselves offers a way to close it.
     let showsClose: Bool
+    /// Drives the staged arrival. Mounted-but-not-revealed is a real state:
+    /// the card is built and laid out during the press, before it is shown.
+    var isRevealed: Bool = true
+    var reduceMotion: Bool = false
     let onClose: () -> Void
+
+    /// When each element joins, in seconds after the card starts opening.
+    ///
+    /// Everything arrives inside a fifth of a second — this is ordering, not
+    /// queueing. The number leads because it is the answer the user tapped for
+    /// and the only thing carried over from the capsule; the flame follows as
+    /// the card has grown enough to hold it; the label lands last because it is
+    /// a caption and captions read after the thing they caption.
+    private enum Stage {
+        static let number: Double = 0
+        static let flame: Double = 0.05
+        static let label: Double = 0.10
+        static let close: Double = 0.14
+    }
+
+    /// Staged on the way in, immediate on the way out.
+    ///
+    /// Reversing the stagger during a collapse would hold pieces of the card
+    /// on screen after the surface had left them behind.
+    private func entrance(_ delay: Double) -> Animation {
+        guard !reduceMotion else { return .easeOut(duration: 0.16) }
+        return isRevealed
+            ? .spring(response: 0.36, dampingFraction: 0.84).delay(delay)
+            : .easeIn(duration: 0.12)
+    }
 
     var body: some View {
         ZStack {
@@ -71,6 +100,9 @@ struct StreakCardContent: View {
             if showsClose {
                 closeButton
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .opacity(isRevealed ? 1 : 0)
+                    .scaleEffect(isRevealed ? 1 : 0.8)
+                    .animation(entrance(Stage.close), value: isRevealed)
             }
         }
         .frame(width: metrics.size.width, height: metrics.size.height)
@@ -95,14 +127,29 @@ struct StreakCardContent: View {
                 // Clears the close button even at three digits.
                 .padding(.horizontal, 56)
                 .padding(.top, metrics.topPadding)
+                .opacity(isRevealed ? 1 : 0)
+                // Rises the last few points into place rather than appearing
+                // at rest, so it reads as arriving with the card.
+                .offset(y: isRevealed ? 0 : 10)
+                .animation(entrance(Stage.number), value: isRevealed)
 
+            // Scaled from the centre it will settle on: the flame swells into
+            // the space the card has just finished making for it. Scale rather
+            // than a resized frame — re-laying out a Lottie composition every
+            // frame is the one thing here that would genuinely cost time.
             FlameFigure(visibleHeight: metrics.flameHeight, isAnimating: isAnimated)
                 .padding(.top, metrics.numberToFlame)
+                .opacity(isRevealed ? 1 : 0)
+                .scaleEffect(isRevealed ? 1 : 0.84)
+                .animation(entrance(Stage.flame), value: isRevealed)
 
             Text("day streak")
                 .font(.system(size: metrics.labelSize, weight: .semibold))
                 .foregroundStyle(Theme.inkSecondary)
                 .padding(.top, metrics.flameToLabel)
+                .opacity(isRevealed ? 1 : 0)
+                .offset(y: isRevealed ? 0 : 8)
+                .animation(entrance(Stage.label), value: isRevealed)
 
             Spacer(minLength: 0)
         }
@@ -143,6 +190,7 @@ struct StreakCardContent: View {
             metrics: metrics,
             isAnimated: true,
             showsClose: true,
+            isRevealed: true,
             onClose: {}
         )
         .background(Theme.surface, in: .rect(cornerRadius: metrics.cornerRadius))

@@ -189,14 +189,26 @@ struct TodayHomeView: View {
             // in either direction: the morph draws the identical capsule at the
             // identical position, so the swap has nothing to show.
             .opacity(isChipHidden ? 0 : 1)
-            .disabled(intro.isMounted)
+            // Not `isMounted`: the card is now mounted while the finger is
+            // still down, and disabling a button mid-press cancels the press
+            // — which would swallow the very tap meant to open it.
+            .disabled(intro.isChipDisabled)
             .scaleEffect(bubbleScale)
         }
     }
 
     /// Under Reduce Motion the card does not travel, so the capsule stays where
     /// it is rather than disappearing for no visible reason.
-    private var isChipHidden: Bool { intro.isMounted && !reduceMotion }
+    ///
+    /// The standby mount does not count as handover either: during the press
+    /// the real capsule is still the one on screen, still showing its own press
+    /// dimming, and the invisible card is only standing by behind it.
+    private var isChipHidden: Bool {
+        intro.isMounted && !reduceMotion && !isStandingBy
+    }
+
+    /// Mounted and laid out, but not yet shown — the card waiting out the press.
+    private var isStandingBy: Bool { intro.state == .arming }
 
     // MARK: - Streak presentation
 
@@ -267,6 +279,9 @@ struct TodayHomeView: View {
             .allowsHitTesting(intro.isInteractive)
             .scaleEffect(bubbleScale)
             .position(x: surfaceRect.midX, y: surfaceRect.midY)
+            // Laid out and rendered during the press, but not drawn: the real
+            // capsule is still the one the user is touching.
+            .opacity(isStandingBy ? 0 : 1)
     }
 
     /// The flame icon and number the capsule shows at rest, drawn inside the
@@ -283,6 +298,7 @@ struct TodayHomeView: View {
             .scaleEffect(capsuleScale * bubbleScale)
             .position(x: surfaceRect.midX, y: surfaceRect.midY)
             .allowsHitTesting(false)
+            .opacity(isStandingBy ? 0 : 1)
     }
 
     private var cardContents: some View {
@@ -291,6 +307,11 @@ struct TodayHomeView: View {
             metrics: metrics,
             isAnimated: !reduceMotion,
             showsClose: intro.showsCloseButton,
+            // Staged from the same flag that opens the card, so the order the
+            // contents arrive in is part of the expansion rather than a second
+            // animation running after it.
+            isRevealed: intro.isExpanded,
+            reduceMotion: reduceMotion,
             onClose: { intro.close(reduceMotion: reduceMotion) }
         )
         .opacity(intro.isExpanded ? 1 : 0)
@@ -357,9 +378,17 @@ struct TodayHomeView: View {
         return min(max(surfaceRect.width / localChipRect.width, 1), 1.6)
     }
 
+    /// The contents come up with the card, not after it.
+    ///
+    /// This used to wait 140ms before starting a 260ms fade, so the card was
+    /// not readable until well over a third of a second after the tap — the
+    /// single largest contributor to the delay the user could feel. The card
+    /// now starts carrying its contents almost immediately; the staging that
+    /// keeps it from arriving all at once lives inside the card, where it can
+    /// be ordered rather than simply postponed.
     private var contentFade: Animation {
         intro.isExpanded
-            ? .easeOut(duration: 0.26).delay(0.14)
+            ? .easeOut(duration: 0.20).delay(0.03)
             : .easeIn(duration: 0.16)
     }
 
@@ -387,10 +416,16 @@ struct TodayHomeView: View {
 
         guard !isPressed else {
             Haptics.tap()
+            // Build the card now, while the finger is still down. By the time
+            // the tap is reported its layout and the flame's layers already
+            // exist, so the expansion has nothing left to prepare.
+            intro.prearm()
             withAnimation(Self.bubblePress) { bubbleScale = 0.92 }
             return
         }
 
+        // Hands the standby mount back if this turns out not to be a tap.
+        intro.releasePrearm()
         withAnimation(Self.bubbleRelease) { bubbleScale = 1.02 }
         bubbleSettle = Task {
             try? await Task.sleep(for: .milliseconds(140))
