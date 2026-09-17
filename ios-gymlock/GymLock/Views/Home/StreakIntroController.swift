@@ -59,6 +59,18 @@ final class StreakIntroController {
     /// end of its journey.
     private(set) var absorbPulse = 0
 
+    /// True for the first beat of a tap-to-open, while the card shell is
+    /// already on screen but the flame has not been mounted yet.
+    ///
+    /// Mounting the Lottie player is the one genuinely expensive step of
+    /// opening — the layer tree is built on the main thread the frame it
+    /// appears — so it is kept off the frame that has to show the user their
+    /// tap landed. The shell never waits on it.
+    private(set) var isFlameDeferred = false
+
+    /// Whether the card should currently contain the flame.
+    var showsFlame: Bool { isMounted && !isFlameDeferred }
+
     /// Set while a full-screen flow is covering home. The entrance is not spent
     /// playing to nobody behind a cover.
     var isSuspended = false
@@ -84,6 +96,17 @@ final class StreakIntroController {
     /// Reduce Motion keeps the same beats but drops the journey.
     static let reducedExpand: Animation = .easeOut(duration: 0.30)
     static let reducedCollapse: Animation = .easeIn(duration: 0.28)
+
+    /// The tap-to-open entrance: the card appears in place, fading and growing
+    /// the last few percent. Short and ease-out, so the very first frame after
+    /// the tap is already visibly the card arriving.
+    static let manualOpen: Animation = .easeOut(duration: 0.2)
+    /// The flame coming alive inside a card that is already there.
+    static let flameReveal: Animation = .easeOut(duration: 0.22)
+    /// How long after a tap the flame mounts. Late enough that the shell's
+    /// entrance has its first frames to itself, early enough to land while the
+    /// card is still settling.
+    private static let flameDelayMilliseconds = 120
 
     /// Long enough to guarantee the capsule-sized state is rendered before
     /// anything moves. Two frames at 60Hz, so it holds on a display that misses
@@ -179,28 +202,32 @@ final class StreakIntroController {
             playback = nil
             state = .manuallyExpanded
         default:
-            arm(into: .manuallyExpanded, reduceMotion: reduceMotion)
+            present(reduceMotion: reduceMotion)
         }
     }
 
-    /// Mounts the card at the capsule's exact geometry, waits for it to be
-    /// rendered there, and only then expands it.
+    /// Puts the card up the instant the user asks for it.
     ///
-    /// This frame is the difference between a morph and a fade. A view inserted
-    /// in its final state has no previous value for SwiftUI to animate from, so
-    /// the card would simply appear in the middle of the screen — which is
-    /// precisely what it must not do.
-    private func arm(into destination: StreakPresentation, reduceMotion: Bool) {
+    /// No arming frame and no travel: the state goes straight to expanded in
+    /// one animated transaction, so the shell's insertion transition starts on
+    /// the very next frame. The flame follows a beat later, once the shell is
+    /// already moving, so building the player can never hold the card back.
+    private func present(reduceMotion: Bool) {
         playback?.cancel()
-        state = .arming
+        isFlameDeferred = true
+
+        withAnimation(Self.manualOpen) {
+            state = .manuallyExpanded
+        }
 
         playback = Task { [weak self] in
-            guard await self?.sleep(Self.armingFrames) == true else { return }
-            guard let self, state == .arming else { return }
+            guard await self?.sleep(Self.flameDelayMilliseconds) == true else { return }
+            guard let self, state == .manuallyExpanded else { return }
 
-            withAnimation(reduceMotion ? Self.reducedExpand : Self.expand) {
-                state = destination
+            withAnimation(reduceMotion ? nil : Self.flameReveal) {
+                isFlameDeferred = false
             }
+            playback = nil
         }
     }
 
@@ -227,6 +254,7 @@ final class StreakIntroController {
     func normalizeImmediately() {
         playback?.cancel()
         playback = nil
+        isFlameDeferred = false
         state = .compact
     }
 
@@ -297,6 +325,7 @@ final class StreakIntroController {
             if userInitiated { Haptics.tap(intensity: 0.45) }
 
             guard await sleep(travel - absorbAt), state == .collapsing else { return }
+            isFlameDeferred = false
             state = .compact
             playback = nil
         }

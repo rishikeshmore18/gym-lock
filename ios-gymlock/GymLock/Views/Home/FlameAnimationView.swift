@@ -137,7 +137,11 @@ enum FlameAsset {
     static let name = "flame_streak"
 
     private static var cached: DotLottieFile?
-    private static var isLoading = false
+    /// The load in flight, if any. A card opened while the launch-time preload
+    /// is still running joins it rather than being told there is no flame —
+    /// which is what used to leave the very first open on a cold launch
+    /// showing the placeholder glow for its whole duration.
+    private static var loading: Task<DotLottieFile?, Never>?
 
     /// Call when home appears, so the composition is ready before it is needed.
     static func prepare() async {
@@ -146,21 +150,25 @@ enum FlameAsset {
 
     static func resolved() async -> DotLottieFile? {
         if let cached { return cached }
-        guard !isLoading else { return nil }
-        isLoading = true
-        defer { isLoading = false }
+        if let loading { return await loading.value }
 
-        do {
-            let file = try await DotLottieFile.named(name)
-            cached = file
-            return file
-        } catch {
-            // A failure here must not leave the streak number floating on a
-            // blank card — the placeholder glow stays up instead.
-            #if DEBUG
-            print("[GymLock] streak flame unavailable: \(error.localizedDescription)")
-            #endif
-            return nil
+        let task = Task<DotLottieFile?, Never> {
+            do {
+                let file = try await DotLottieFile.named(name)
+                cached = file
+                return file
+            } catch {
+                // A failure here must not leave the streak number floating on
+                // a blank card — the placeholder glow stays up instead.
+                #if DEBUG
+                print("[GymLock] streak flame unavailable: \(error.localizedDescription)")
+                #endif
+                return nil
+            }
         }
+        loading = task
+        let file = await task.value
+        loading = nil
+        return file
     }
 }

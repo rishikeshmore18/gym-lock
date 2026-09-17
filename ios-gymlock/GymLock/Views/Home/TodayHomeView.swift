@@ -210,16 +210,41 @@ struct TodayHomeView: View {
     /// fade out as it opens; and the card's contents, which fade in. Nothing
     /// here appears or disappears independently of the surface — that is the
     /// whole point.
+    ///
+    /// The automatic entrance mounts this un-animated at the capsule's geometry
+    /// and morphs from there. A tap mounts it inside an animated transaction
+    /// already at full size, so the insertion transitions below are what the
+    /// user sees: the scrim fading up and the card fading in while growing the
+    /// last few percent. Removal is `.identity` both ways, because the collapse
+    /// morphs back into the capsule before unmounting and must not fade on top
+    /// of that.
     @ViewBuilder
     private var streakOverlay: some View {
+        // Two siblings rather than one wrapping stack, so each is inserted
+        // with its own transition: the scrim must fade only, never scale.
         if intro.isMounted {
+            scrim
+                .transition(.asymmetric(insertion: .opacity, removal: .identity))
+
             ZStack {
-                scrim
                 surface
                 capsuleContents
                 cardContents
             }
+            .transition(.asymmetric(insertion: cardEntrance, removal: .identity))
         }
+    }
+
+    /// Opacity plus a small scale, anchored on the card's own centre so the
+    /// growth reads as the card arriving rather than the screen zooming. Under
+    /// Reduce Motion the scale is dropped.
+    private var cardEntrance: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let anchor = UnitPoint(
+            x: 0.5,
+            y: rootFrame.height > 0 ? expandedRect.midY / rootFrame.height : 0.5
+        )
+        return .opacity.combined(with: .scale(scale: 0.96, anchor: anchor))
     }
 
     /// A flat colour rather than a blur of the whole screen. It costs one
@@ -291,6 +316,7 @@ struct TodayHomeView: View {
             metrics: metrics,
             isAnimated: !reduceMotion,
             showsClose: intro.showsCloseButton,
+            showsFlame: intro.showsFlame,
             onClose: { intro.close(reduceMotion: reduceMotion) }
         )
         .opacity(intro.isExpanded ? 1 : 0)
