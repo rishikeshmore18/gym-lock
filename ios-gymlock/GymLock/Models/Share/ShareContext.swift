@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Where a share was started from.
 ///
@@ -6,29 +7,45 @@ import Foundation
 /// only the day, and the frames that need a photograph are simply not offered.
 enum ShareOrigin: Hashable, Identifiable {
     /// The review screen's Share, or a card in the Progress stack.
-    case progressPhoto(ProgressPhoto)
+    /// `justSaved` is true only on the way in from the review screen, and is
+    /// what earns the "saved to progress" toast.
+    case progressPhoto(ProgressPhoto, justSaved: Bool = false)
     /// The success screens, before any photo exists for the day.
     case session(day: Date)
 
     var id: String {
         switch self {
-        case let .progressPhoto(photo): "photo-\(photo.id.uuidString)"
-        case let .session(day): "session-\(day.timeIntervalSinceReferenceDate)"
+        case let .progressPhoto(photo, _): "photo-\(photo.id.uuidString)"
+        case let .session(day): "session-\(Int(day.timeIntervalSinceReferenceDate))"
         }
     }
 
     var photo: ProgressPhoto? {
-        if case let .progressPhoto(photo) = self { return photo }
+        if case let .progressPhoto(photo, _) = self { return photo }
         return nil
+    }
+
+    var justSaved: Bool {
+        if case let .progressPhoto(_, justSaved) = self { return justSaved }
+        return false
     }
 
     /// The day every number on the frame is about.
     var referenceDay: Date {
         switch self {
-        case let .progressPhoto(photo): photo.createdAt
+        case let .progressPhoto(photo, _): photo.createdAt
         case let .session(day): day
         }
     }
+}
+
+/// The decoded images a canvas draws. Loaded once per editor session.
+struct StoryAssets: Hashable {
+    var photo: UIImage?
+    /// The Day 0 thumbnail for the Journey inset.
+    var dayZero: UIImage?
+
+    static let none = StoryAssets(photo: nil, dayZero: nil)
 }
 
 /// The morning as a sequence of timestamps, for the Receipt.
@@ -51,8 +68,7 @@ nonisolated struct ReceiptTimeline: Hashable {
 
 /// How far the user is into the programme, for the Journey frame.
 nonisolated struct JourneySnapshot: Hashable {
-    /// Days since install, counting the install day as Day 1... no: the
-    /// install day is Day 0 on the card, so the day after it is Day 1.
+    /// Calendar days from the install day to the reference day, plus one.
     let dayNumber: Int
     let verifiedVisits: Int
     /// Trailing 28 days, `completed / due`. Nil when nothing was due.

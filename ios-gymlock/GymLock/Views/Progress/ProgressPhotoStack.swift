@@ -24,6 +24,11 @@ struct ProgressPhotoStack: View {
     let onFocus: (ProgressPhotoSlide) -> Void
     /// Called to delete a real photograph. Absent while the demo stack shows.
     var onDelete: ((ProgressPhoto) -> Void)?
+    /// Called to share a real photograph: from the context menu, or by tapping
+    /// the card that is already in front. Absent while the demo stack shows.
+    var onShare: ((ProgressPhoto) -> Void)?
+    /// The zoom transition's source, so the card grows into the editor.
+    var transitionNamespace: Namespace.ID?
 
     /// Continuous position while a finger is down. `nil` means settled, and
     /// the focused card is the source of truth again.
@@ -124,6 +129,7 @@ struct ProgressPhotoStack: View {
             showsMarker: slide.markerText != nil,
             width: cardWidth
         )
+        .zoomTransitionSource(id: slide.id, in: transitionNamespace, isEnabled: slide.id == focusedID)
         .scaleEffect(geometry.scale)
         .offset(x: geometry.x)
         .zIndex(geometry.zIndex)
@@ -135,7 +141,7 @@ struct ProgressPhotoStack: View {
         .accessibilityAction {
             withAnimation(settle) { onFocus(slide) }
         }
-        .photoDeleteMenu(slide: slide, onDelete: onDelete)
+        .photoContextMenu(slide: slide, onShare: onShare, onDelete: onDelete)
     }
 
     /// The spring for a tap, where travel is short and known.
@@ -250,12 +256,24 @@ struct ProgressPhotoStack: View {
             }
     }
 
-    /// Brings the card under a tap to the front.
+    /// Brings the card under a tap to the front — or, if it is already in
+    /// front, opens it in the Story editor.
+    ///
+    /// Two taps to share, never one: the first tap is always "look at this
+    /// one", so a user browsing their history is never surprised by an
+    /// editor appearing.
     private func handleTap(at location: CGPoint) {
         guard let index = slideIndex(at: location.x),
-              let slide = slides[safe: index],
-              slide.id != focusedID
+              let slide = slides[safe: index]
         else { return }
+
+        if slide.id == focusedID {
+            guard let onShare, case let .photo(photo) = slide.content else { return }
+            Haptics.tap()
+            onShare(photo)
+            return
+        }
+
         Haptics.selection()
         withAnimation(settle) { onFocus(slide) }
     }
@@ -446,36 +464,72 @@ enum ProgressPhotoLayout {
     }
 }
 
-// MARK: - Delete
+// MARK: - Context menu
 
 private extension View {
-    /// Long-press to delete, on real photographs only.
+    /// Long-press for Share and Delete, on real photographs only.
     ///
-    /// A context menu rather than a visible delete control on every card: this
-    /// is a destructive action on something the user cannot get back, and it
-    /// should take a deliberate press rather than sit under the thumb that is
-    /// busy dragging the deck. Long-press is also where iOS users already
-    /// reach to delete a photo.
+    /// A context menu rather than visible controls on every card: delete is
+    /// destructive, and both should take a deliberate press rather than sit
+    /// under the thumb that is busy dragging the deck. Long-press is also
+    /// where iOS users already reach for both actions on a photo. Share sits
+    /// above Delete, as the system puts the safe action first.
     ///
-    /// A matching accessibility action is attached alongside it, because a
-    /// long press is not a gesture VoiceOver users can rely on.
+    /// Matching accessibility actions are attached alongside, because a long
+    /// press is not a gesture VoiceOver users can rely on.
     @ViewBuilder
-    func photoDeleteMenu(
+    func photoContextMenu(
         slide: ProgressPhotoSlide,
+        onShare: ((ProgressPhoto) -> Void)?,
         onDelete: ((ProgressPhoto) -> Void)?
     ) -> some View {
-        if let onDelete, case let .photo(photo) = slide.content {
+        if case let .photo(photo) = slide.content, onShare != nil || onDelete != nil {
             contextMenu {
-                Button(role: .destructive) {
-                    onDelete(photo)
-                } label: {
-                    Label("Delete Photo", systemImage: "trash")
+                if let onShare {
+                    Button {
+                        onShare(photo)
+                    } label: {
+                        Label("Share Photo", systemImage: "square.and.arrow.up")
+                    }
+                }
+                if let onDelete {
+                    Button(role: .destructive) {
+                        onDelete(photo)
+                    } label: {
+                        Label("Delete Photo", systemImage: "trash")
+                    }
                 }
             }
-            .accessibilityAction(named: "Delete Photo") { onDelete(photo) }
+            .modifier(PhotoAccessibilityActions(photo: photo, onShare: onShare, onDelete: onDelete))
         } else {
             self
         }
+    }
+
+    /// Marks the focused card as the source of the zoom into the editor.
+    ///
+    /// Only the focused card is a source: registering the buried ones too
+    /// would be wasted work on every drag frame.
+    @ViewBuilder
+    func zoomTransitionSource(id: String, in namespace: Namespace.ID?, isEnabled: Bool) -> some View {
+        if let namespace, isEnabled {
+            matchedTransitionSource(id: id, in: namespace)
+        } else {
+            self
+        }
+    }
+}
+
+/// VoiceOver actions matching the context menu.
+private struct PhotoAccessibilityActions: ViewModifier {
+    let photo: ProgressPhoto
+    let onShare: ((ProgressPhoto) -> Void)?
+    let onDelete: ((ProgressPhoto) -> Void)?
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityAction(named: "Share Photo") { onShare?(photo) }
+            .accessibilityAction(named: "Delete Photo") { onDelete?(photo) }
     }
 }
 

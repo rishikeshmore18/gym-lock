@@ -419,6 +419,8 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "GymLock uses your location to know when you actually reached the gym, and to notice when you leave home on a gym morning.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GymLock records audio for a Day 0 video you choose to capture, and to hear you read your line during a mirror mission. Nothing is uploaded, and mission audio is never saved.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "GymLock counts your steps during an activation mission so it can tell you actually got moving.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "GymLock saves a progress Story to your photo library only when you choose Save Image from the share sheet.";
+				INFOPLIST_KEY_LSApplicationQueriesSchemes = "instagram-stories";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "GymLock listens for the one line you read out loud during a mirror mission. Recognition runs on your device and the transcript is discarded straight afterwards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "location remote-notification";
@@ -463,6 +465,8 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "GymLock uses your location to know when you actually reached the gym, and to notice when you leave home on a gym morning.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GymLock records audio for a Day 0 video you choose to capture, and to hear you read your line during a mirror mission. Nothing is uploaded, and mission audio is never saved.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "GymLock counts your steps during an activation mission so it can tell you actually got moving.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "GymLock saves a progress Story to your photo library only when you choose Save Image from the share sheet.";
+				INFOPLIST_KEY_LSApplicationQueriesSchemes = "instagram-stories";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "GymLock listens for the one line you read out loud during a mirror mission. Recognition runs on your device and the transcript is discarded straight afterwards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "location remote-notification";

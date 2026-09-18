@@ -6,7 +6,7 @@ import Foundation
 /// the outcome that reached it is dated the reference day. There is no badge
 /// artwork because no badge system exists yet — the Progress tile still says
 /// zero — so the frame draws none.
-nonisolated struct Milestone: Hashable {
+struct Milestone: Hashable {
     enum Kind: Hashable {
         case verifiedVisits(Int)
         case firstKeptWeek

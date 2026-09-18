@@ -240,10 +240,10 @@ final class ProgressPhotoCameraModel: NSObject {
             let one = 1 / displayMultiplier
             var factors: Set<CGFloat> = [one]
             for number in device.virtualDeviceSwitchOverVideoZoomFactors {
-                factors.insert(CGFloat(number.doubleValue))
+                factors.insert(CGFloat(truncating: number))
             }
-            for number in device.activeFormat.secondaryNativeResolutionZoomFactors {
-                factors.insert(CGFloat(number.doubleValue))
+            for factor in device.activeFormat.secondaryNativeResolutionZoomFactors {
+                factors.insert(factor)
             }
             // The ultra-wide constituent, when there is one, sits at the
             // device's floor and is only worth a chip if it is a real lens

@@ -7,7 +7,7 @@ import SwiftUI
 /// Every frame is built from at most four of these. They are the units the
 /// user can select, drag, resize and (for two of them) remove, and the units
 /// whose positions are remembered.
-nonisolated enum StoryElementKind: String, CaseIterable, Hashable, Codable, Identifiable {
+nonisolated enum StoryElementKind: String, CaseIterable, Hashable, Codable, CodingKeyRepresentable, Identifiable {
     /// The one thing the frame says. On the Receipt this is the ticket.
     case statement
     /// The supporting line or two under the statement.
@@ -42,7 +42,7 @@ nonisolated enum StoryElementKind: String, CaseIterable, Hashable, Codable, Iden
 /// and Post share one horizontal scale. The view multiplies by the size it is
 /// actually given, which is a phone-sized preview in the editor and exactly
 /// 1080 × 1920 in the export. There is no second layout to drift.
-nonisolated struct StoryLayout: Hashable {
+struct StoryLayout: Hashable {
     let format: StoryFormat
     /// The size the canvas is being drawn at, in points.
     let canvasSize: CGSize
@@ -103,7 +103,7 @@ nonisolated struct StoryLayout: Hashable {
 
     // MARK: Type roles (canvas points, 1080-wide)
 
-    enum Type {
+    enum TypeScale {
         static let statement: CGFloat = 168
         static let statementTracking: CGFloat = -0.02
         static let heroNumber: CGFloat = 320
@@ -180,7 +180,7 @@ nonisolated struct StoryLayout: Hashable {
             // reads as a caption to the frame rather than competing with the
             // statement on the left.
             let insetWidth = insetWidthFraction
-            let insetHeight = insetWidth * Double(format.size.width) / ProgressPhotoMetrics.aspectRatio * unit
+            let insetHeight = insetWidth * Double(format.size.width) / Double(ProgressPhotoMetrics.aspectRatio) * unit
                 + 44 * unit // caption
             return StoryElementLayout(
                 origin: CGPoint(x: 1 - sides - insetWidth, y: bottom - insetHeight),
@@ -195,20 +195,20 @@ nonisolated struct StoryLayout: Hashable {
     private static func statementHeightCanvasPoints(for frame: ShareFrame) -> Double {
         switch frame {
         case .clean: 0
-        case .showedUp, .comeback: Double(Type.statement) * 1.05
-        case .quickSave: Double(Type.statement) * 2.05
-        case .momentum: Double(Type.eyebrow) * 1.4 + Double(Type.heroNumber) * 1.02
-        case .receipt: 5 * Double(Type.receiptRow) * 1.45 + 70
-        case .journey: Double(Type.journeyNumber) * 1.05
-        case .milestone: Double(Type.milestoneNumber) * 1.02 + Double(Type.eyebrow) * 1.4 + 36
+        case .showedUp, .comeback: Double(TypeScale.statement) * 1.05
+        case .quickSave: Double(TypeScale.statement) * 2.05
+        case .momentum: Double(TypeScale.eyebrow) * 1.4 + Double(TypeScale.heroNumber) * 1.02
+        case .receipt: 5 * Double(TypeScale.receiptRow) * 1.45 + 70
+        case .journey: Double(TypeScale.journeyNumber) * 1.05
+        case .milestone: Double(TypeScale.milestoneNumber) * 1.02 + Double(TypeScale.eyebrow) * 1.4 + 36
         }
     }
 
     private static func factsHeightCanvasPoints(for frame: ShareFrame) -> Double {
         switch frame {
         case .clean: 0
-        case .comeback, .showedUp, .journey: Double(Type.fact) * 2.6
-        default: Double(Type.fact) * 1.3
+        case .comeback, .showedUp, .journey: Double(TypeScale.fact) * 2.6
+        default: Double(TypeScale.fact) * 1.3
         }
     }
 }
@@ -217,7 +217,7 @@ nonisolated struct StoryLayout: Hashable {
 ///
 /// Never pixels. The same struct places the element on a 320-point preview
 /// and on the 1080-pixel export, which is what makes the two agree.
-nonisolated struct StoryElementLayout: Hashable, Codable {
+struct StoryElementLayout: Hashable, Codable {
     /// Top-leading corner, normalized.
     var origin: CGPoint
     /// Multiplier on the element's authored size. 1 is the default size.
@@ -266,7 +266,7 @@ nonisolated struct StoryElementLayout: Hashable, Codable {
 }
 
 /// Every element's layout for one frame in one format.
-nonisolated struct StoryElementLayouts: Hashable, Codable {
+struct StoryElementLayouts: Hashable, Codable {
     var layouts: [StoryElementKind: StoryElementLayout]
 
     /// All defaults for a frame and format.

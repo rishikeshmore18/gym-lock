@@ -418,6 +418,36 @@ struct ProgressAnalytics {
         return (earliest, latest)
     }
 
+    /// Tallies an arbitrary span of days with the chart's own rules.
+    ///
+    /// Built on `buildWeek`, which already walks a span day by day and applies
+    /// `status` and the slot rule — so a share frame quoting "83% showed up"
+    /// over the last four weeks is computed by exactly the code that draws
+    /// the month chart, not by a second copy of it.
+    static func tally(
+        in interval: DateInterval,
+        log: MomentumLog,
+        plan: MorningPlan,
+        schedule: GymSchedule,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> ProgressTally {
+        let today = calendar.startOfDay(for: now)
+        let trainingDays = plan.effectiveTrainingDays(fallback: schedule)
+        let outcomesByDay = Dictionary(grouping: log.outcomes) {
+            calendar.startOfDay(for: $0.date)
+        }
+        return buildWeek(
+            index: 0,
+            start: interval.start,
+            endExclusive: interval.end,
+            trainingDays: trainingDays,
+            outcomesByDay: outcomesByDay,
+            today: today,
+            calendar: calendar
+        ).tally
+    }
+
     // MARK: Week
 
     private static func buildWeek(

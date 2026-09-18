@@ -11,6 +11,11 @@ struct ProgressPhotosCard: View {
     let store: ProgressPhotoStore
     /// Stagger so the card lands after the chart above it.
     var appearanceDelay: Double = 0.24
+    /// Raises the Story editor. Owned by the tab so the cover is presented
+    /// from a view that stays on screen while this card scrolls away.
+    var onShare: ((ShareOrigin) -> Void)?
+    /// The zoom transition's source namespace, shared with the presenter.
+    var transitionNamespace: Namespace.ID?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -107,7 +112,11 @@ struct ProgressPhotosCard: View {
                 focusedPhotoID = nil
             }
         }
-        .progressPhotoImporter(store: store, pendingSource: $pendingSource)
+        .progressPhotoImporter(store: store, pendingSource: $pendingSource) { saved in
+            // Sharing from the review screen: the photo is already written,
+            // and the toast on the editor says so.
+            onShare?(.progressPhoto(saved, justSaved: true))
+        }
         .confirmationDialog(
             "Delete this photo?",
             isPresented: Binding(
@@ -166,9 +175,11 @@ struct ProgressPhotosCard: View {
                 regionWidth: width,
                 reduceMotion: reduceMotion,
                 onFocus: focus,
-                // Only real photographs can be deleted; the demonstration
-                // stack has nothing behind it to remove.
-                onDelete: isDemo ? nil : { photoPendingDeletion = $0 }
+                // Only real photographs can be deleted or shared; the
+                // demonstration stack has nothing behind it.
+                onDelete: isDemo ? nil : { photoPendingDeletion = $0 },
+                onShare: isDemo || onShare == nil ? nil : { onShare?(.progressPhoto($0)) },
+                transitionNamespace: transitionNamespace
             )
         } else {
             // First layout pass, before the width is known. Reserves nothing

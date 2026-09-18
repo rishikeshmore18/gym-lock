@@ -21,6 +21,10 @@ struct ProgressTabView: View {
     @State private var period = ProgressPeriodModel()
     /// Owned by the tab so the photos survive the card scrolling out of view.
     @State private var photos = ProgressPhotoStore()
+    /// The share being edited, if any. Presented from the tab so the cover
+    /// outlives the card that raised it.
+    @State private var shareOrigin: ShareOrigin?
+    @Namespace private var shareTransition
 
     /// The zoom between the two levels of the chart.
     ///
@@ -64,7 +68,11 @@ struct ProgressTabView: View {
                         onStepWeek: stepWeek
                     )
 
-                    ProgressPhotosCard(store: photos)
+                    ProgressPhotosCard(
+                        store: photos,
+                        onShare: { shareOrigin = $0 },
+                        transitionNamespace: shareTransition
+                    )
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
@@ -75,6 +83,7 @@ struct ProgressTabView: View {
             .navigationBarTitleDisplayMode(.large)
         }
         .tint(Theme.accent)
+        .storyEditor(origin: $shareOrigin, photos: photos, transitionNamespace: shareTransition)
         .task(id: refreshKey) { refresh() }
         // The Day 0 photograph the user took during onboarding is their real
         // before-picture; the stack starts from it rather than asking for the

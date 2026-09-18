@@ -35,6 +35,10 @@ struct ProgressPhotoCaptureSheet: View {
     /// moment after, then gone, as the Camera app does it.
     @State private var isShowingZoomReadout = false
     @State private var readoutFade: Task<Void, Never>?
+    /// True from the first pinch change to its end. Separate from the readout
+    /// flag: a second pinch that starts while the readout is still fading has
+    /// to re-anchor its start factor, or it jumps.
+    @State private var isPinching = false
 
     var body: some View {
         ZStack {
@@ -165,7 +169,8 @@ struct ProgressPhotoCaptureSheet: View {
     private var pinch: some Gesture {
         MagnifyGesture(minimumScaleDelta: 0)
             .onChanged { value in
-                if !isShowingZoomReadout {
+                if !isPinching {
+                    isPinching = true
                     camera.beginPinch()
                     readoutFade?.cancel()
                     withAnimation(.easeOut(duration: 0.12)) { isShowingZoomReadout = true }
@@ -173,6 +178,7 @@ struct ProgressPhotoCaptureSheet: View {
                 camera.pinch(magnification: value.magnification)
             }
             .onEnded { _ in
+                isPinching = false
                 scheduleReadoutFade()
             }
     }
