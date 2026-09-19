@@ -60,7 +60,8 @@ enum StoryFixtures {
         receipt: ReceiptTimeline? = receipt(withWorkout: true),
         journey: JourneySnapshot? = nil,
         comeback: ComebackInfo? = nil,
-        milestone: Milestone? = nil
+        milestone: Milestone? = nil,
+        history: FrameHistory = .everything
     ) -> ShareContext {
         ShareContext(
             referenceDay: day,
@@ -76,8 +77,24 @@ enum StoryFixtures {
             journey: journey,
             comeback: comeback,
             milestone: milestone,
-            installDate: day.addingTimeInterval(-29 * 86_400)
+            installDate: day.addingTimeInterval(-29 * 86_400),
+            history: history
         )
+    }
+
+    /// A brand-new user: Clean only, everything else locked.
+    static var newUser: ShareContext {
+        context(
+            weeks: 0, thisWeek: 1, outcome: nil, receipt: nil,
+            journey: JourneySnapshot(dayNumber: 3, verifiedVisits: 0, completion: nil, due: 0, dayZeroPhoto: nil),
+            history: .none
+        )
+    }
+
+    /// The whole editor over a fixture, for looking at the rail and the
+    /// All Frames sheet without a real morning.
+    static func editor(_ context: ShareContext, assets: StoryAssets = assets) -> StoryEditorModel {
+        StoryEditorModel(fixtureContext: context, assets: assets, origin: .progressPhoto(photo))
     }
 
     static let journey30 = JourneySnapshot(
@@ -94,6 +111,26 @@ enum StoryFixtures {
     /// Demo artwork stands in for the user's photo.
     static var assets: StoryAssets {
         StoryAssets(photo: ProgressPhotoDemoArtwork.frame(2), dayZero: ProgressPhotoDemoArtwork.frame(0))
+    }
+}
+
+/// The editor chrome over a fixture model: canvas, rail and share bar.
+private struct FixtureEditor: View {
+    @State var model: StoryEditorModel
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 14) {
+                StoryEditableCanvas(model: model, canvasSize: CGSize(width: 250, height: 250 / model.format.ratio))
+                FramePreviewRail(model: model, cellWidth: 112) { model.select($0) }
+                    .padding(.horizontal, 14)
+            }
+        }
+        .sheet(isPresented: $model.isShowingAllFrames) {
+            AllFramesSheet(model: model) { model.select($0) }
+        }
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -175,6 +212,19 @@ private struct FixtureCanvas: View {
         frame: .comeback
     )
     .environment(\.locale, Locale(identifier: "de_DE"))
+}
+#Preview("17 · Rail · mature user") {
+    FixtureEditor(model: StoryFixtures.editor(StoryFixtures.context(weeks: 6, thisWeek: 3, comeback: StoryFixtures.comeback)))
+}
+#Preview("17 · Rail · new user (Clean + 2 locked)") {
+    FixtureEditor(model: StoryFixtures.editor(StoryFixtures.newUser))
+}
+#Preview("17 · Rail · card mode") {
+    FixtureEditor(model: StoryFixtures.editor(StoryFixtures.context(photo: nil), assets: .none))
+}
+#Preview("18 · All Frames sheet · new user") {
+    AllFramesSheet(model: StoryFixtures.editor(StoryFixtures.newUser)) { _ in }
+        .background(Color.black)
 }
 #Preview("16 · Long strings · DAY 100") {
     FixtureCanvas(context: StoryFixtures.context(outcome: nil, receipt: nil, journey: StoryFixtures.journeyNoPercent), frame: .journey)

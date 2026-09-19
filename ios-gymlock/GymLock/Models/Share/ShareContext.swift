@@ -112,6 +112,9 @@ struct ShareContext: Hashable {
     let comeback: ComebackInfo?
     let milestone: Milestone?
     let installDate: Date
+    /// What has ever happened, for telling a locked frame from one that
+    /// simply does not apply today.
+    let history: FrameHistory
 
     var hasPhoto: Bool { photo != nil }
 
@@ -139,7 +142,8 @@ struct ShareContext: Hashable {
         journey: JourneySnapshot?,
         comeback: ComebackInfo?,
         milestone: Milestone?,
-        installDate: Date
+        installDate: Date,
+        history: FrameHistory = .everything
     ) {
         self.referenceDay = referenceDay
         self.photo = photo
@@ -155,6 +159,7 @@ struct ShareContext: Hashable {
         self.comeback = comeback
         self.milestone = milestone
         self.installDate = installDate
+        self.history = history
     }
 }
 

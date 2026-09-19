@@ -11,7 +11,9 @@ struct StoryEditorView: View {
     let onClose: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var canvasArea: CGSize = .zero
+    @State private var screenHeight: CGFloat = 0
     @State private var hasSettled = false
     @State private var shareURL: URL?
 
@@ -47,6 +49,13 @@ struct StoryEditorView: View {
         return byHeight
     }
 
+    /// 112 normally. On an SE-class height the full rail would leave the
+    /// canvas under 55 % of the screen, so the cells drop to 96 instead of
+    /// the rail being clipped.
+    private var railCellWidth: CGFloat {
+        (screenHeight > 0 && screenHeight < 700) || verticalSizeClass == .compact ? 96 : 112
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -60,12 +69,12 @@ struct StoryEditorView: View {
                     .padding(.horizontal, 28)
                     .padding(.vertical, 14)
 
-                FramePillStrip(frames: model.frames, selected: model.frame) { frame in
-                    guard let index = model.frames.firstIndex(of: frame) else { return }
-                    withAnimation(pageAnimation) { model.select(frameAt: index) }
+                FramePreviewRail(model: model, cellWidth: railCellWidth) { frame in
+                    withAnimation(pageAnimation) { model.select(frame) }
                 }
-                .frame(height: 44)
+                .padding(.horizontal, 14)
                 .opacity(model.hasFrames ? 1 : 0)
+                .animation(Theme.settle, value: model.format)
 
                 resetRow
                     .frame(height: 30)
@@ -97,6 +106,12 @@ struct StoryEditorView: View {
             if let toast = model.toast {
                 EditorToast(message: toast)
                     .padding(.top, 62)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { screenHeight = $0 }
+        .sheet(isPresented: $model.isShowingAllFrames) {
+            AllFramesSheet(model: model) { frame in
+                withAnimation(pageAnimation) { model.select(frame) }
             }
         }
         .preferredColorScheme(.dark)
@@ -161,6 +176,7 @@ struct StoryEditorView: View {
                     } else {
                         StoryEditableCanvas(model: model, canvasSize: canvasSize)
                             .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
+                            .simultaneousGesture(TapGesture().onEnded { model.dismissLockExplanation() })
                     }
                 }
             }

@@ -34,6 +34,11 @@ struct StoryCanvasView: View {
     /// Reports each element's drawn size, normalized, so the editor can hit
     /// test and draw selection chrome. Unused by the renderer.
     var onElementSize: ((StoryElementKind, CGSize) -> Void)? = nil
+    /// A locked frame has no real data to draw, so its miniature shows only
+    /// the frame's statement word in the frame's own style, plus the mark —
+    /// the shape of the result and nothing invented. Never used for export:
+    /// a locked frame cannot be rendered.
+    var isLockedPreview: Bool = false
 
     private var layout: StoryLayout { StoryLayout(format: format, canvasSize: canvasSize) }
 
@@ -56,7 +61,9 @@ struct StoryCanvasView: View {
                 StoryLegibilityBand(layout: layout)
             }
 
-            if layers.contains(.elements) {
+            if layers.contains(.elements), isLockedPreview {
+                lockedPreviewElements
+            } else if layers.contains(.elements) {
                 ForEach(Self.activeElements(frame: frame, context: context)) { kind in
                     if let element = layouts[kind], !element.isHidden {
                         elementView(kind, scale: element.scale)
@@ -78,6 +85,22 @@ struct StoryCanvasView: View {
         .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
         .clipped()
         .environment(\.colorScheme, .dark)
+    }
+
+    /// The statement word and the mark at their default positions.
+    @ViewBuilder
+    private var lockedPreviewElements: some View {
+        let defaults = StoryElementLayouts.defaults(for: frame, format: format)
+        if let statement = defaults[.statement], !frame.lockedPreviewWord.isEmpty {
+            StoryStatementText(text: Text(frame.lockedPreviewWord), layout: layout, scale: statement.scale)
+                .frame(maxWidth: layout.textWidth(elementScale: statement.scale), alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
+                .offset(x: layout.x(statement.origin.x), y: layout.y(statement.origin.y))
+        }
+        if let mark = defaults[.mark] {
+            StoryMarkView(layout: layout, scale: mark.scale)
+                .offset(x: layout.x(mark.origin.x), y: layout.y(mark.origin.y))
+        }
     }
 
     @ViewBuilder

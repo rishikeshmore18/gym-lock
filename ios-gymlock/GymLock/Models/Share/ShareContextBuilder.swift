@@ -63,6 +63,8 @@ enum ShareContextBuilder {
             calendar: calendar
         )
 
+        let history = history(log: log, events: store.events, weeklyGoal: store.streak.weeklyGoal, calendar: calendar)
+
         return ShareContext(
             referenceDay: referenceDay,
             photo: origin.photo,
@@ -77,8 +79,58 @@ enum ShareContextBuilder {
             journey: journey,
             comeback: comeback,
             milestone: milestone,
-            installDate: installDate
+            installDate: installDate,
+            history: history
         )
+    }
+
+    // MARK: History
+
+    /// Everything the record has ever contained, for the lock rules.
+    static func history(
+        log: MomentumLog,
+        events: SessionEventLog,
+        weeklyGoal: Int,
+        calendar: Calendar
+    ) -> FrameHistory {
+        let verified = log.outcomes.filter(\.kind.isVerifiedGymVisit).count
+        return FrameHistory(
+            hasVerifiedVisit: verified > 0,
+            hasReceipt: hasEverHadReceipt(events: events, calendar: calendar),
+            hasKeptWeek: hasEverKeptWeek(log: log, weeklyGoal: weeklyGoal, calendar: calendar),
+            hasHomeWorkout: log.outcomes.contains { $0.kind == .homeWorkout },
+            verifiedVisitsEver: verified
+        )
+    }
+
+    /// Whether any morning, grouped by session where one is recorded and by
+    /// day otherwise, passes the same `receipt(from:)` test the frame uses.
+    static func hasEverHadReceipt(events: SessionEventLog, calendar: Calendar) -> Bool {
+        var bySession: [UUID: [SessionEvent]] = [:]
+        var byDay: [Date: [SessionEvent]] = [:]
+        for event in events.events {
+            if let id = event.sessionID {
+                bySession[id, default: []].append(event)
+            } else {
+                byDay[calendar.startOfDay(for: event.at), default: []].append(event)
+            }
+        }
+        let groups = Array(bySession.values) + Array(byDay.values)
+        return groups.contains { receipt(from: $0.sorted { $0.at < $1.at }) != nil }
+    }
+
+    /// Whether any completed or live week has met the goal. Uses the same
+    /// session-day definition as the streak, so a week the streak would have
+    /// kept is exactly a week this counts.
+    static func hasEverKeptWeek(log: MomentumLog, weeklyGoal: Int, calendar: Calendar) -> Bool {
+        let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
+        var daysByWeek: [Date: Set<Date>] = [:]
+        for outcome in log.outcomes where outcome.kind.preservesMomentum {
+            let day = calendar.startOfDay(for: outcome.date)
+            guard let week = StreakEngine.weekStart(containing: day, weekCalendar: weekCalendar) else { continue }
+            daysByWeek[week, default: []].insert(day)
+        }
+        return daysByWeek.values.contains { $0.count >= weeklyGoal }
     }
 
     // MARK: Receipt

@@ -13,8 +13,19 @@ import SwiftUI
 final class StoryEditorModel {
     let origin: ShareOrigin
     let context: ShareContext
-    /// The frames this context can honestly support, in display order.
+    /// The frames this context can honestly support, in display order. The
+    /// only frames that can be selected, swiped to, rendered or shared.
     let frames: [ShareFrame]
+    /// Every frame with where it stands, in `allCases` order.
+    let availability: [(frame: ShareFrame, state: FrameAvailability)]
+    /// The locked frames the rail shows after the available ones: nearest to
+    /// unlocking first, capped so a new user sees promise rather than a wall.
+    let lockedForRail: [(frame: ShareFrame, lock: FrameLock)]
+
+    /// The locked frame whose explanation is showing above its rail cell.
+    var explainedLock: ShareFrame?
+    var isShowingAllFrames = false
+    private var lockExplanationFade: Task<Void, Never>?
 
     private(set) var format: StoryFormat = .story
     /// Which frame is current. Paging animates through fractional positions
@@ -66,14 +77,75 @@ final class StoryEditorModel {
         self.layoutStore = layoutStore
         context = ShareContextBuilder.build(origin: origin, store: store, photos: photos)
         frames = ShareFrameAvailability.frames(for: context)
+        availability = ShareFrameAvailability.availability(for: context)
+        lockedForRail = ShareFrameAvailability.lockedForRail(availability)
         transform = layoutStore.transform(for: origin, format: .story)
         reloadLayouts()
+    }
+
+    #if DEBUG
+    /// A model over a hand-built context, for fixtures and the debug entry
+    /// point. Never used at runtime.
+    init(fixtureContext: ShareContext, assets: StoryAssets, origin: ShareOrigin) {
+        self.origin = origin
+        layoutStore = StoryLayoutStore(defaults: UserDefaults(suiteName: "gymlock.share.fixture") ?? .standard)
+        context = fixtureContext
+        frames = ShareFrameAvailability.frames(for: fixtureContext)
+        availability = ShareFrameAvailability.availability(for: fixtureContext)
+        lockedForRail = ShareFrameAvailability.lockedForRail(availability)
+        transform = .default
+        self.assets = assets
+        isLoadingAssets = false
+        reloadLayouts()
+    }
+    #endif
+
+    /// Where a frame stands for this share.
+    func state(of frame: ShareFrame) -> FrameAvailability {
+        availability.first { $0.frame == frame }?.state ?? .notToday
+    }
+
+    /// The arrangement a thumbnail of `frame` draws: the user's own, when
+    /// they have one, so the miniature is the export.
+    func layouts(for frame: ShareFrame) -> StoryElementLayouts {
+        layouts[frame] ?? .defaults(for: frame, format: format)
+    }
+
+    /// Selects a frame by identity. Locked and not-today frames are refused
+    /// here, so no path into the model can land on one.
+    func select(_ frame: ShareFrame) {
+        guard let index = frames.firstIndex(of: frame) else { return }
+        dismissLockExplanation()
+        select(frameAt: index)
+    }
+
+    // MARK: Locked frames
+
+    /// Shows why a frame is locked, above its cell, for a moment. Nothing
+    /// else changes: the canvas keeps the frame it had.
+    func explainLock(on frame: ShareFrame) {
+        guard state(of: frame).isLocked else { return }
+        Haptics.soft()
+        lockExplanationFade?.cancel()
+        withAnimation(Theme.stateChange) { explainedLock = frame }
+        lockExplanationFade = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.dismissLockExplanation()
+        }
+    }
+
+    func dismissLockExplanation() {
+        guard explainedLock != nil else { return }
+        lockExplanationFade?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { explainedLock = nil }
     }
 
     // MARK: Assets
 
     /// Decodes the working image and the Day 0 thumbnail, once.
     func loadAssets() async {
+        guard isLoadingAssets else { return }
         defer { isLoadingAssets = false }
         let loader = ProgressPhotoImageLoader.shared
 
@@ -99,6 +171,7 @@ final class StoryEditorModel {
     func setFormat(_ newFormat: StoryFormat) {
         guard newFormat != format else { return }
         Haptics.selection()
+        dismissLockExplanation()
         format = newFormat
         transform = layoutStore.transform(for: origin, format: newFormat)
         selectedElement = nil

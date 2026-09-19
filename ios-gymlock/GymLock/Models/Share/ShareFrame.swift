@@ -34,6 +34,35 @@ nonisolated enum ShareFrame: String, CaseIterable, Hashable, Identifiable, Codab
         }
     }
 
+    /// One honest line for the All Frames gallery.
+    var description: String {
+        switch self {
+        case .clean: "just the photo."
+        case .showedUp: "the day you turned up."
+        case .receipt: "alarm to gym, minute by minute."
+        case .momentum: "weeks you kept."
+        case .journey: "how far it has been."
+        case .milestone: "a number worth saying."
+        case .quickSave: "the day a quick 20 saved."
+        case .comeback: "back after a miss."
+        }
+    }
+
+    /// The single word a locked preview is allowed to draw, in the frame's
+    /// own statement style. Never a number, never a date.
+    var lockedPreviewWord: String {
+        switch self {
+        case .clean: ""
+        case .showedUp: "SHOWED UP."
+        case .receipt: "RECEIPT"
+        case .momentum: "MOMENTUM"
+        case .journey: "JOURNEY"
+        case .milestone: "MILESTONE"
+        case .quickSave: "THE SAVE"
+        case .comeback: "COMEBACK"
+        }
+    }
+
     /// The movable pieces this frame is made of, in drawing order.
     var elements: [StoryElementKind] {
         switch self {
