@@ -121,11 +121,12 @@ private struct FixtureEditor: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VStack(spacing: 14) {
-                StoryEditableCanvas(model: model, canvasSize: CGSize(width: 250, height: 250 / model.format.ratio))
-                FramePreviewRail(model: model, cellWidth: 112) { model.select($0) }
-                    .padding(.horizontal, 14)
-            }
+            StoryEditableCanvas(model: model, canvasSize: CGSize(width: 320, height: 320 / model.format.ratio))
+                .overlay(alignment: .bottom) {
+                    FramePreviewRail(model: model) { model.select($0) }
+                        .frame(width: 320)
+                        .padding(.bottom, 10)
+                }
         }
         .sheet(isPresented: $model.isShowingAllFrames) {
             AllFramesSheet(model: model) { model.select($0) }

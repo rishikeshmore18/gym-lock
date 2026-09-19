@@ -125,97 +125,111 @@ struct FormatToggle: View {
 
 // MARK: - Frame rail
 
-/// The frames under the canvas, as live miniatures of the user's own photo.
+/// The frame picker, floating over the bottom of the photo the way the
+/// filter row does in Instagram and Snapchat.
 ///
-/// Each cell is the same `StoryCanvasView` the big canvas and the export
-/// draw, at 112 points wide, so choosing a frame is recognising a finished
-/// result rather than reading a name. Available frames first, then at most
-/// two locked ones dimmed with the result still visible beneath, then the
-/// All Frames cell. One glass tray around all of it; the cells carry no
-/// glass of their own.
+/// A single row of small circles, no tray, no labels. Each circle is the
+/// same `StoryCanvasView` the big canvas and the export draw, cropped to its
+/// bottom band so the statement is what shows. The selected frame is a
+/// little larger with a white ring, and its name sits as one small caption
+/// above the row. Available frames first, then at most two locked ones
+/// dimmed, then the All Frames circle.
+///
+/// It lives as an overlay on the canvas rather than in the column below
+/// it, so the photo keeps the screen; the row is `height` tall in total.
 struct FramePreviewRail: View {
     @Bindable var model: StoryEditorModel
-    /// Cell width; 112 normally, 96 on compact heights so the canvas keeps
-    /// enough of the screen.
-    let cellWidth: CGFloat
     let onSelect: (ShareFrame) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     /// Stable scroll identity for the trailing cell.
     private static let allFramesID = "all-frames"
-    static let trayInsets = EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14)
-    /// Reserved for the title so an accessibility-size wrap does not move the
-    /// cells.
-    static let titleHeight: CGFloat = 34
+    private static let circle: CGFloat = 50
+    private static let selectedCircle: CGFloat = 62
+    private static let ring: CGFloat = 2.5
+    /// Every cell reserves the selected size so selection never reflows
+    /// its neighbours; only the circle inside grows.
+    private static let slot: CGFloat = selectedCircle + ring * 2 + 4
+    private static let captionHeight: CGFloat = 20
 
-    private var cellHeight: CGFloat { (cellWidth / model.format.ratio).rounded() }
-
-    /// The rail's full height for a given cell width, so the editor can
-    /// budget the canvas area before the rail is measured.
-    static func height(cellWidth: CGFloat, format: StoryFormat) -> CGFloat {
-        (cellWidth / format.ratio).rounded() + 6 + titleHeight + trayInsets.top + trayInsets.bottom
-    }
+    /// Row plus caption, for anyone budgeting around it.
+    static let height: CGFloat = slot + captionHeight + 4
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 10) {
-                    ForEach(model.frames) { frame in
-                        availableCell(frame)
-                            .id(frame)
+        VStack(spacing: 4) {
+            caption
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 8) {
+                        ForEach(model.frames) { frame in
+                            availableCell(frame)
+                                .id(frame)
+                        }
+                        ForEach(model.lockedForRail, id: \.frame) { entry in
+                            lockedCell(entry.frame, lock: entry.lock)
+                                .id(entry.frame)
+                        }
+                        allFramesCell
+                            .id(Self.allFramesID)
                     }
-                    ForEach(model.lockedForRail, id: \.frame) { entry in
-                        lockedCell(entry.frame, lock: entry.lock)
-                            .id(entry.frame)
+                    .padding(.horizontal, 16)
+                    .scrollTargetLayout()
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollClipDisabled()
+                .onScrollPhaseChange { _, phase in
+                    if phase != .idle { model.dismissLockExplanation() }
+                }
+                .onChange(of: model.frame) { _, frame in
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.86)) {
+                        proxy.scrollTo(frame, anchor: .center)
                     }
-                    allFramesCell
-                        .id(Self.allFramesID)
-                }
-                .padding(.horizontal, 14)
-                .scrollTargetLayout()
-            }
-            .scrollBounceBehavior(.basedOnSize)
-            .scrollClipDisabled()
-            .onScrollPhaseChange { _, phase in
-                if phase != .idle { model.dismissLockExplanation() }
-            }
-            .onChange(of: model.frame) { _, frame in
-                withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.86)) {
-                    proxy.scrollTo(frame, anchor: .center)
                 }
             }
+            .frame(height: Self.slot)
         }
-        .padding(Self.trayInsets)
-        .modifier(RailTray())
         .overlay(alignment: .top) { tooltip }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Frames")
+    }
+
+    // MARK: Caption
+
+    /// The selected frame's name, the way Instagram names the filter above
+    /// the row. Text shadow rather than a pill: it reads over any photo
+    /// without adding a box.
+    private var caption: some View {
+        Text(model.hasFrames ? model.frame.title : "")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.6), radius: 4, y: 1)
+            .frame(height: Self.captionHeight)
+            .contentTransition(.opacity)
+            .animation(selectionAnimation, value: model.frame)
+            .accessibilityHidden(true)
     }
 
     // MARK: Cells
 
     private func availableCell(_ frame: ShareFrame) -> some View {
         let isSelected = frame == model.frame
+        let diameter = isSelected ? Self.selectedCircle : Self.circle
         return Button {
             onSelect(frame)
         } label: {
-            VStack(spacing: 6) {
-                thumbnail(frame, isLocked: false)
-                    .overlay {
-                        if isSelected {
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(Theme.accent, lineWidth: 2)
-                                .padding(1)
-                        }
+            thumbnail(frame, isLocked: false, diameter: diameter)
+                .overlay {
+                    // White ring with a hairline of photo showing between
+                    // ring and image, as on Instagram's selected filter.
+                    if isSelected {
+                        Circle()
+                            .strokeBorder(.white, lineWidth: Self.ring)
+                            .padding(-(Self.ring + 2))
                     }
-                    .opacity(isSelected ? 1 : 0.82)
-                    .scaleEffect(isSelected && !reduceMotion ? 1.04 : 1)
-                cellTitle(frame.title, color: isSelected ? .white : .white.opacity(0.7), isBold: isSelected)
-            }
-            .frame(width: cellWidth)
-            .contentShape(.rect)
+                }
+                .frame(width: Self.slot, height: Self.slot)
+                .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .animation(selectionAnimation, value: isSelected)
@@ -231,13 +245,11 @@ struct FramePreviewRail: View {
                 model.explainLock(on: frame)
             }
         } label: {
-            VStack(spacing: 6) {
-                thumbnail(frame, isLocked: true)
-                    .modifier(LockedTreatment())
-                cellTitle(frame.title, color: .white.opacity(0.5), isBold: false)
-            }
-            .frame(width: cellWidth)
-            .contentShape(.rect)
+            thumbnail(frame, isLocked: true, diameter: Self.circle)
+                .modifier(LockedTreatment(symbolSize: 14))
+                .clipShape(.circle)
+                .frame(width: Self.slot, height: Self.slot)
+                .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(frame.title) frame, locked")
@@ -251,55 +263,39 @@ struct FramePreviewRail: View {
             model.dismissLockExplanation()
             model.isShowingAllFrames = true
         } label: {
-            VStack(spacing: 6) {
-                VStack(spacing: 8) {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 22, weight: .medium))
-                    Text("All frames")
-                        .font(.system(size: 13, weight: .semibold))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                }
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: cellWidth, height: cellHeight)
-                .background(Color.white.opacity(0.08), in: .rect(cornerRadius: 12))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                }
-                cellTitle("All", color: .white.opacity(0.7), isBold: false)
-            }
-            .frame(width: cellWidth)
-            .contentShape(.rect)
+                .frame(width: Self.circle, height: Self.circle)
+                .background(Color.black.opacity(0.35), in: .circle)
+                .overlay { Circle().strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5) }
+                .frame(width: Self.slot, height: Self.slot)
+                .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("All frames")
         .accessibilityHint("Browse every frame")
     }
 
-    /// The miniature. Same view, same layouts, same image as the export.
-    private func thumbnail(_ frame: ShareFrame, isLocked: Bool) -> some View {
+    /// The miniature, cropped to a circle. Same view, same layouts, same
+    /// image as the export; the crop is anchored to the bottom band because
+    /// that is where the frames differ.
+    private func thumbnail(_ frame: ShareFrame, isLocked: Bool, diameter: CGFloat) -> some View {
         FrameThumbnail(
             model: model,
             frame: frame,
             isLocked: isLocked,
-            size: CGSize(width: cellWidth, height: cellHeight),
-            cornerRadius: 12
+            size: CGSize(width: diameter, height: (diameter / model.format.ratio).rounded()),
+            cornerRadius: 0
         )
-    }
-
-    private func cellTitle(_ text: String, color: Color, isBold: Bool) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: isBold ? .bold : .semibold))
-            .foregroundStyle(color)
-            .lineLimit(2)
-            .minimumScaleFactor(0.8)
-            .multilineTextAlignment(.center)
-            .frame(height: Self.titleHeight, alignment: .top)
+        .frame(width: diameter, height: diameter, alignment: .bottom)
+        .clipShape(.circle)
+        .shadow(color: .black.opacity(0.35), radius: 4, y: 2)
     }
 
     // MARK: Tooltip
 
-    /// Why a frame is locked, above the rail. Positioned over the rail rather
+    /// Why a frame is locked, above the row. Positioned over the row rather
     /// than anchored to a scrolling cell so it stays legible at the edges.
     @ViewBuilder
     private var tooltip: some View {
@@ -319,7 +315,7 @@ struct FramePreviewRail: View {
             .padding(.vertical, 9)
             .editorGlass(in: .rect(cornerRadius: 12), isInteractive: false)
             .padding(.horizontal, 20)
-            .offset(y: -26)
+            .offset(y: -40)
             .transition(.opacity.combined(with: .move(edge: .bottom)))
             .allowsHitTesting(false)
             .accessibilityAddTraits(.updatesFrequently)
@@ -328,28 +324,6 @@ struct FramePreviewRail: View {
 
     private var selectionAnimation: Animation {
         reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.3, dampingFraction: 0.86)
-    }
-}
-
-/// The one glass tray around the rail: clear glass on iOS 26, material
-/// below, opaque under Reduce Transparency.
-private struct RailTray: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 24)
-        if reduceTransparency {
-            content
-                .background(Color.white.opacity(0.06), in: shape)
-                .overlay { shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 1) }
-        } else if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: shape)
-        } else {
-            content
-                .background(.ultraThinMaterial, in: shape)
-                .overlay { shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 1) }
-        }
     }
 }
 
