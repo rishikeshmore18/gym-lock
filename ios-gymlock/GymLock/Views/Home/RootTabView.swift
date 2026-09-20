@@ -1,21 +1,12 @@
 import SwiftUI
 
-/// The four destinations of the main app.
-enum RootTab: Hashable {
-    case home
-    case progress
-    case profile
-    case home2
-}
-
 /// The top-level navigation shell.
 ///
-/// Uses the system `TabView` rather than a hand-drawn bar. On iOS 26 that is
-/// already the floating Liquid Glass tab bar, correct down to the selected
-/// highlight, and it gets safe areas, Reduce Transparency, Dynamic Type and
-/// VoiceOver right without any of it being reimplemented here. It also keeps
-/// each tab alive, which is what stops the calendar losing its scroll position
-/// and the streak entrance replaying every time the user comes back.
+/// The destinations are stacked and kept alive rather than swapped, which is
+/// what stops the calendar losing its scroll position and the streak entrance
+/// replaying every time the user comes back to Home. The bar is installed as a
+/// bottom safe area inset, so every scroll view inside every tab still ends
+/// above it and content scrolls underneath the glass.
 struct RootTabView: View {
     @Environment(AppStore.self) private var store
     @Environment(GymSessionCoordinator.self) private var coordinator
@@ -27,33 +18,30 @@ struct RootTabView: View {
     @State private var isRunningSetup = false
 
     var body: some View {
-        TabView(selection: $selection) {
-            Tab("Home", systemImage: "house.fill", value: RootTab.home) {
+        ZStack {
+            destination(.home) {
                 TodayHomeView(intro: intro, coordinator: coordinator)
             }
 
-            Tab("Progress", systemImage: "chart.bar.fill", value: RootTab.progress) {
+            destination(.progress) {
                 ProgressTabView()
             }
 
-            Tab("Profile", systemImage: "person.fill", value: RootTab.profile) {
-                ProfilePlaceholderView()
+            destination(.community) {
+                CommunityView()
             }
 
-            // The existing home, untouched, reached through its own tab.
-            Tab("Home 2", systemImage: "square.grid.2x2.fill", value: RootTab.home2) {
-                HomeView()
+            destination(.profile) {
+                ProfileView()
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            RootTabBar(selection: $selection)
         }
         // Black rather than coral: on this screen coral means a skipped day,
         // and a coral tab would be competing with that.
         .tint(Theme.ink)
         .onChange(of: selection) { _, tab in
-            // Fires on the change, not on the tap, so pressing the tab you are
-            // already on stays silent. One selection tick — a tab change is a
-            // confirmation, not an event.
-            Haptics.selection()
-
             // Leaving home resets the streak to compact at once. There is no
             // point animating a collapse onto a screen nobody is looking at,
             // and it guarantees the next tab never inherits a dimmed backdrop,
@@ -97,5 +85,21 @@ struct RootTabView: View {
             intro.isSuspended = true
             isRunningSetup = true
         }
+    }
+
+    /// One destination, permanently mounted and hidden when it is not current.
+    ///
+    /// Hidden by opacity rather than removed so tab state survives, and made
+    /// inert to touches and to VoiceOver so an off-screen tab can never be
+    /// tapped or read out through the one on top of it.
+    @ViewBuilder
+    private func destination(_ tab: RootTab, @ViewBuilder content: () -> some View) -> some View {
+        let isCurrent = selection == tab
+
+        content()
+            .opacity(isCurrent ? 1 : 0)
+            .allowsHitTesting(isCurrent)
+            .accessibilityHidden(!isCurrent)
+            .zIndex(isCurrent ? 1 : 0)
     }
 }
