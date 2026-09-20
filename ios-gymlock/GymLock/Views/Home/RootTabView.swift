@@ -75,6 +75,7 @@ struct RootTabView: View {
         .task {
             // A cold generator is late enough to be felt on the first tick.
             Haptics.prepareSelection()
+            Haptics.preparePress()
 
             // The two morning setup screens run once, immediately after
             // activation, before the first alarm is finalised. This lives at
@@ -98,6 +99,10 @@ struct RootTabView: View {
 
         content()
             .opacity(isCurrent ? 1 : 0)
+            // Its own short crossfade, overriding the bar's spring: a screen
+            // whose opacity bounced would read as a flicker. The bar springs,
+            // the screen behind it simply changes.
+            .animation(.easeInOut(duration: 0.2), value: isCurrent)
             .allowsHitTesting(isCurrent)
             .accessibilityHidden(!isCurrent)
             .zIndex(isCurrent ? 1 : 0)

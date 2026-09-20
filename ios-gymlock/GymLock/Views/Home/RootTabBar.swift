@@ -3,7 +3,7 @@ import SwiftUI
 /// The four destinations of the main app.
 ///
 /// `profile` is deliberately not part of `capsuleTabs`: it is drawn as its own
-/// detached circle beside the bar, the way a floating action button sits beside
+/// detached glass circle beside the bar, the way a floating control sits beside
 /// a Liquid Glass tab bar on iOS 26.
 enum RootTab: Hashable, CaseIterable {
     case home
@@ -33,40 +33,245 @@ enum RootTab: Hashable, CaseIterable {
     }
 }
 
-// MARK: - Glass
+// MARK: - Motion
 
-/// Liquid Glass where the OS has it, a material where it doesn't, and an
-/// opaque surface for anyone who has asked for less transparency.
+/// The bar's motion language, in one place so the pill, the press and the
+/// screen behind them can never disagree about how fast the bar is.
+private enum TabMotion {
+    /// The selection travelling between tabs.
+    ///
+    /// Under-damped on purpose. Liquid Glass is supposed to read as a material
+    /// with mass — it arrives, overshoots very slightly and settles. A critically
+    /// damped curve here is what made the old bar feel like a web control.
+    static let morph: Animation = .spring(response: 0.34, dampingFraction: 0.68)
+    /// Same job, no bounce and shorter, for Reduce Motion.
+    static let morphReduced: Animation = .easeInOut(duration: 0.2)
+    /// The give under a finger.
+    static let press: Animation = .spring(response: 0.22, dampingFraction: 0.65)
+}
+
+// MARK: - Press behaviour
+
+/// Squish on finger-down, spring back on release, with the soft haptic that
+/// goes with a material yielding.
 ///
-/// Kept separate from `glassCapsule()` because the tab bar floats over live,
-/// scrolling content and needs the interactive variant plus a lift shadow,
-/// while the streak capsule sits on a still header.
-private struct FloatingGlass<S: Shape>: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+/// Separate from the selection tick deliberately: pressing gives you the give
+/// immediately, even on the tab you are already on, and only an actual change
+/// of destination earns the selection tick.
+private struct TabPressStyle: ButtonStyle {
+    let reduceMotion: Bool
 
-    let shape: S
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.88 : 1)
+            .animation(TabMotion.press, value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                guard isPressed else { return }
+                Haptics.press()
+            }
+    }
+}
 
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(Theme.surface, in: shape)
-                .overlay { shape.stroke(Theme.border, lineWidth: 1) }
-                .shadow(color: .black.opacity(0.10), radius: 12, y: 4)
-        } else if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: shape)
-        } else {
-            content
-                .background(.ultraThinMaterial, in: shape)
-                .overlay { shape.stroke(Color.white.opacity(0.55), lineWidth: 1) }
-                .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+// MARK: - Item contents
+
+/// Icon and label. Knows nothing about glass — both bar implementations draw
+/// the same contents so they can never drift apart.
+private struct TabItemLabel: View {
+    let tab: RootTab
+    let isSelected: Bool
+    let reduceMotion: Bool
+
+    /// Counted rather than bound to `isSelected`, so the icon bounces when a
+    /// tab becomes current and stays still when it is abandoned.
+    @State private var bounce = 0
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Image(systemName: tab.symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .symbolEffect(.bounce, options: .speed(1.4), value: bounce)
+                .scaleEffect(isSelected ? 1.05 : 1)
+
+            Text(tab.title)
+                .font(.system(size: 10.5, weight: isSelected ? .semibold : .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(isSelected ? Theme.ink : Theme.inkTertiary)
+        .frame(maxWidth: .infinity)
+        .frame(height: RootTabBar.itemHeight)
+        .onChange(of: isSelected) { _, selected in
+            guard selected, !reduceMotion else { return }
+            bounce += 1
         }
     }
 }
 
-private extension View {
-    func floatingGlass<S: Shape>(in shape: S) -> some View {
-        modifier(FloatingGlass(shape: shape))
+// MARK: - iOS 26 Liquid Glass
+
+/// The real thing: one `GlassEffectContainer`, and a selection that is itself
+/// a piece of glass carrying a `glassEffectID`.
+///
+/// That identity is the whole difference. Because the same glass element is
+/// removed from one tab and inserted into the next inside a single animated
+/// transaction, the system does not slide a rectangle — it morphs the material,
+/// stretching and re-forming it between positions, with the lensing and
+/// specular edge recomputed the entire way. `.interactive()` then lets the
+/// glass itself flex under the finger rather than only the contents scaling.
+@available(iOS 26.0, *)
+private struct LiquidGlassBar: View {
+    @Binding var selection: RootTab
+    let reduceMotion: Bool
+    let onSelect: (RootTab) -> Void
+
+    @Namespace private var glass
+
+    var body: some View {
+        // Wide enough that the capsule and the profile circle sense each other
+        // and their edges lens together as the selection approaches the end of
+        // the bar, without the two ever merging into one shape at rest.
+        GlassEffectContainer(spacing: 18) {
+            HStack(spacing: RootTabBar.gap) {
+                HStack(spacing: 2) {
+                    ForEach(RootTab.capsuleTabs, id: \.self) { tab in
+                        Button {
+                            onSelect(tab)
+                        } label: {
+                            TabItemLabel(tab: tab, isSelected: selection == tab, reduceMotion: reduceMotion)
+                                .background {
+                                    if selection == tab {
+                                        selectionGlass
+                                    }
+                                }
+                                .contentShape(.capsule)
+                        }
+                        .buttonStyle(TabPressStyle(reduceMotion: reduceMotion))
+                        .accessibilityLabel(tab.title)
+                        .accessibilityAddTraits(selection == tab ? [.isButton, .isSelected] : .isButton)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .frame(height: RootTabBar.barHeight)
+                .glassEffect(.regular, in: .capsule)
+
+                profileCircle
+            }
+        }
+    }
+
+    /// A faint ink wash *inside* the glass rather than a grey capsule behind
+    /// it: over a near-white canvas pure glass on glass is invisible, and this
+    /// is the darkening the material itself would pick up from content beneath.
+    private var selectionGlass: some View {
+        Capsule()
+            .fill(Theme.ink.opacity(0.05))
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .glassEffectID("selection", in: glass)
+    }
+
+    /// Tinted glass when current, rather than a flat black disc — it stays a
+    /// lens over whatever is scrolling beneath it either way.
+    private var profileCircle: some View {
+        let isSelected = selection == .profile
+
+        return Button {
+            onSelect(.profile)
+        } label: {
+            Image(systemName: isSelected ? "person.fill" : "person")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(isSelected ? Color.white : Theme.ink)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: RootTabBar.barHeight, height: RootTabBar.barHeight)
+                .contentShape(.circle)
+        }
+        .buttonStyle(TabPressStyle(reduceMotion: reduceMotion))
+        .glassEffect(
+            isSelected ? .regular.tint(Theme.ink).interactive() : .regular.interactive(),
+            in: .circle
+        )
+        .glassEffectID("profile", in: glass)
+        .accessibilityLabel("Profile")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+// MARK: - Pre-26 and Reduce Transparency
+
+/// The same bar without the material: blurred on iOS 18, fully opaque for
+/// anyone who has asked for reduced transparency. The selection still travels —
+/// it just slides instead of morphing, because nothing here is glass to morph.
+private struct MaterialTabBar: View {
+    @Binding var selection: RootTab
+    let reduceMotion: Bool
+    let isOpaque: Bool
+    let onSelect: (RootTab) -> Void
+
+    @Namespace private var highlight
+
+    var body: some View {
+        HStack(spacing: RootTabBar.gap) {
+            HStack(spacing: 2) {
+                ForEach(RootTab.capsuleTabs, id: \.self) { tab in
+                    Button {
+                        onSelect(tab)
+                    } label: {
+                        TabItemLabel(tab: tab, isSelected: selection == tab, reduceMotion: reduceMotion)
+                            .background {
+                                if selection == tab {
+                                    Capsule()
+                                        .fill(Theme.ink.opacity(0.07))
+                                        .matchedGeometryEffect(id: "selection", in: highlight)
+                                }
+                            }
+                            .contentShape(.capsule)
+                    }
+                    .buttonStyle(TabPressStyle(reduceMotion: reduceMotion))
+                    .accessibilityLabel(tab.title)
+                    .accessibilityAddTraits(selection == tab ? [.isButton, .isSelected] : .isButton)
+                }
+            }
+            .padding(.horizontal, 6)
+            .frame(height: RootTabBar.barHeight)
+            .background(surface, in: .capsule)
+            .overlay { Capsule().strokeBorder(edge, lineWidth: 1) }
+            .shadow(color: .black.opacity(isOpaque ? 0.10 : 0.12), radius: 14, y: 5)
+
+            profileCircle
+        }
+    }
+
+    private var profileCircle: some View {
+        let isSelected = selection == .profile
+
+        return Button {
+            onSelect(.profile)
+        } label: {
+            Image(systemName: isSelected ? "person.fill" : "person")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(isSelected ? Color.white : Theme.ink)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: RootTabBar.barHeight, height: RootTabBar.barHeight)
+                .background {
+                    if isSelected { Circle().fill(Theme.ink) }
+                }
+                .contentShape(.circle)
+        }
+        .buttonStyle(TabPressStyle(reduceMotion: reduceMotion))
+        .background(surface, in: .circle)
+        .overlay { Circle().strokeBorder(edge, lineWidth: 1) }
+        .shadow(color: .black.opacity(isOpaque ? 0.10 : 0.12), radius: 14, y: 5)
+        .accessibilityLabel("Profile")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// Type-erased because the two branches are different shape styles; a
+    /// `@ViewBuilder` cannot produce a `ShapeStyle`.
+    private var surface: AnyShapeStyle {
+        isOpaque ? AnyShapeStyle(Theme.surface) : AnyShapeStyle(.ultraThinMaterial)
+    }
+
+    private var edge: Color {
+        isOpaque ? Theme.border : Color.white.opacity(0.55)
     }
 }
 
@@ -76,123 +281,51 @@ private extension View {
 ///
 /// Hand-drawn rather than the system `TabView` bar for one reason: the profile
 /// control has to sit *outside* the capsule as its own circle, which the system
-/// bar cannot express. Everything else the system bar gave us is kept by hand —
-/// the glass, the sliding selection pill, the selection haptic, Reduce
-/// Transparency and Reduce Motion — and the bar is installed as a bottom safe
-/// area inset, so content still scrolls underneath it and every scroll view
-/// still ends above it.
+/// bar cannot express. Everything the system bar would have given us is kept —
+/// real Liquid Glass with a morphing selection, the press-then-select haptic
+/// pair, Reduce Transparency and Reduce Motion, and correct safe areas, because
+/// the bar is installed as a bottom safe-area inset so content scrolls beneath
+/// the material and actually has something to refract.
 struct RootTabBar: View {
     @Binding var selection: RootTab
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var highlight
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     /// Matches the system bar closely enough that nothing shifts vertically
     /// when the screen behind it changes.
-    private static let capsuleHeight: CGFloat = 58
-    private static let circleSize: CGFloat = 58
-
-    private var selectionAnimation: Animation {
-        reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.34, dampingFraction: 0.82)
-    }
+    static let barHeight: CGFloat = 58
+    static let itemHeight: CGFloat = 46
+    static let gap: CGFloat = 12
 
     var body: some View {
         Group {
-            if #available(iOS 26.0, *) {
-                // Lets the capsule and the profile circle sense each other, so
-                // their glass reads as one piece of material rather than two
-                // unrelated panes sitting side by side.
-                GlassEffectContainer(spacing: 16) { bar }
+            if #available(iOS 26.0, *), !reduceTransparency {
+                LiquidGlassBar(selection: $selection, reduceMotion: reduceMotion, onSelect: select)
             } else {
-                bar
+                MaterialTabBar(
+                    selection: $selection,
+                    reduceMotion: reduceMotion,
+                    isOpaque: reduceTransparency,
+                    onSelect: select
+                )
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
         .padding(.bottom, 4)
-    }
-
-    private var bar: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 2) {
-                ForEach(RootTab.capsuleTabs, id: \.self) { tab in
-                    item(tab)
-                }
-            }
-            .padding(.horizontal, 6)
-            .frame(height: Self.capsuleHeight)
-            .floatingGlass(in: .capsule)
-
-            profileButton
-        }
-    }
-
-    private func item(_ tab: RootTab) -> some View {
-        let isSelected = selection == tab
-
-        return Button {
-            select(tab)
-        } label: {
-            VStack(spacing: 3) {
-                Image(systemName: tab.symbol)
-                    .font(.system(size: 18, weight: .semibold))
-
-                Text(tab.title)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .foregroundStyle(isSelected ? Theme.ink : Theme.inkTertiary)
-            .frame(maxWidth: .infinity)
-            .frame(height: Self.capsuleHeight - 10)
-            .background {
-                // One pill that travels between items instead of three that
-                // fade in and out — the movement is what tells you the bar
-                // responded to your tap.
-                if isSelected {
-                    Capsule()
-                        .fill(Theme.ink.opacity(0.07))
-                        .matchedGeometryEffect(id: "selection", in: highlight)
-                }
-            }
-            .contentShape(.capsule)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(tab.title)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-    }
-
-    /// The detached circle. Filled when it is the active destination, so it
-    /// still reads as a tab and not as an action button that did nothing.
-    private var profileButton: some View {
-        let isSelected = selection == .profile
-
-        return Button {
-            select(.profile)
-        } label: {
-            Image(systemName: isSelected ? "person.fill" : "person")
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(isSelected ? Color.white : Theme.ink)
-                .frame(width: Self.circleSize, height: Self.circleSize)
-                .background {
-                    if isSelected {
-                        Circle().fill(Theme.ink)
-                    }
-                }
-                .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .floatingGlass(in: .circle)
-        .accessibilityLabel("Profile")
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .task { Haptics.preparePress() }
     }
 
     private func select(_ tab: RootTab) {
-        // Silent when you tap the tab you are already on: a confirmation of
-        // nothing is just noise.
+        // Silent when you tap the tab you are already on: the press haptic has
+        // already acknowledged the touch, and confirming a change that did not
+        // happen is just noise.
         guard tab != selection else { return }
         Haptics.selection()
-        withAnimation(selectionAnimation) { selection = tab }
+        withAnimation(reduceMotion ? TabMotion.morphReduced : TabMotion.morph) {
+            selection = tab
+        }
     }
 }
 

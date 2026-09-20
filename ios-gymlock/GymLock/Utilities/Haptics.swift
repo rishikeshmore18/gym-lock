@@ -8,6 +8,9 @@ import UIKit
 /// that would break the picker-wheel illusion.
 enum Haptics {
     private static let selectionGenerator = UISelectionFeedbackGenerator()
+    /// Kept alive for controls that fire on finger-down, where a generator
+    /// created on the spot is late enough that the touch and the feel separate.
+    private static let pressGenerator = UIImpactFeedbackGenerator(style: .soft)
 
     /// A light impact. `intensity` softens it further — used where the feedback
     /// should be felt but not noticed, such as a card settling back into place.
@@ -24,6 +27,20 @@ enum Haptics {
     /// Pre-warms the selection generator so the first tick is not late.
     static func prepareSelection() {
         selectionGenerator.prepare()
+    }
+
+    /// The soft give of a control accepting a press, played on finger-down.
+    ///
+    /// Deliberately below full strength: this is the material yielding under a
+    /// finger, not the action landing. The action itself is `selection()`, on
+    /// release, and only when something actually changed.
+    static func press(intensity: CGFloat = 0.5) {
+        pressGenerator.impactOccurred(intensity: intensity)
+    }
+
+    /// Pre-warms the press generator. Call when a pressable surface appears.
+    static func preparePress() {
+        pressGenerator.prepare()
     }
 
     static func medium() {
