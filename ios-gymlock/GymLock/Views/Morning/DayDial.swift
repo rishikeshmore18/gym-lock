@@ -23,6 +23,19 @@ enum DayDialModel {
         var isGym: Bool { !isSleep }
     }
 
+    /// One bar as the grab test sees it.
+    struct Bar: Equatable {
+        let start: Int
+        let span: Int
+        let startGrab: Grab
+        let endGrab: Grab
+        let bodyGrab: Grab
+        /// False when the bar is too short to carry an icon at each end. A
+        /// collapsed bar is a pill you slide; its ends are reached from just
+        /// outside it.
+        let showsBothIcons: Bool
+    }
+
     /// The shortest night the dial will let a user set. Below this the two
     /// icons sit on top of each other and neither can be grabbed.
     static let minimumSleepMinutes = 60
@@ -57,9 +70,39 @@ enum DayDialModel {
 
     /// Screen offset for something sitting at `minutes` on a ring of
     /// `radius`, with an optional extra rotation for rubber-band overshoot.
-    static func offset(minutes: Int, radius: CGFloat, extraDegrees: Double = 0) -> CGSize {
-        let angle = (angleDegrees(minutes: minutes) - 90 + extraDegrees) * .pi / 180
+    static func offset(minutes: Double, radius: CGFloat, extraDegrees: Double = 0) -> CGSize {
+        let angle = (minutes / 1440 * 360 - 90 + extraDegrees) * .pi / 180
         return CGSize(width: radius * cos(angle), height: radius * sin(angle))
+    }
+
+    static func offset(minutes: Int, radius: CGFloat, extraDegrees: Double = 0) -> CGSize {
+        offset(minutes: Double(minutes), radius: radius, extraDegrees: extraDegrees)
+    }
+
+    /// Arc length, in points, of a span of minutes on a ring of `radius`.
+    static func arcLength(minutes: Int, radius: CGFloat) -> CGFloat {
+        CGFloat(Double(minutes) / 1440 * 2 * .pi) * radius
+    }
+
+    /// Whether a bar is long enough to carry an icon at each end.
+    ///
+    /// Both glyphs sit half a round cap inside the bar's ends, so the room
+    /// they need is one bar width (the two half caps) plus one glyph plus a
+    /// gap between them. Below that the second icon is not drawn at all and
+    /// the first one moves to the middle of the pill.
+    ///
+    /// `wasShowing` widens the gap on the way in and narrows it on the way
+    /// out, so a bar dragged back and forth across the threshold cannot
+    /// flicker.
+    static func showsBothIcons(
+        spanMinutes: Int,
+        radius: CGFloat,
+        barWidth: CGFloat,
+        glyphWidth: CGFloat,
+        wasShowing: Bool
+    ) -> Bool {
+        let gap = glyphWidth * (wasShowing ? 0.3 : 0.8)
+        return arcLength(minutes: spanMinutes, radius: radius) >= barWidth + glyphWidth + gap
     }
 
     /// Signed shortest distance around the dial from `a` to `b`, in minutes.
@@ -79,34 +122,44 @@ enum DayDialModel {
 
     /// Decides what a touch in the gutter grabbed.
     ///
-    /// Icons win when the finger is within `tolerance` minutes of one. Then
-    /// the body of whichever bar the finger is on. Anywhere else on the ring
-    /// is nothing, so a stray touch cannot move the night.
-    static func grab(
-        fingerMinutes finger: Int,
-        bedtime: Int,
-        wake: Int,
-        gymBy: Int,
-        gymDone: Int,
-        tolerance: Int
-    ) -> Grab? {
-        let ends: [(Grab, Int)] = [
-            (.gymStart, abs(wrappedDelta(from: gymBy, to: finger))),
-            (.gymEnd, abs(wrappedDelta(from: gymDone, to: finger))),
-            (.wake, abs(wrappedDelta(from: wake, to: finger))),
-            (.bedtime, abs(wrappedDelta(from: bedtime, to: finger))),
-        ]
-        // Order above is the tie-break: on a short window the gym icons sit
-        // close to the alarm icon and are drawn on top, so they win.
-        if let nearest = ends.min(by: { $0.1 < $1.1 }), nearest.1 <= tolerance {
-            return nearest.0
+    /// `bars` is asked in drawing order, topmost first, so a bar drawn over
+    /// another one wins a genuine tie.
+    ///
+    /// 1. Inside a collapsed bar is always that bar's body. A pill too short
+    ///    to show two icons is a thing you slide, not a thing you stretch.
+    /// 2. Otherwise the nearest bar end within reach. Because it is the
+    ///    nearest that wins, the empty gutter between two bars is split down
+    ///    the middle and neither bar can steal the other's end.
+    /// 3. Otherwise the body of whichever bar the finger is inside.
+    /// 4. Otherwise nothing, so a stray touch on bare gutter moves nothing.
+    static func grab(fingerMinutes finger: Int, bars: [Bar], tolerance: Int) -> Grab? {
+        func isInside(_ bar: Bar) -> Bool {
+            clockwiseSpan(from: bar.start, to: finger) <= bar.span
         }
 
-        if clockwiseSpan(from: bedtime, to: finger) <= clockwiseSpan(from: bedtime, to: wake) {
-            return .sleepBody
+        for bar in bars where !bar.showsBothIcons && isInside(bar) {
+            return bar.bodyGrab
         }
-        if clockwiseSpan(from: gymBy, to: finger) <= clockwiseSpan(from: gymBy, to: gymDone) {
-            return .gymBody
+
+        var best: (grab: Grab, distance: Int)?
+        for bar in bars {
+            // An expanded bar keeps its middle third for the body, so a long
+            // night can still be slid without resizing it.
+            let reach = bar.showsBothIcons ? min(tolerance, max(bar.span / 3, 1)) : tolerance
+            let candidates: [(Grab, Int)] = [
+                (bar.startGrab, abs(wrappedDelta(from: bar.start, to: finger))),
+                (bar.endGrab, abs(wrappedDelta(from: (bar.start + bar.span) % 1440, to: finger))),
+            ]
+            for candidate in candidates where candidate.1 <= reach {
+                if best == nil || candidate.1 < (best?.distance ?? .max) {
+                    best = (candidate.0, candidate.1)
+                }
+            }
+        }
+        if let best { return best.grab }
+
+        for bar in bars where isInside(bar) {
+            return bar.bodyGrab
         }
         return nil
     }
@@ -188,6 +241,11 @@ enum DayDialModel {
 /// to done). Each bar has two ends and a body. Drag an end to move that end,
 /// drag a body to slide the whole bar.
 ///
+/// A bar only shows two icons when it is long enough to hold them apart. A
+/// short one shows a single icon in the middle of its pill and behaves like a
+/// handle; pull just past either cap to stretch it. The second icon springs
+/// in the moment there is room for it.
+///
 /// The bar follows the finger 1:1 with the grab offset preserved, and stops
 /// exactly where the finger lifts. No momentum: a schedule is not a scroll
 /// view, and a bar that drifts after release feels loose.
@@ -216,6 +274,11 @@ struct DayDial: View {
     /// Visual overshoot, in minutes of arc, while an end is held past its
     /// clamp. Springs back to zero on release.
     @State private var overshootMinutes: CGFloat = 0
+    /// Whether each bar currently has room for an icon at both ends. Held in
+    /// state rather than recomputed inline so the threshold can have
+    /// hysteresis and the change can be animated.
+    @State private var sleepShowsBothIcons = true
+    @State private var gymShowsBothIcons = false
 
     // MARK: Metrics
 
@@ -231,10 +294,17 @@ struct DayDial: View {
     /// short of a bar's true start and end so the cap lands exactly on them.
     private var capMinutes: Double { Double(barWidth / 2) * minutesPerPoint }
 
-    /// How close, in minutes of arc, a finger must be to an icon to grab it.
+    /// How close, in minutes of arc, a finger must be to a bar end to take
+    /// hold of it. One bar width, which is the size of the icon that sits
+    /// there.
     private var grabTolerance: Int {
-        let arc = barWidth * 0.85
-        return max(35, Int(arc / gutterRadius * 1440 / (2 * .pi)))
+        max(30, Int(Double(barWidth) * minutesPerPoint))
+    }
+
+    /// The spring the icons use when a bar crosses the two-icon threshold.
+    /// Slightly bouncy, because something appearing should look alive.
+    private var iconFitAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.16) : .bouncy(duration: 0.42, extraBounce: 0.2)
     }
 
     // MARK: Derived
@@ -255,6 +325,29 @@ struct DayDial: View {
         reduceMotion
             ? .easeOut(duration: 0.16)
             : .spring(response: 0.28, dampingFraction: 0.92)
+    }
+
+    /// The bars, topmost first. The gym bar is drawn over the night, so it is
+    /// also the one a tie goes to.
+    private var bars: [DayDialModel.Bar] {
+        [
+            DayDialModel.Bar(
+                start: gymByMinutes,
+                span: sessionMinutes,
+                startGrab: .gymStart,
+                endGrab: .gymEnd,
+                bodyGrab: .gymBody,
+                showsBothIcons: gymShowsBothIcons
+            ),
+            DayDialModel.Bar(
+                start: bedtimeMinutes,
+                span: sleepMinutes,
+                startGrab: .bedtime,
+                endGrab: .wake,
+                bodyGrab: .sleepBody,
+                showsBothIcons: sleepShowsBothIcons
+            ),
+        ]
     }
 
     /// Where a bar's stroke centreline really runs, once its round caps are
@@ -286,15 +379,63 @@ struct DayDial: View {
             bar(gymLine, colour: Theme.accent)
             hatching
             barIcon(.bedtime)
-            barIcon(.wake)
-            barIcon(.gymEnd)
+            if sleepShowsBothIcons {
+                barIcon(.wake)
+                    .transition(iconTransition)
+            }
+            if gymShowsBothIcons {
+                barIcon(.gymEnd)
+                    .transition(iconTransition)
+            }
             barIcon(.gymStart)
         }
         .frame(width: size, height: size)
         .contentShape(.circle)
         .gesture(drag)
+        .onAppear { refreshIconFit(animated: false) }
+        .onChange(of: sleepMinutes) { _, _ in refreshIconFit() }
+        .onChange(of: sessionMinutes) { _, _ in refreshIconFit() }
+        .onChange(of: size) { _, _ in refreshIconFit() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("day dial")
+    }
+
+    /// The second icon does not fade in, it arrives: small, then past size,
+    /// then settled, on the same spring that slides its partner outward.
+    private var iconTransition: AnyTransition {
+        reduceMotion
+            ? .opacity
+            : .scale(scale: 0.25).combined(with: .opacity)
+    }
+
+    /// Recomputes whether each bar has room for two icons. Only the crossing
+    /// is animated; the positions themselves keep tracking the finger 1:1.
+    private func refreshIconFit(animated: Bool = true) {
+        let sleepFits = DayDialModel.showsBothIcons(
+            spanMinutes: sleepMinutes,
+            radius: gutterRadius,
+            barWidth: barWidth,
+            glyphWidth: iconSize,
+            wasShowing: sleepShowsBothIcons
+        )
+        let gymFits = DayDialModel.showsBothIcons(
+            spanMinutes: sessionMinutes,
+            radius: gutterRadius,
+            barWidth: barWidth,
+            glyphWidth: iconSize,
+            wasShowing: gymShowsBothIcons
+        )
+        guard sleepFits != sleepShowsBothIcons || gymFits != gymShowsBothIcons else { return }
+
+        if animated {
+            withAnimation(iconFitAnimation) {
+                sleepShowsBothIcons = sleepFits
+                gymShowsBothIcons = gymFits
+            }
+        } else {
+            sleepShowsBothIcons = sleepFits
+            gymShowsBothIcons = gymFits
+        }
     }
 
     // MARK: - Layers
@@ -420,46 +561,57 @@ struct DayDial: View {
     // MARK: - Icons
 
     private struct IconSpec {
-        let minutes: Int
+        let minutes: Double
         let symbol: String
         let label: String
         let value: Int
-        let extraDegrees: Double
+    }
+
+    /// Whether the bar this icon belongs to is currently showing both ends.
+    private func showsBoth(_ which: DayDialModel.Grab) -> Bool {
+        which.isSleep ? sleepShowsBothIcons : gymShowsBothIcons
+    }
+
+    /// Where an icon sits: on its own end when the bar is long enough, in the
+    /// middle of the pill when it is not.
+    private func iconMinutes(
+        _ line: (start: Double, span: Double),
+        isEnd: Bool,
+        showsBoth: Bool
+    ) -> Double {
+        guard showsBoth else { return line.start + line.span / 2 }
+        return isEnd ? line.start + line.span : line.start
     }
 
     private func iconSpec(_ which: DayDialModel.Grab) -> IconSpec {
         switch which {
         case .bedtime, .sleepBody:
             IconSpec(
-                minutes: Int(sleepLine.start.rounded()),
+                minutes: iconMinutes(sleepLine, isEnd: false, showsBoth: sleepShowsBothIcons),
                 symbol: "bed.double.fill",
                 label: "Bedtime",
-                value: bedtimeMinutes,
-                extraDegrees: 0
+                value: bedtimeMinutes
             )
         case .wake:
             IconSpec(
-                minutes: Int((sleepLine.start + sleepLine.span).rounded()),
+                minutes: iconMinutes(sleepLine, isEnd: true, showsBoth: sleepShowsBothIcons),
                 symbol: "alarm.fill",
                 label: "Wake up",
-                value: wakeMinutes,
-                extraDegrees: 0
+                value: wakeMinutes
             )
         case .gymStart, .gymBody:
             IconSpec(
-                minutes: Int(gymLine.start.rounded()),
+                minutes: iconMinutes(gymLine, isEnd: false, showsBoth: gymShowsBothIcons),
                 symbol: "figure.strengthtraining.traditional",
                 label: "Gym by",
-                value: gymByMinutes,
-                extraDegrees: 0
+                value: gymByMinutes
             )
         case .gymEnd:
             IconSpec(
-                minutes: Int((gymLine.start + gymLine.span).rounded()),
+                minutes: iconMinutes(gymLine, isEnd: true, showsBoth: gymShowsBothIcons),
                 symbol: "flag.checkered",
                 label: "Gym done",
-                value: gymDoneMinutes,
-                extraDegrees: 0
+                value: gymDoneMinutes
             )
         }
     }
@@ -477,6 +629,8 @@ struct DayDial: View {
     private func barIcon(_ which: DayDialModel.Grab) -> some View {
         let spec = iconSpec(which)
         let held = isHeld(which)
+        let both = showsBoth(which)
+        let isCollapsedLead = !both && (which == .bedtime || which == .gymStart)
 
         return Image(systemName: spec.symbol)
             .font(.system(size: iconSize, weight: .bold))
@@ -485,13 +639,28 @@ struct DayDial: View {
             .contentShape(.circle)
             .scaleEffect(held && !reduceMotion ? 1.16 : 1)
             .animation(.spring(response: 0.26, dampingFraction: 0.72), value: held)
-            .offset(DayDialModel.offset(minutes: spec.minutes, radius: gutterRadius, extraDegrees: spec.extraDegrees))
+            .offset(DayDialModel.offset(minutes: spec.minutes, radius: gutterRadius))
+            // Only the collapse crossing animates. Everything else tracks the
+            // finger with no lag.
+            .animation(iconFitAnimation, value: both)
             .accessibilityElement()
             .accessibilityLabel(spec.label)
             .accessibilityValue(time(at: spec.value).displayString)
             .accessibilityAdjustableAction { direction in
                 adjust(which, byMinutes: direction == .increment ? 5 : -5)
             }
+            // A collapsed bar hides its far end, so its length has to stay
+            // reachable some other way.
+            .accessibilityActions {
+                if isCollapsedLead {
+                    Button("lengthen") { adjust(farEnd(of: which), byMinutes: 15) }
+                    Button("shorten") { adjust(farEnd(of: which), byMinutes: -15) }
+                }
+            }
+    }
+
+    private func farEnd(of which: DayDialModel.Grab) -> DayDialModel.Grab {
+        which.isSleep ? .wake : .gymEnd
     }
 
     private func time(at minutes: Int) -> TimeOfDay {
@@ -535,10 +704,7 @@ struct DayDial: View {
 
         return DayDialModel.grab(
             fingerMinutes: DayDialModel.minutes(at: point, centre: centre),
-            bedtime: bedtimeMinutes,
-            wake: wakeMinutes,
-            gymBy: gymByMinutes,
-            gymDone: gymDoneMinutes,
+            bars: bars,
             tolerance: grabTolerance
         )
     }
@@ -590,6 +756,7 @@ struct DayDial: View {
                 sleepMinutes: baseSleep,
                 sessionMinutes: base.gymSessionMinutes
             )
+            overshoot = (base.windowMinutes + delta) - window
             next.travelMinutes = window - base.getReadyMinutes
 
         case .gymEnd:

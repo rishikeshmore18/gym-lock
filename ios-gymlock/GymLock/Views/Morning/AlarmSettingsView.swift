@@ -73,7 +73,7 @@ struct AlarmSettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    GlassCircleButton(symbol: "chevron.left", label: "Back", tint: Theme.ink) {
+                    GlassCircleButton(symbol: "chevron.left", label: "Back") {
                         // Leaving with an unsaved dial change throws the draft
                         // away, as Apple's X does. The tick is how you keep it.
                         draft = nil
@@ -81,23 +81,8 @@ struct AlarmSettingsView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if hasDraftChanges {
-                        GlassCircleButton(symbol: "checkmark", label: "Save change", tint: Theme.accent) {
-                            isChoosingScope = true
-                        }
-                        .transition(.scale(scale: 0.4).combined(with: .opacity))
-                    }
+                    commitButton
                 }
-            }
-            .animation(.spring(response: 0.38, dampingFraction: 0.6), value: hasDraftChanges)
-            .confirmationDialog(
-                "apply this change to every training day?",
-                isPresented: $isChoosingScope,
-                titleVisibility: .visible
-            ) {
-                Button("change next alarm only") { commitDraft(scope: .nextOnly) }
-                Button("change this schedule") { commitDraft(scope: .schedule) }
-                Button("cancel", role: .cancel) {}
             }
         }
         .tint(Theme.accent)
@@ -133,6 +118,59 @@ struct AlarmSettingsView: View {
         .nightLockPromptAlert($nightLockPrompt, store: store) {
             rhythmOnOpen = store.plan.rhythm
         }
+    }
+
+    // MARK: - Commit
+
+    /// The tick, and the question it asks.
+    ///
+    /// The button is always in the hierarchy and only scales out of sight,
+    /// because the popover hangs off it: removing the anchor mid-animation
+    /// would snap the popover away instead of letting it fold back in.
+    private var commitButton: some View {
+        GlassCircleButton(symbol: "checkmark", label: "Save change", role: .prominent) {
+            isChoosingScope = true
+        }
+        .scaleEffect(hasDraftChanges ? 1 : 0.35)
+        .opacity(hasDraftChanges ? 1 : 0)
+        .allowsHitTesting(hasDraftChanges)
+        .accessibilityHidden(!hasDraftChanges)
+        .animation(.bouncy(duration: 0.42, extraBounce: 0.32), value: hasDraftChanges)
+        .popover(isPresented: $isChoosingScope, arrowEdge: .bottom) {
+            scopeChoice
+        }
+    }
+
+    /// Apple asks this as a popover growing out of the tick, not as a sheet
+    /// thrown up from the bottom of the screen. So do we.
+    private var scopeChoice: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("apply this change to every training day?")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 4)
+
+            scopeButton("change next alarm only") { commitDraft(scope: .nextOnly) }
+            scopeButton("change this schedule") { commitDraft(scope: .schedule) }
+        }
+        .padding(18)
+        .frame(width: 268)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    private func scopeButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button {
+            isChoosingScope = false
+            action()
+        } label: {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(GlassChoiceButtonStyle())
     }
 
     // MARK: - Dial

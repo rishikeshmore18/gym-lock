@@ -1,16 +1,28 @@
 import SwiftUI
 
-/// A round Liquid Glass toolbar button, after the X on Apple's Change Wake Up
-/// screen.
+/// The round Liquid Glass buttons Apple puts in the corners of its full-screen
+/// editors: the X and the tick on Change Wake Up, the close circle in Photos.
 ///
-/// Presses squash and spring back like a bubble: the material yields on
-/// finger-down, and the release overshoots before settling. Reduce Motion
-/// swaps the spring for a short fade; Reduce Transparency swaps the glass for
-/// an opaque disc.
+/// Two roles, matching Apple's own pairing:
+/// - `.neutral` — plain interactive glass with an ink glyph. Dismiss, back.
+/// - `.prominent` — ink-tinted glass with a white glyph. The one action that
+///   commits. Coral is not used here: on this screen the single accent
+///   belongs to the gym bar on the dial.
+///
+/// Presses behave like a bubble. The disc squashes under the finger and
+/// springs back past its resting size on release. On iOS 26 the glass itself
+/// also lenses and brightens under the touch, which is where most of the life
+/// comes from; the spring is what carries it on iOS 18.
 struct GlassCircleButton: View {
+    enum Role {
+        case neutral
+        case prominent
+    }
+
     let symbol: String
     let label: String
-    var tint: Color = Theme.ink
+    var role: Role = .neutral
+    var diameter: CGFloat = 36
     let action: () -> Void
 
     var body: some View {
@@ -19,39 +31,43 @@ struct GlassCircleButton: View {
             action()
         } label: {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(tint)
-                .frame(width: 40, height: 40)
+                .font(.system(size: diameter * 0.44, weight: .bold))
+                .foregroundStyle(role == .prominent ? Theme.surface : Theme.ink)
+                .frame(width: diameter, height: diameter)
                 .contentShape(.circle)
         }
-        .buttonStyle(BubbleGlassStyle())
+        .buttonStyle(BubbleGlassButtonStyle(role: role))
         .accessibilityLabel(label)
     }
 }
 
-/// The bubble: scale down on press, spring past resting size on release.
-private struct BubbleGlassStyle: ButtonStyle {
+/// Squash on press, spring past resting size on release.
+private struct BubbleGlassButtonStyle: ButtonStyle {
+    let role: GlassCircleButton.Role
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .modifier(GlassDisc(isPressed: configuration.isPressed, reduceTransparency: reduceTransparency))
+            .modifier(GlassDisc(role: role, isPressed: configuration.isPressed, reduceTransparency: reduceTransparency))
             .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? 0.86 : 1))
-            .opacity(reduceMotion && configuration.isPressed ? 0.7 : 1)
+            .opacity(reduceMotion && configuration.isPressed ? 0.6 : 1)
             .animation(
-                reduceMotion
-                    ? .easeOut(duration: 0.12)
-                    : .spring(response: 0.32, dampingFraction: 0.55),
+                reduceMotion ? .easeOut(duration: 0.12) : .bouncy(duration: 0.34, extraBounce: 0.3),
                 value: configuration.isPressed
             )
             .onChange(of: configuration.isPressed) { _, pressed in
-                if pressed { Haptics.press(intensity: 0.6) }
+                if pressed { Haptics.press(intensity: 0.55) }
             }
     }
 }
 
+/// The material itself, with honest fallbacks. A warm off-white canvas gives
+/// clear glass almost nothing to refract, so the pre-iOS-26 path leans on a
+/// hairline and a soft drop shadow to keep the disc visible.
 private struct GlassDisc: ViewModifier {
+    let role: GlassCircleButton.Role
     let isPressed: Bool
     let reduceTransparency: Bool
 
@@ -59,15 +75,43 @@ private struct GlassDisc: ViewModifier {
     func body(content: Content) -> some View {
         if reduceTransparency {
             content
-                .background(Theme.surface, in: .circle)
-                .overlay { Circle().strokeBorder(Theme.border, lineWidth: 1) }
+                .background(role == .prominent ? Theme.ink : Theme.surface, in: .circle)
+                .overlay {
+                    Circle().strokeBorder(role == .prominent ? Color.clear : Theme.border, lineWidth: 1)
+                }
         } else if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: .circle)
+            if role == .prominent {
+                content.glassEffect(.regular.tint(Theme.ink).interactive(), in: .circle)
+            } else {
+                content.glassEffect(.regular.interactive(), in: .circle)
+            }
         } else {
             content
-                .background(.ultraThinMaterial, in: .circle)
-                .overlay { Circle().strokeBorder(Color.white.opacity(0.55), lineWidth: 1) }
-                .shadow(color: .black.opacity(isPressed ? 0.04 : 0.08), radius: isPressed ? 4 : 8, y: 3)
+                .background(
+                    role == .prominent ? AnyShapeStyle(Theme.ink) : AnyShapeStyle(.ultraThinMaterial),
+                    in: .circle
+                )
+                .overlay {
+                    Circle().strokeBorder(
+                        Color.black.opacity(role == .prominent ? 0 : 0.07),
+                        lineWidth: 1
+                    )
+                }
+                .shadow(
+                    color: .black.opacity(isPressed ? 0.05 : 0.12),
+                    radius: isPressed ? 3 : 9,
+                    y: isPressed ? 1 : 3
+                )
+        }
+    }
+}
+
+#Preview("Glass circle buttons") {
+    ZStack {
+        Theme.canvas.ignoresSafeArea()
+        HStack(spacing: 24) {
+            GlassCircleButton(symbol: "chevron.left", label: "Back") {}
+            GlassCircleButton(symbol: "checkmark", label: "Save", role: .prominent) {}
         }
     }
 }
