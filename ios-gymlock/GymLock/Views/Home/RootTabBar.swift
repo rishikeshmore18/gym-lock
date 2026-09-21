@@ -493,6 +493,10 @@ struct RootTabBar: View {
     static let barHeight: CGFloat = 58
     static let itemHeight: CGFloat = 46
     static let gap: CGFloat = 12
+    /// Everything the bar occupies vertically, padding included. Screens use
+    /// this to guarantee their last element clears the glass even if the safe
+    /// area inset does not reach them.
+    static let reservedHeight: CGFloat = barHeight + 10
 
     var body: some View {
         Group {

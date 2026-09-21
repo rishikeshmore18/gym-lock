@@ -38,49 +38,46 @@ struct ProgressTabView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 14) {
-                    HStack(alignment: .top, spacing: 12) {
-                        ProgressStatCard(
-                            title: "Week Streak",
-                            count: store.streak.weeks,
-                            appearanceDelay: 0
-                        ) {
-                            FlameEmblem()
-                        }
-
-                        ProgressStatCard(
-                            title: "Badges Earned",
-                            count: 0,
-                            digitStyle: .dark,
-                            appearanceDelay: 0.08
-                        ) {
-                            BadgeEmblem()
-                        }
+        // No NavigationStack: this tab pushes nothing, and four live stacks
+        // inside the tab shell stopped insetting their scroll views, which is
+        // what put the large "Progress" title on top of the first card. The
+        // header now belongs to the screen and collapses as the page scrolls.
+        FloatingTitleScreen(title: "Progress") {
+            VStack(spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    ProgressStatCard(
+                        title: "Week Streak",
+                        count: store.streak.weeks,
+                        appearanceDelay: 0
+                    ) {
+                        FlameEmblem()
                     }
 
-                    ProgressPeriodCard(
-                        model: period,
-                        onSelectWeek: selectWeek,
-                        onCollapseWeek: collapseWeek,
-                        onStepMonth: stepMonth,
-                        onStepWeek: stepWeek
-                    )
-
-                    ProgressPhotosCard(
-                        store: photos,
-                        onShare: { shareOrigin = $0 },
-                        transitionNamespace: shareTransition
-                    )
+                    ProgressStatCard(
+                        title: "Badges Earned",
+                        count: 0,
+                        digitStyle: .dark,
+                        appearanceDelay: 0.08
+                    ) {
+                        BadgeEmblem()
+                    }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
-                .padding(.bottom, 28)
+
+                ProgressPeriodCard(
+                    model: period,
+                    onSelectWeek: selectWeek,
+                    onCollapseWeek: collapseWeek,
+                    onStepMonth: stepMonth,
+                    onStepWeek: stepWeek
+                )
+
+                ProgressPhotosCard(
+                    store: photos,
+                    onShare: { shareOrigin = $0 },
+                    transitionNamespace: shareTransition
+                )
             }
-            .background(Theme.canvas)
-            .navigationTitle("Progress")
-            .navigationBarTitleDisplayMode(.large)
+            .padding(.horizontal, 20)
         }
         .tint(Theme.accent)
         .storyEditor(origin: $shareOrigin, photos: photos, transitionNamespace: shareTransition)

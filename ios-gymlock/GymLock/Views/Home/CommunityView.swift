@@ -11,22 +11,14 @@ struct CommunityView: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.canvas.ignoresSafeArea()
-
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 14) {
-                        headline
-                        whatIsComing
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 24)
-                }
+        // Same header treatment as the other tabs: this screen pushes nothing,
+        // so it does not carry a navigation stack just to obtain a title.
+        FloatingTitleScreen(title: "Community") {
+            VStack(spacing: 14) {
+                headline
+                whatIsComing
             }
-            .navigationTitle("Community")
-            .navigationBarTitleDisplayMode(.large)
+            .padding(.horizontal, 20)
         }
         .tint(Theme.accent)
     }
