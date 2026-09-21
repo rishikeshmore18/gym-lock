@@ -12,6 +12,12 @@ struct GymAlarmRequest: Hashable {
     var message: String
     /// Bundled resource name of the chosen alarm sound, without extension.
     var soundResource: String?
+    /// Whether this alarm offers the single snooze.
+    ///
+    /// Morning only, decided from the daypart at schedule time. The alert is
+    /// built by the system before the app is running, so the rule has to travel
+    /// with the request rather than being asked for at the moment of the tap.
+    var allowsSnooze: Bool = false
 }
 
 /// How capable the current alarm backend is, so the UI can be honest about what

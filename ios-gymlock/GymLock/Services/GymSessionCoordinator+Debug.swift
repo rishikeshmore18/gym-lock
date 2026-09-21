@@ -46,6 +46,19 @@ extension GymSessionCoordinator {
         case cantTodayWithinAllowance
         case cantTodayOverAllowance
 
+        // The three doors: every way a real morning can actually begin.
+        case alarmKitButtonTapped
+        case alarmKitSnoozeTapped
+        case notificationActionImUp
+        case notificationActionSnooze
+        case notificationTapped
+        case notificationDismissed
+        case coldLaunchFromAlarm
+        case foregroundDuringWindow
+        case foregroundAfterWindow
+        case foregroundAfterResolved
+        case alarmFiredWhileAppOpen
+
         var id: String { rawValue }
 
         var section: String {
@@ -64,6 +77,13 @@ extension GymSessionCoordinator {
                 "health"
             case .quickWorkoutComplete, .cantTodayWithinAllowance, .cantTodayOverAllowance:
                 "fallbacks"
+            case .alarmKitButtonTapped, .alarmKitSnoozeTapped,
+                 .notificationActionImUp, .notificationActionSnooze,
+                 .notificationTapped, .notificationDismissed,
+                 .coldLaunchFromAlarm, .foregroundDuringWindow,
+                 .foregroundAfterWindow, .foregroundAfterResolved,
+                 .alarmFiredWhileAppOpen:
+                "doors"
             }
         }
 
@@ -95,11 +115,22 @@ extension GymSessionCoordinator {
             case .quickWorkoutComplete: "quick workout complete"
             case .cantTodayWithinAllowance: "can't today (within allowance)"
             case .cantTodayOverAllowance: "can't today (over allowance)"
+            case .alarmKitButtonTapped: "AlarmKit: tapped I'm up"
+            case .alarmKitSnoozeTapped: "AlarmKit: tapped 5 more min"
+            case .notificationActionImUp: "notification: I'm up"
+            case .notificationActionSnooze: "notification: 5 more min"
+            case .notificationTapped: "notification: tapped the banner"
+            case .notificationDismissed: "notification: swiped away"
+            case .coldLaunchFromAlarm: "cold launch from alarm"
+            case .foregroundDuringWindow: "opened app during window"
+            case .foregroundAfterWindow: "opened app after window (none)"
+            case .foregroundAfterResolved: "opened app after resolving (none)"
+            case .alarmFiredWhileAppOpen: "alarm fired while app open"
             }
         }
 
         static var sections: [String] {
-            ["flow", "screen time", "arrival", "health", "fallbacks"]
+            ["doors", "flow", "screen time", "arrival", "health", "fallbacks"]
         }
     }
 
@@ -267,7 +298,132 @@ extension GymSessionCoordinator {
             debugStore?.debugExhaustSkips(count: easySkipAllowance)
             if session == nil { simulate(.alarmFired) }
             beginCantToday()
+
+        // MARK: The three doors
+        //
+        // Each of these runs the real path rather than a shortcut around it:
+        // they write the same handoff the intent or the notification delegate
+        // writes, then let `resumeSessionIfDue()` do the rest. A simulator that
+        // takes a different route through the state machine tests nothing worth
+        // knowing.
+
+        case .alarmKitButtonTapped, .notificationActionImUp, .notificationTapped:
+            beginFromDoor(wantsSnooze: false)
+
+        case .alarmKitSnoozeTapped, .notificationActionSnooze:
+            beginFromDoor(wantsSnooze: true)
+
+        case .notificationDismissed:
+            // Swiping an alarm away is not permission to skip the gym, so the
+            // session still starts and the lock still goes on.
+            beginFromDoor(wantsSnooze: false)
+
+        case .coldLaunchFromAlarm:
+            // No scene phase change happens on a cold launch, so this proves
+            // `attach(to:)` alone is enough to pick the note up.
+            endSession()
+            debugStore?.debugSeedGym()
+            debugClearResolvedSlots()
+            debugWriteHandoff(wantsSnooze: false)
+            if let store = debugStore { attach(to: store) }
+
+        case .foregroundDuringWindow:
+            // No handoff at all: the clock alone has to notice.
+            debugPrepareClockOnly(minutesAgo: 5)
+            resumeSessionIfDue()
+
+        case .foregroundAfterWindow:
+            // Past the window plus the grace. The correct outcome is that
+            // nothing happens: nobody gets ambushed at lunchtime.
+            let window = debugStore?.plan.windowMinutes ?? 35
+            debugPrepareClockOnly(minutesAgo: window + SessionResume.resumeGrace + 5)
+            resumeSessionIfDue()
+
+        case .foregroundAfterResolved:
+            debugPrepareClockOnly(minutesAgo: 5, clearingResolved: false)
+            debugMarkFirstSlotResolved()
+            resumeSessionIfDue()
+
+        case .alarmFiredWhileAppOpen:
+            // The app is frontmost, so there is no scene phase change to lean
+            // on: the posted notification is what has to carry it.
+            endSession()
+            debugStore?.debugSeedGym()
+            debugClearResolvedSlots()
+            debugWriteHandoff(wantsSnooze: false)
+            NotificationCenter.default.post(name: .gymLockAlarmHandoffAvailable, object: nil)
         }
+    }
+
+    // MARK: - Door helpers
+
+    /// Writes exactly what the intent and the notification delegate write.
+    private func debugWriteHandoff(wantsSnooze: Bool) {
+        AlarmHandoff.write(
+            .init(
+                slotID: debugStore?.plan.enabledSlots.first?.id,
+                firedAt: Date(),
+                wantsSnooze: wantsSnooze
+            )
+        )
+    }
+
+    private func beginFromDoor(wantsSnooze: Bool) {
+        endSession()
+        debugStore?.debugSeedGym()
+        debugClearResolvedSlots()
+
+        // Forced to a morning time, because the snooze does not exist at any
+        // other hour and simulating it from an evening slot would silently do
+        // nothing and look like a bug.
+        if wantsSnooze { debugSetFirstSlotTime(TimeOfDay(hour: 6, minute: 30)) }
+
+        debugWriteHandoff(wantsSnooze: wantsSnooze)
+        resumeSessionIfDue()
+    }
+
+    /// Clears every note and moves the first slot to a time that already passed
+    /// today, so the clock-based check has something real to find.
+    private func debugPrepareClockOnly(minutesAgo: Int, clearingResolved: Bool = true) {
+        endSession()
+        debugStore?.debugSeedGym()
+        if clearingResolved { debugClearResolvedSlots() }
+        AlarmHandoff.clear()
+
+        let firedAt = Date().addingTimeInterval(-Double(minutesAgo) * 60)
+        let parts = Calendar.current.dateComponents([.hour, .minute, .weekday], from: firedAt)
+        debugSetFirstSlotTime(
+            TimeOfDay(hour: parts.hour ?? 6, minute: parts.minute ?? 30),
+            addingWeekday: parts.weekday.flatMap(Weekday.init(rawValue:))
+        )
+    }
+
+    private func debugSetFirstSlotTime(_ time: TimeOfDay, addingWeekday weekday: Weekday? = nil) {
+        guard let store = debugStore else { return }
+
+        var plan = store.plan
+        guard let index = plan.slots.firstIndex(where: { $0.isEnabled }) else { return }
+
+        plan.slots[index].alarmTime = time
+        if let weekday { plan.slots[index].days.insert(weekday) }
+        store.plan = plan
+    }
+
+    /// Marks today's first slot as already settled, the way a real "can't
+    /// today" would have.
+    private func debugMarkFirstSlotResolved() {
+        guard let store = debugStore, let slot = store.plan.enabledSlots.first else { return }
+
+        var resolved = GymSession(
+            day: Calendar.current.startOfDay(for: Date()),
+            slotID: slot.id,
+            alarmTime: slot.alarmTime,
+            isMorningSession: slot.daypart.usesSleepRhythm,
+            getReadyMinutes: store.plan.rhythm.getReadyMinutes,
+            travelMinutes: store.plan.rhythm.travelMinutes
+        )
+        resolved.state = .cantToday
+        debugMarkResolved(resolved)
     }
 }
 #endif

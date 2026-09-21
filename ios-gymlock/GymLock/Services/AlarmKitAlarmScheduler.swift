@@ -3,6 +3,7 @@
 // sound type lives there rather than in AlarmKit itself.
 import ActivityKit
 import AlarmKit
+import AppIntents
 import Foundation
 import SwiftUI
 
@@ -82,10 +83,27 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
             systemImageName: "figure.walk"
         )
 
-        let alert = AlarmPresentation.Alert(
-            title: LocalizedStringResource(stringLiteral: request.title),
-            stopButton: stopButton
-        )
+        // `.custom` rather than AlarmKit's built-in countdown: GymLock's snooze
+        // has rules the generic one cannot express (the apps stay locked, it is
+        // offered exactly once, and it is clamped inside the gym window), so
+        // our own intent has to be what runs.
+        let alert: AlarmPresentation.Alert = if request.allowsSnooze {
+            AlarmPresentation.Alert(
+                title: LocalizedStringResource(stringLiteral: request.title),
+                stopButton: stopButton,
+                secondaryButton: AlarmButton(
+                    text: "5 more min",
+                    textColor: .white,
+                    systemImageName: "zzz"
+                ),
+                secondaryButtonBehavior: .custom
+            )
+        } else {
+            AlarmPresentation.Alert(
+                title: LocalizedStringResource(stringLiteral: request.title),
+                stopButton: stopButton
+            )
+        }
 
         let attributes = AlarmAttributes<GymAlarmMetadata>(
             presentation: AlarmPresentation(alert: alert),
@@ -100,15 +118,55 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
             )
         )
 
-        let configuration = AlarmManager.AlarmConfiguration.alarm(
+        // Without a `stopIntent` the alarm silences and the app is never told
+        // anything happened, which is precisely the bug that made the alarm
+        // unable to start a session at all.
+        let configuration = AlarmManager.AlarmConfiguration(
             schedule: schedule,
             attributes: attributes,
+            stopIntent: StartGymSessionIntent(alarmID: request.slotID.uuidString),
+            secondaryIntent: request.allowsSnooze
+                ? SnoozeGymSessionIntent(alarmID: request.slotID.uuidString)
+                : nil,
             sound: sound(for: request)
         )
 
         // The slot id is reused as the alarm id, which is what makes a replace a
         // genuine replace: the same slot can never occupy two alarms.
         _ = try? await manager.schedule(id: request.slotID, configuration: configuration)
+    }
+
+    // MARK: - Observing what the system actually did
+
+    /// A long-lived observer of the system's own view of our alarms.
+    ///
+    /// The stop intent is the fast path. This is the honest one: it reports what
+    /// AlarmKit actually did, including a dismissal from the Lock Screen that
+    /// never ran an intent.
+    ///
+    /// It races the intent on purpose. `AlarmHandoff.take()` is a genuine take,
+    /// so both paths may write and only one can start a session.
+    func observeAlarmUpdates(onFire: @escaping @Sendable (UUID) -> Void) -> Task<Void, Never> {
+        Task {
+            var alerting: Set<UUID> = []
+
+            for await alarms in AlarmManager.shared.alarmUpdates {
+                guard !Task.isCancelled else { return }
+
+                let nowAlerting = Set(
+                    alarms.filter { $0.state == .alerting }.map(\.id)
+                )
+
+                // Only the transition into alerting is interesting. Reporting
+                // the steady state every update would restart the morning on
+                // every emission.
+                for id in nowAlerting.subtracting(alerting) {
+                    onFire(id)
+                }
+
+                alerting = nowAlerting
+            }
+        }
     }
 
     /// The user's chosen bundled track, or the system alarm sound.

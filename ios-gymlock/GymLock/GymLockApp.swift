@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UserNotifications
 
 @main
 struct GymLockApp: App {
@@ -15,7 +16,19 @@ struct GymLockApp: App {
     @State private var coordinator = GymSessionCoordinator()
     @State private var alarmPlayer = AlarmSoundPlayer()
 
+    /// Held for the lifetime of the app: `UNUserNotificationCenter` keeps only
+    /// a weak reference to its delegate.
+    private let notificationDelegate = AlarmNotificationDelegate()
+
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        // Both of these must happen before the system can deliver a launch
+        // notification. Doing it in `.task` is too late for a cold launch from
+        // an alarm tap: the response is dropped and the morning never starts.
+        UNUserNotificationCenter.current().delegate = notificationDelegate
+        AlarmNotificationDelegate.registerCategories()
+    }
 
     var body: some Scene {
         WindowGroup {

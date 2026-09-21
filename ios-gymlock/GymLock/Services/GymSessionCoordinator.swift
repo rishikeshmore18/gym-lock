@@ -48,6 +48,12 @@ enum MorningRoute: Equatable {
 final class GymSessionCoordinator {
     private enum Key {
         static let session = "gymlock.activeSession"
+        /// Slots already resolved today, as `"<slotID>|<yyyy-MM-dd>"`.
+        ///
+        /// Without this, someone who says "can't today" at 6:35 and reopens the
+        /// app at 6:50 has their apps locked again by the clock check. That is
+        /// the single worst bug this feature could ship with.
+        static let resolvedSlots = "gymlock.alarm.resolvedSlots"
     }
 
     /// The morning in progress, if there is one.
@@ -67,6 +73,8 @@ final class GymSessionCoordinator {
     let health: HealthWorkoutObserver
 
     private var ticker: Task<Void, Never>?
+    /// The long-lived observers, held somewhere that can clean itself up.
+    private let observers = AlarmObserverBag()
 
     /// Injected so the coordinator can read the plan and write outcomes without
     /// owning a second copy of either.
@@ -109,6 +117,47 @@ final class GymSessionCoordinator {
         restore()
         armArrivalIfPossible()
         startHealthObservation()
+        observeAlarmFiring()
+        observeHandoffNotifications()
+
+        // A cold launch from an alarm tap has no scene-phase change to wait
+        // for: the app is already active by the time this runs.
+        resumeSessionIfDue()
+    }
+
+    /// The second belt on door one.
+    ///
+    /// The stop intent is the fast path and usually wins. This catches the
+    /// cases it cannot see, most importantly a dismissal from the Lock Screen
+    /// that never runs an intent at all.
+    private func observeAlarmFiring() {
+        #if canImport(AlarmKit)
+        guard !observers.hasAlarmObserver, #available(iOS 26.0, *),
+              let scheduler = alarms as? AlarmKitAlarmScheduler
+        else { return }
+
+        observers.hold(alarm: scheduler.observeAlarmUpdates { id in
+            // Writing rather than starting directly: this arrives off the main
+            // actor, and the handoff's one-shot take is what stops the intent
+            // and this observer from starting two sessions for one alarm.
+            AlarmHandoff.write(.init(slotID: id, firedAt: Date(), wantsSnooze: false))
+            Task { @MainActor [weak self] in self?.resumeSessionIfDue() }
+        })
+        #endif
+    }
+
+    /// An intent running while the app is already frontmost produces no scene
+    /// phase change, so the note would sit there until the next backgrounding.
+    private func observeHandoffNotifications() {
+        guard !observers.hasHandoffObserver else { return }
+
+        observers.hold(handoff: NotificationCenter.default.addObserver(
+            forName: .gymLockAlarmHandoffAvailable,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.resumeSessionIfDue() }
+        })
     }
 
     var alarmCapability: AlarmDeliveryCapability { alarms.capability }
@@ -127,7 +176,66 @@ final class GymSessionCoordinator {
         // "5 more min" and puts the phone down could come back to a screen
         // still promising an alarm that already passed.
         resolveElapsedSnooze()
+        // Door three: the user ignored the alarm and simply opened the app.
+        resumeSessionIfDue()
         Task { await health.fetchNewWorkouts() }
+    }
+
+    // MARK: - Starting the morning from outside the app
+
+    /// Starts or resumes the morning when the app comes back to life.
+    ///
+    /// Three inputs, in priority order: a note left by the alarm's own button, a
+    /// note left by a notification response, and, if neither exists, the plain
+    /// question of whether the clock is inside a window that should already have
+    /// begun.
+    func resumeSessionIfDue(at now: Date = Date()) {
+        guard let store else { return }
+
+        guard let decision = SessionResume.decide(
+            now: now,
+            isSessionLive: session?.state.isLive ?? false,
+            handoff: AlarmHandoff.peek(now: now),
+            slots: store.plan.slots,
+            windowMinutes: store.plan.windowMinutes,
+            resolvedKeys: resolvedSlotKeys
+        ) else { return }
+
+        // Only consumed once the decision is actually being acted on, so a note
+        // arriving during a live session is not silently thrown away.
+        if decision.source == .handoff {
+            AlarmHandoff.clear()
+        }
+
+        let slot = store.plan.slots.first { $0.id == decision.slotID }
+
+        // `startAt` rather than `now`: the deadline is measured from when the
+        // alarm actually rang, so ignoring it for ten minutes does not quietly
+        // buy ten more minutes.
+        beginSession(for: slot, at: decision.startAt)
+
+        if decision.wantsSnooze {
+            snooze()
+        }
+    }
+
+    // MARK: - Resolved slots
+
+    private var resolvedSlotKeys: Set<String> {
+        Set(defaults.stringArray(forKey: Key.resolvedSlots) ?? [])
+    }
+
+    /// Remembers that this slot is finished for today.
+    ///
+    /// Only today's keys are kept, so the list cannot grow without bound and a
+    /// key from last Tuesday can never suppress this Tuesday's alarm.
+    private func markSlotResolved(_ session: GymSession, at now: Date = Date()) {
+        let todayKey = SessionResume.dayKey(for: now)
+        let key = SessionResume.resolvedKey(slotID: session.slotID, day: now)
+
+        var kept = resolvedSlotKeys.filter { $0.hasSuffix("|\(todayKey)") }
+        kept.insert(key)
+        defaults.set(Array(kept), forKey: Key.resolvedSlots)
     }
 
     // MARK: - Derived
@@ -256,7 +364,10 @@ final class GymSessionCoordinator {
                 weekdays: slot.days,
                 title: "Gym time",
                 message: "You planned this.",
-                soundResource: profile.alarmSound.resourceName
+                soundResource: profile.alarmSound.resourceName,
+                // The alert is built by the system long before the app runs, so
+                // the morning-only snooze rule has to be decided here.
+                allowsSnooze: slot.daypart.usesSleepRhythm
             )
         }
 
@@ -933,6 +1044,7 @@ final class GymSessionCoordinator {
         current.state = .cantToday
         session = current
         store?.record(.cantToday, sessionID: current.id)
+        markSlotResolved(current)
         persist()
     }
 
@@ -998,6 +1110,12 @@ final class GymSessionCoordinator {
     func endSession(clearingAnchor: Bool = true, keepingReminders: Bool = false) {
         ticker?.cancel()
         ticker = nil
+
+        // Before the session is thrown away: remember that this slot is done
+        // for today, so the clock check cannot resurrect it ten minutes later.
+        if let current = session, current.state.isResolved {
+            markSlotResolved(current)
+        }
 
         if clearingAnchor { location.endSession() }
 
@@ -1160,6 +1278,16 @@ final class GymSessionCoordinator {
 
     func debugEnforceFailsafe() {
         enforceShieldFailsafe()
+    }
+
+    var debugResolvedSlotKeys: Set<String> { resolvedSlotKeys }
+
+    func debugMarkResolved(_ session: GymSession, at now: Date = Date()) {
+        markSlotResolved(session, at: now)
+    }
+
+    func debugClearResolvedSlots() {
+        defaults.removeObject(forKey: Key.resolvedSlots)
     }
     #endif
 }

@@ -59,6 +59,22 @@ enum GymSessionState: String, Codable, Hashable {
         }
     }
 
+    /// True once this morning has an answer, one way or another.
+    ///
+    /// Drives the resolved-slot key: a day the user has already settled must
+    /// never be restarted by the clock when they next open the app. Arrival and
+    /// a completed home workout count, because being re-locked after earning
+    /// your apps back would be the worst possible bug.
+    var isResolved: Bool {
+        switch self {
+        case .completed, .missed, .rescheduled, .cantToday,
+             .arrived, .homeWorkoutVerified:
+            true
+        default:
+            false
+        }
+    }
+
     /// Whether the selected apps should be shielded in this state.
     ///
     /// The whole product exists for the moment another app wins, so the shield

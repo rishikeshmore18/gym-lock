@@ -12,6 +12,10 @@ struct DebugMorningPanel: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var alarmAuthorization: AlarmAuthorization = .notDetermined
+    /// Re-read whenever the panel appears, because the interesting cases are
+    /// exactly the ones where something changed while it was closed.
+    @State private var handoffSummary = "none"
+    @State private var resolvedSummary = "none"
 
     var body: some View {
         NavigationStack {
@@ -40,6 +44,7 @@ struct DebugMorningPanel: View {
             }
             .task {
                 alarmAuthorization = await coordinator.alarmAuthorization()
+                refreshDoorReadings()
             }
         }
     }
@@ -57,6 +62,9 @@ struct DebugMorningPanel: View {
 
             row("alarm backend", coordinator.alarmCapability.headline)
             row("alarm permission", alarmAuthorization.rawValue)
+            row("next alarm", nextAlarmLabel)
+            row("handoff pending", handoffSummary)
+            row("resolved today", resolvedSummary)
             row("shield backend", coordinator.shieldCapability.headline)
             row("shield permission", coordinator.shield.authorization.rawValue)
             row("shield active", coordinator.shield.isShielded ? "yes" : "no")
@@ -78,6 +86,24 @@ struct DebugMorningPanel: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .warmCard(radius: 18)
+    }
+
+    /// Peeked, never taken: reporting on the note must not consume it.
+    private func refreshDoorReadings() {
+        if let pending = AlarmHandoff.peek() {
+            let fired = pending.firedAt.formatted(date: .omitted, time: .standard)
+            handoffSummary = pending.wantsSnooze ? "snooze · \(fired)" : "I'm up · \(fired)"
+        } else {
+            handoffSummary = "none"
+        }
+
+        let keys = coordinator.debugResolvedSlotKeys
+        resolvedSummary = keys.isEmpty ? "none" : "\(keys.count) slot(s)"
+    }
+
+    private var nextAlarmLabel: String {
+        guard let next = store.plan.nextOccurrence() else { return "none" }
+        return next.fireDate.formatted(date: .abbreviated, time: .shortened)
     }
 
     private var locationLabel: String {
@@ -138,15 +164,19 @@ struct DebugMorningPanel: View {
     /// Steps that only change a reading stay on screen; steps that move the
     /// flow dismiss, so the result is actually visible.
     private func stepButton(_ step: GymSessionCoordinator.DebugStep) -> some View {
+        // The two "must produce nothing" doors stay open on purpose: the whole
+        // point is to watch the readings *not* change.
         let staysOpen: Set<GymSessionCoordinator.DebugStep> = [
             .familyControlsAuthorized, .familyControlsDenied,
             .badGPSAccuracy, .goodGPSAccuracy,
             .healthDenied, .noHealthWorkout, .driveBy,
+            .foregroundAfterWindow, .foregroundAfterResolved,
         ]
         let isReadingOnly = staysOpen.contains(step)
 
         return Button {
             coordinator.simulate(step)
+            refreshDoorReadings()
             if !isReadingOnly { dismiss() }
         } label: {
             HStack {
@@ -184,6 +214,19 @@ struct DebugMorningPanel: View {
                 store.debugClearSkips()
             } label: {
                 Text("clear recent skips")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(Theme.surfaceMuted, in: .rect(cornerRadius: 14))
+            }
+
+            Button {
+                AlarmHandoff.clear()
+                coordinator.debugClearResolvedSlots()
+                refreshDoorReadings()
+            } label: {
+                Text("clear handoff and resolved slots")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.inkSecondary)
                     .frame(maxWidth: .infinity)
