@@ -2,16 +2,23 @@ import SwiftUI
 
 /// The Profile tab.
 ///
-/// Reachable from the detached circle on the tab bar. It shows the two things
-/// it can state truthfully — who the user said they are, and the streak the
-/// ledger has ruled on — and is where the original home now lives, as "Home 2".
+/// Reachable from the detached circle on the tab bar. It shows the things it
+/// can state truthfully — who the user said they are, the alarm that will
+/// actually ring, and the streak the ledger has ruled on — and is where the
+/// original home now lives, as "Home 2".
 struct ProfileView: View {
     @Environment(AppStore.self) private var store
+    @Environment(GymSessionCoordinator.self) private var coordinator
 
     /// The classic home, presented rather than pushed: it owns its own
     /// navigation stack and toolbar, and nesting one stack inside another
     /// would give it two back buttons and two titles.
     @State private var isShowingClassicHome = false
+    @State private var isShowingAlarmSettings = false
+    @State private var alarmAuth: AlarmAuthorization = .notDetermined
+
+    /// The alarm screen grows out of this row and returns to it.
+    @Namespace private var alarmTransition
 
     private var streakLine: String {
         let weeks = store.streak.weeks
@@ -32,6 +39,17 @@ struct ProfileView: View {
         .sheet(isPresented: $isShowingClassicHome) {
             HomeView()
                 .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(isPresented: $isShowingAlarmSettings, onDismiss: {
+            // The interesting state is exactly what may have changed while the
+            // cover was up.
+            Task { alarmAuth = await coordinator.alarmAuthorization() }
+        }) {
+            AlarmSettingsView()
+                .navigationTransition(.zoom(sourceID: "alarm-settings", in: alarmTransition))
+        }
+        .task {
+            alarmAuth = await coordinator.alarmAuthorization()
         }
     }
 
@@ -68,6 +86,25 @@ struct ProfileView: View {
         VStack(spacing: 0) {
             Button {
                 Haptics.tap()
+                isShowingAlarmSettings = true
+            } label: {
+                row(
+                    symbol: "alarm.fill",
+                    title: "Alarm",
+                    detail: alarmDetail,
+                    detailColor: alarmDetailColor
+                )
+            }
+            .buttonStyle(.plain)
+            .matchedTransitionSource(id: "alarm-settings", in: alarmTransition)
+
+            Rectangle()
+                .fill(Theme.border)
+                .frame(height: 1)
+                .padding(.horizontal, 18)
+
+            Button {
+                Haptics.tap()
                 isShowingClassicHome = true
             } label: {
                 row(
@@ -82,7 +119,28 @@ struct ProfileView: View {
         .warmCard()
     }
 
-    private func row(symbol: String, title: String, detail: String) -> some View {
+    /// Live, derived, and honest: what will actually ring, or what is broken.
+    private var alarmDetail: String {
+        if alarmAuth == .denied { return "alarm is off in Settings" }
+
+        guard let slot = store.plan.enabledSlots.first ?? store.plan.slots.first else {
+            return "no alarm set"
+        }
+        return "\(slot.alarmTime.displayString) · \(slot.daysSummary)"
+    }
+
+    /// Denied permission is the one case where the row earns the accent,
+    /// because it is the one case where something is broken.
+    private var alarmDetailColor: Color {
+        alarmAuth == .denied ? Theme.accent : Theme.inkSecondary
+    }
+
+    private func row(
+        symbol: String,
+        title: String,
+        detail: String,
+        detailColor: Color = Theme.inkSecondary
+    ) -> some View {
         HStack(spacing: 14) {
             Image(systemName: symbol)
                 .font(.system(size: 16, weight: .semibold))
@@ -96,7 +154,7 @@ struct ProfileView: View {
 
                 Text(detail)
                     .font(.system(size: 13.5, weight: .medium))
-                    .foregroundStyle(Theme.inkSecondary)
+                    .foregroundStyle(detailColor)
             }
 
             Spacer(minLength: 0)
