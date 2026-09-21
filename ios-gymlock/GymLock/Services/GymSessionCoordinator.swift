@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 /// Which screen the morning flow should be showing.
 ///
@@ -78,6 +79,8 @@ final class GymSessionCoordinator {
     /// The evening lock. Independent of the session: it holds the shield by
     /// the clock, and only ever inside its own window.
     let windDown = WindDownController()
+    /// The sound the user wakes up to, once the app is frontmost.
+    let ringer = AlarmRinger()
 
     /// Injected so the coordinator can read the plan and write outcomes without
     /// owning a second copy of either.
@@ -424,6 +427,10 @@ final class GymSessionCoordinator {
                 title: "Gym time",
                 message: "You planned this.",
                 soundResource: profile.alarmSound.resourceName,
+                // The notification backend needs the caf, not the mp3: the
+                // system sound facility cannot decode mp3 and silently plays
+                // its own default instead.
+                soundFileName: notificationSoundFileName(for: profile),
                 // The alert is built by the system long before the app runs, so
                 // the morning-only snooze rule has to be decided here.
                 allowsSnooze: slot.daypart.usesSleepRhythm
@@ -431,6 +438,22 @@ final class GymSessionCoordinator {
         }
 
         await alarms.replaceAll(with: requests)
+    }
+
+    /// Which file a notification should name, following the same fallback
+    /// chain the ringer uses so both agree on what "your alarm sound" means.
+    private func notificationSoundFileName(for profile: OnboardingProfile) -> String? {
+        if profile.alarmSound == .ownSong {
+            // The trimmer exports a caf sibling into Library/Sounds precisely
+            // so the notification has something legal to play.
+            if let custom = profile.customAlarmSoundFile {
+                let caf = (custom as NSString).deletingPathExtension + ".caf"
+                if AlarmTrackResolver.customSongExists(named: caf) { return caf }
+            }
+            return (profile.previousBundledSound ?? AlarmTrackResolver.guaranteed)
+                .notificationFileName
+        }
+        return profile.alarmSound.notificationFileName
     }
 
     func alarmAuthorization() async -> AlarmAuthorization {
@@ -699,8 +722,24 @@ final class GymSessionCoordinator {
         // moment is the thirty seconds after the alarm.
         applyShield(for: new)
 
+        // The chosen track, which is a separate thing from whatever the system
+        // alarm just rang with.
+        startRingingIfFrontmost()
+
         persist()
         startTicking()
+    }
+
+    /// Plays the user's own track, but only with a screen in front of them.
+    ///
+    /// AlarmKit rings with the system sound because custom sounds are broken on
+    /// iOS 26.0, and the stop intent is what brings the app forward. That makes
+    /// this the moment the real track starts. Starting it from a background
+    /// launch would burn battery playing to nobody.
+    private func startRingingIfFrontmost() {
+        guard let store else { return }
+        guard UIApplication.shared.applicationState == .active else { return }
+        ringer.start(for: store.profile)
     }
 
     /// Lets a user who woke up before the alarm start anyway.
@@ -727,6 +766,10 @@ final class GymSessionCoordinator {
     /// because the user just did the thing the app wanted.
     func commitToGoing() {
         guard var current = session else { return }
+
+        // The user is up and has decided. Nothing about this moment should
+        // still be shouting at them.
+        ringer.stop()
 
         current.committedAt = Date()
         current.snoozeExpiresAt = nil
@@ -774,6 +817,9 @@ final class GymSessionCoordinator {
         guard SessionVoice(session: current).allowsSnooze else { return }
         guard current.state == .alarmFired || current.state == .awaitingDecision else { return }
 
+        // Silence now, and ring again when the snooze runs out.
+        ringer.stop()
+
         let now = Date()
         current.snoozeUsedAt = now
         current.snoozeExpiresAt = now.addingTimeInterval(Double(GymSession.snoozeMinutes) * 60)
@@ -808,6 +854,9 @@ final class GymSessionCoordinator {
         // The shield never came off, so there is nothing to re-apply — only the
         // decision to put back in front of the user.
         Haptics.medium()
+
+        // The whole point of a snooze is that the alarm comes back.
+        startRingingIfFrontmost()
     }
 
     /// Pushes today's session later without abandoning it.
@@ -1169,6 +1218,9 @@ final class GymSessionCoordinator {
     func endSession(clearingAnchor: Bool = true, keepingReminders: Bool = false) {
         ticker?.cancel()
         ticker = nil
+
+        // No morning ends with the alarm still going.
+        ringer.stop()
 
         // Before the session is thrown away: remember that this slot is done
         // for today, so the clock check cannot resurrect it ten minutes later.

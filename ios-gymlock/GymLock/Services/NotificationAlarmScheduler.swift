@@ -87,18 +87,39 @@ final class NotificationAlarmScheduler: AlarmScheduling {
         try? await center.add(notification)
     }
 
-    /// The user's chosen track, if the system will play it.
+    /// The user's chosen track, if the system will really play it.
     ///
-    /// Notification sounds must be under 30 seconds and live in the bundle or
-    /// Library/Sounds. The generated alarm tracks qualify; an imported song does
-    /// not, so that case falls back to the default rather than silently failing.
+    /// Three constraints, all of them silent failures when broken: the file must
+    /// be under 30 seconds, must live in the bundle or `Library/Sounds`, and must
+    /// be Linear PCM, IMA4, µLaw or aLaw in an aiff, wav or caf container. mp3 is
+    /// *not* on that list, which is why `soundFileName` hands over a caf.
+    ///
+    /// An imported song is served from `Library/Sounds` by the trimmer, which
+    /// exports m4a for the ringer and a caf sibling for this path.
     private func sound(for request: GymAlarmRequest) -> UNNotificationSound {
-        guard let resource = request.soundResource,
-              Bundle.main.url(forResource: resource, withExtension: "mp3") != nil
+        guard let fileName = request.soundFileName,
+              Self.soundFileExists(named: fileName)
         else {
             return .defaultCritical
         }
-        return UNNotificationSound(named: UNNotificationSoundName("\(resource).mp3"))
+        return UNNotificationSound(named: UNNotificationSoundName(fileName))
+    }
+
+    /// Looks where the system itself looks, so a missing file falls back loudly
+    /// at schedule time rather than silently at 6:30 in the morning.
+    private static func soundFileExists(named fileName: String) -> Bool {
+        let name = (fileName as NSString).deletingPathExtension
+        let ext = (fileName as NSString).pathExtension
+
+        if Bundle.main.url(forResource: name, withExtension: ext) != nil { return true }
+
+        guard let library = FileManager.default.urls(
+            for: .libraryDirectory,
+            in: .userDomainMask
+        ).first else { return false }
+
+        let sounds = library.appendingPathComponent("Sounds").appendingPathComponent(fileName)
+        return FileManager.default.fileExists(atPath: sounds.path)
     }
 
     static let categoryIdentifier = "gymlock.alarm"

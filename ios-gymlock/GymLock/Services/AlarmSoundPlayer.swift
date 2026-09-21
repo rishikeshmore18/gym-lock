@@ -21,20 +21,21 @@ final class AlarmSoundPlayer {
     /// How long a preview runs before stopping itself.
     private static let previewDuration: Double = 6
 
-    func toggle(_ sound: AlarmSound) {
+    /// `profile` is what lets a preview of "my own song" play the user's own
+    /// trimmed clip rather than a bundled stand-in. Without it the preview
+    /// would quietly demonstrate the wrong track.
+    func toggle(_ sound: AlarmSound, profile: OnboardingProfile? = nil) {
         if playing == sound {
             stop()
         } else {
-            play(sound)
+            play(sound, profile: profile)
         }
     }
 
-    func play(_ sound: AlarmSound) {
+    func play(_ sound: AlarmSound, profile: OnboardingProfile? = nil) {
         stop()
 
-        guard let name = sound.resourceName,
-              let url = Bundle.main.url(forResource: name, withExtension: "mp3")
-        else { return }
+        guard let url = AlarmTrackResolver.previewURL(for: sound, profile: profile) else { return }
 
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])

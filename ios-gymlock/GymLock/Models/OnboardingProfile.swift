@@ -167,7 +167,8 @@ enum AlarmSound: String, CaseIterable, Codable, Identifiable, Hashable {
     /// Bundled resource name, or nil for the user's own imported track.
     ///
     /// These are the file names as bundled into `Resources/`, which do not match
-    /// the display names above.
+    /// the display names above. Each one ships twice, in two formats, for two
+    /// very different players — see `ringerFileName` and `notificationFileName`.
     var resourceName: String? {
         switch self {
         case .energyUp: "gym_workout_alarm"
@@ -176,6 +177,27 @@ enum AlarmSound: String, CaseIterable, Codable, Identifiable, Hashable {
         case .noLimits: "triumphant_rock_workout"
         case .ownSong: nil
         }
+    }
+
+    /// What `AVAudioPlayer` plays: the in-app preview and the real ringer.
+    ///
+    /// mp3 is fine here. `AVAudioPlayer` decodes it, and stereo at 128 kbps is
+    /// what these tracks were authored at.
+    var ringerFileName: String? {
+        guard let resourceName else { return nil }
+        return "\(resourceName).mp3"
+    }
+
+    /// What a notification plays, which is a different file on purpose.
+    ///
+    /// The system sound facility cannot decode mp3. It accepts only Linear PCM,
+    /// IMA4, µLaw or aLaw packaged as aiff, wav or caf, and silently substitutes
+    /// the default system sound for anything else — so every "custom" alarm tone
+    /// this app shipped through the notification backend was never actually
+    /// heard. These are IMA4 in caf for exactly that reason.
+    var notificationFileName: String? {
+        guard let resourceName else { return nil }
+        return "\(resourceName).caf"
     }
 
     /// The four tracks that ship with the app.
@@ -228,6 +250,21 @@ struct OnboardingProfile: Codable, Hashable {
     var ownSongFileName: String?
     /// Display name of that imported track.
     var ownSongTitle: String?
+    /// File name in `Library/Sounds` of the 30-second clip the user trimmed.
+    ///
+    /// Only the name, never an absolute path: the container directory changes
+    /// between launches and updates, so a stored path goes stale silently.
+    var customAlarmSoundFile: String?
+    /// What to call that clip on screen.
+    var customAlarmSoundTitle: String?
+    /// Where in the original track the clip starts, in seconds, so reopening
+    /// the trimmer puts the window back where the user left it.
+    var customAlarmTrimStart: Double?
+    /// The bundled track selected before the user imported their own.
+    ///
+    /// Kept so a missing custom file falls back to a sound they actually chose
+    /// rather than to a generic default.
+    var previousBundledSound: AlarmSound?
     var comebackModeEnabled: Bool
     /// Set once the user activates the system on the final screen.
     var hasActivated: Bool
@@ -247,6 +284,10 @@ struct OnboardingProfile: Codable, Hashable {
         alarmSound: .energyUp,
         ownSongFileName: nil,
         ownSongTitle: nil,
+        customAlarmSoundFile: nil,
+        customAlarmSoundTitle: nil,
+        customAlarmTrimStart: nil,
+        previousBundledSound: nil,
         comebackModeEnabled: true,
         hasActivated: false
     )
@@ -323,9 +364,17 @@ struct OnboardingProfile: Codable, Hashable {
     /// What to call the chosen alarm track anywhere it is summarised.
     var alarmSoundLabel: String {
         if alarmSound == .ownSong {
-            return ownSongTitle ?? "your own track"
+            return customAlarmSoundTitle ?? ownSongTitle ?? "your own track"
         }
         return alarmSound.label
+    }
+
+    /// The custom clip's file name, whichever route produced it.
+    ///
+    /// The trimmer writes `customAlarmSoundFile`; the older onboarding importer
+    /// wrote `ownSongFileName`. Both must keep working for anyone mid-upgrade.
+    var effectiveCustomSoundFile: String? {
+        customAlarmSoundFile ?? ownSongFileName
     }
 
     /// Local URL of the imported track, if there is one.

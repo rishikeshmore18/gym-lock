@@ -12,6 +12,12 @@ struct GymAlarmRequest: Hashable {
     var message: String
     /// Bundled resource name of the chosen alarm sound, without extension.
     var soundResource: String?
+    /// The file the *notification* backend should play, with its extension.
+    ///
+    /// Separate from `soundResource` because the two backends need different
+    /// formats of the same track: `AVAudioPlayer` takes the mp3, the system
+    /// sound facility only accepts IMA4/PCM in caf, aiff or wav.
+    var soundFileName: String?
     /// Whether this alarm offers the single snooze.
     ///
     /// Morning only, decided from the daypart at schedule time. The alert is

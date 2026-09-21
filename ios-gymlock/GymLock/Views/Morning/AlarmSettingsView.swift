@@ -536,12 +536,34 @@ struct AlarmSettingsView: View {
                 .foregroundStyle(Theme.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // What actually happens with the chosen track, which is not the
+            // same as what the system alarm rings with.
+            Text(ringerExplanation)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             permissionRow
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .warmCard(radius: 18)
+    }
+
+    /// Honest about the split between the two sounds.
+    ///
+    /// With AlarmKit the system rings first with its own tone and the chosen
+    /// track starts once the app is open, because custom sounds are broken on
+    /// iOS 26.0. Saying otherwise would be a lie the user finds out about at
+    /// 6:30 in the morning.
+    private var ringerExplanation: String {
+        switch coordinator.alarmCapability {
+        case .systemAlarm:
+            "your track plays once you open the app, and keeps going until you answer."
+        case .notification:
+            "your track plays through the notification, then again in the app."
+        }
     }
 
     @ViewBuilder

@@ -60,6 +60,7 @@ struct DebugMorningPanel: View {
                 .tracking(0.6)
                 .foregroundStyle(Theme.inkTertiary)
 
+            row("alarm sound", store.profile.alarmSoundLabel)
             row("alarm backend", coordinator.alarmCapability.headline)
             row("alarm permission", alarmAuthorization.rawValue)
             row("next alarm", nextAlarmLabel)
@@ -70,6 +71,8 @@ struct DebugMorningPanel: View {
             row("shield active", coordinator.shield.isShielded ? "yes" : "no")
             row("shield owner", coordinator.shield.owner?.rawValue ?? "none")
             row("wind-down active", coordinator.windDown.isActive ? "yes" : "no")
+            row("ringer", ringerLabel)
+            row("custom song", customSongLabel)
             row("blocked items", "\(coordinator.shield.selectionCount)")
             row("gym", store.primaryGym?.name ?? "not set")
             row("location", locationLabel)
@@ -101,6 +104,21 @@ struct DebugMorningPanel: View {
 
         let keys = coordinator.debugResolvedSlotKeys
         resolvedSummary = keys.isEmpty ? "none" : "\(keys.count) slot(s)"
+    }
+
+    private var ringerLabel: String {
+        guard coordinator.ringer.isRinging else { return "idle" }
+        let percent = Int((coordinator.ringer.intensity * 100).rounded())
+        let track = coordinator.ringer.playingSound?.label ?? "unknown"
+        let fallback = coordinator.ringer.isPlayingFallback ? " (fallback)" : ""
+        return "ringing at \(percent)% · \(track)\(fallback)"
+    }
+
+    /// Distinguishes "never chosen" from "chosen but the file is gone", which
+    /// are the two cases that behave completely differently at 6:30.
+    private var customSongLabel: String {
+        guard let name = store.profile.effectiveCustomSoundFile else { return "none" }
+        return AlarmTrackResolver.customSongExists(named: name) ? name : "missing"
     }
 
     private var nextAlarmLabel: String {
@@ -174,6 +192,10 @@ struct DebugMorningPanel: View {
             .healthDenied, .noHealthWorkout, .driveBy,
             .foregroundAfterWindow, .foregroundAfterResolved,
             .windDownLockStart, .windDownLockEnd, .windDownWhileSessionLive,
+            // Every sound step is judged by the readings above, not by a
+            // screen change, so the panel stays put.
+            .ringerStart, .ringerEscalated, .ringerStop, .ringerCeiling,
+            .customSongMissing, .customSongProtected,
         ]
         let isReadingOnly = staysOpen.contains(step)
 

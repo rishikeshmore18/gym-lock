@@ -412,6 +412,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAlarmKitUsageDescription = "GymLock schedules your gym alarm so it rings through silent mode and Focus on the mornings you chose to train.";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "GymLock reads your music library so you can pick one of your own tracks as the alarm and trim the 30 seconds that wakes you up. Nothing is uploaded.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "GymLock uses the camera for your Day 0 progress photo, and for activation missions where you show your shoes, water or bag. Mission photos are checked on this iPhone and deleted straight afterwards.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "GymLock can read workouts Apple Health already recorded, so a gym session is recognised automatically. You never log anything, and GymLock never writes to Health.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "GymLock does not write anything to Apple Health. It only reads workouts that other apps and your watch have already recorded.";
@@ -423,7 +424,7 @@
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "instagram-stories";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "GymLock listens for the one line you read out loud during a mirror mission. Recognition runs on your device and the transcript is discarded straight afterwards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "location remote-notification";
+				INFOPLIST_KEY_UIBackgroundModes = "audio location remote-notification";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -458,6 +459,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAlarmKitUsageDescription = "GymLock schedules your gym alarm so it rings through silent mode and Focus on the mornings you chose to train.";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "GymLock reads your music library so you can pick one of your own tracks as the alarm and trim the 30 seconds that wakes you up. Nothing is uploaded.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "GymLock uses the camera for your Day 0 progress photo, and for activation missions where you show your shoes, water or bag. Mission photos are checked on this iPhone and deleted straight afterwards.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "GymLock can read workouts Apple Health already recorded, so a gym session is recognised automatically. You never log anything, and GymLock never writes to Health.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "GymLock does not write anything to Apple Health. It only reads workouts that other apps and your watch have already recorded.";
@@ -469,7 +471,7 @@
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "instagram-stories";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "GymLock listens for the one line you read out loud during a mirror mission. Recognition runs on your device and the transcript is discarded straight afterwards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "location remote-notification";
+				INFOPLIST_KEY_UIBackgroundModes = "audio location remote-notification";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

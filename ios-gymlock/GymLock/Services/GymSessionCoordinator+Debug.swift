@@ -65,6 +65,14 @@ extension GymSessionCoordinator {
         case windDownHandoverToGym
         case windDownWhileSessionLive
 
+        // Sound: the ringer and the fallback chain.
+        case ringerStart
+        case ringerEscalated
+        case ringerStop
+        case ringerCeiling
+        case customSongMissing
+        case customSongProtected
+
         var id: String { rawValue }
 
         var section: String {
@@ -93,6 +101,9 @@ extension GymSessionCoordinator {
             case .windDownLockStart, .windDownLockEnd,
                  .windDownHandoverToGym, .windDownWhileSessionLive:
                 "locks"
+            case .ringerStart, .ringerEscalated, .ringerStop,
+                 .ringerCeiling, .customSongMissing, .customSongProtected:
+                "sound"
             }
         }
 
@@ -139,11 +150,17 @@ extension GymSessionCoordinator {
             case .windDownLockEnd: "wind-down: window ends"
             case .windDownHandoverToGym: "wind-down: handover to gym"
             case .windDownWhileSessionLive: "wind-down while session live"
+            case .ringerStart: "ringer: start"
+            case .ringerEscalated: "ringer: jump to full volume"
+            case .ringerStop: "ringer: stop"
+            case .ringerCeiling: "ringer: 10-minute ceiling"
+            case .customSongMissing: "custom song deleted (fallback rings)"
+            case .customSongProtected: "custom song protected (no asset)"
             }
         }
 
         static var sections: [String] {
-            ["doors", "locks", "flow", "screen time", "arrival", "health", "fallbacks"]
+            ["doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
         }
     }
 
@@ -419,6 +436,65 @@ extension GymSessionCoordinator {
                 detail: shield.owner == .gymSession && ownerBefore == .gymSession
                     ? "wind-down ignored the session's shield"
                     : "owner changed while session live: \(ownerBefore?.rawValue ?? "none") to \(shield.owner?.rawValue ?? "none")"
+            )
+
+        // MARK: Sound
+
+        case .ringerStart:
+            guard let store = debugStore else { return }
+            ringer.start(for: store.profile)
+
+        case .ringerEscalated:
+            if !ringer.isRinging { simulate(.ringerStart) }
+            ringer.escalateToFull()
+
+        case .ringerStop:
+            ringer.stop()
+
+        case .ringerCeiling:
+            // The real ceiling is ten minutes away, so this runs what the
+            // timer runs rather than waiting for it.
+            if !ringer.isRinging { simulate(.ringerStart) }
+            ringer.stop()
+            debugStore?.record(
+                .technicalRelease,
+                detail: "ringer ceiling reached after \(Int(AlarmRinger.maximumRingDuration / 60)) min"
+            )
+
+        case .customSongMissing:
+            // Deletes the exported clip and rings anyway: the fallback chain
+            // must produce a sound, never silence.
+            guard let store = debugStore else { return }
+            ringer.stop()
+            store.profile.alarmSound = .ownSong
+            if store.profile.customAlarmSoundFile == nil {
+                store.profile.customAlarmSoundFile = SongTrimService.clipFileName
+            }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await SongTrimService.deleteExportedClip()
+                self.ringer.start(for: store.profile)
+                store.record(
+                    .technicalRelease,
+                    detail: self.ringer.isPlayingFallback
+                        ? "custom song missing, fell back to \(self.ringer.playingSound?.label ?? "none")"
+                        : "custom song missing and nothing rang"
+                )
+            }
+
+        case .customSongProtected:
+            // What a DRM-protected Apple Music track looks like: a chosen
+            // song with no file behind it. The picker refuses these up front,
+            // and this proves the ringer survives one slipping through.
+            guard let store = debugStore else { return }
+            ringer.stop()
+            store.profile.alarmSound = .ownSong
+            store.profile.customAlarmSoundFile = nil
+            store.profile.ownSongFileName = nil
+            ringer.start(for: store.profile)
+            store.record(
+                .technicalRelease,
+                detail: "protected track: rang \(ringer.playingSound?.label ?? "nothing")"
             )
         }
     }
