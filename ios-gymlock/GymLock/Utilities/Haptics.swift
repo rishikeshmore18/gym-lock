@@ -47,6 +47,13 @@ enum Haptics {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
+    /// The hard little knock of a control hitting its limit. Played once, the
+    /// moment the finger first pushes past the clamp, never while it is held
+    /// there.
+    static func boundary() {
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.85)
+    }
+
     static func soft() {
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
     }

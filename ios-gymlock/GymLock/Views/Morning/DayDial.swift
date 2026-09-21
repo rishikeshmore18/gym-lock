@@ -5,9 +5,27 @@ import SwiftUI
 /// The maths behind the Day Dial, kept out of the view so every rule is
 /// testable without a screen or a running clock.
 ///
-/// The dial's convention matches `RhythmDial`: midnight at the top, the day
-/// running clockwise, values snapped to five minutes.
+/// Midnight at the top, the day running clockwise, values snapped to five
+/// minutes.
 enum DayDialModel {
+    /// What a touch in the gutter has taken hold of.
+    ///
+    /// Grabbing an icon moves that end. Grabbing the body of the sleep arc
+    /// slides the whole night, bedtime and wake together, which is how the
+    /// bar in Apple's Change Wake Up screen behaves.
+    enum Grab: Equatable {
+        case bedtime
+        case wake
+        case gym
+        case sleepBody
+    }
+
+    /// The shortest night the dial will let a user set. Below this the two
+    /// icons sit on top of each other and neither can be grabbed.
+    static let minimumSleepMinutes = 60
+    /// Gap kept between gym-by and the next bedtime so the arcs never lap.
+    static let minimumAwakeGapMinutes = 30
+
     /// Converts a touch point to a minute-of-day, snapped to five minutes.
     static func minutes(at point: CGPoint, centre: CGPoint) -> Int {
         let dx = point.x - centre.x
@@ -33,17 +51,77 @@ enum DayDialModel {
         Double(minutes) / 1440 * 360
     }
 
-    /// Screen offset for a handle sitting at `minutes` on a ring of `radius`,
-    /// with an optional extra rotation for rubber-band overshoot.
+    /// Screen offset for something sitting at `minutes` on a ring of
+    /// `radius`, with an optional extra rotation for rubber-band overshoot.
     static func offset(minutes: Int, radius: CGFloat, extraDegrees: Double = 0) -> CGSize {
         let angle = (angleDegrees(minutes: minutes) - 90 + extraDegrees) * .pi / 180
         return CGSize(width: radius * cos(angle), height: radius * sin(angle))
     }
 
+    /// Signed shortest distance around the dial from `a` to `b`, in minutes.
+    /// A finger that crosses midnight must read as a small step, not a jump
+    /// of a whole day.
+    static func wrappedDelta(from a: Int, to b: Int) -> Int {
+        var delta = (b - a) % 1440
+        if delta > 720 { delta -= 1440 }
+        if delta <= -720 { delta += 1440 }
+        return delta
+    }
+
+    /// Minutes clockwise from `a` to `b`, always 0..<1440.
+    static func clockwiseSpan(from a: Int, to b: Int) -> Int {
+        (b - a + 1440) % 1440
+    }
+
+    /// Decides what a touch in the gutter grabbed.
+    ///
+    /// Icons win when the finger is within `tolerance` minutes of one. Then
+    /// the body of the sleep arc, then the body of the gym arc. Anywhere else
+    /// on the ring is nothing, so a stray touch cannot move the night.
+    static func grab(
+        fingerMinutes finger: Int,
+        bedtime: Int,
+        wake: Int,
+        gymBy: Int,
+        tolerance: Int
+    ) -> Grab? {
+        let toBedtime = abs(wrappedDelta(from: bedtime, to: finger))
+        let toWake = abs(wrappedDelta(from: wake, to: finger))
+        let toGym = abs(wrappedDelta(from: gymBy, to: finger))
+
+        let nearest = min(toBedtime, toWake, toGym)
+        if nearest <= tolerance {
+            // On a short window wake and gym-by sit close; the gym icon is on
+            // top visually, so it wins ties.
+            if toGym == nearest { return .gym }
+            if toWake == nearest { return .wake }
+            return .bedtime
+        }
+
+        if clockwiseSpan(from: bedtime, to: finger) <= clockwiseSpan(from: bedtime, to: wake) {
+            return .sleepBody
+        }
+        if clockwiseSpan(from: wake, to: finger) <= clockwiseSpan(from: wake, to: gymBy) {
+            return .gym
+        }
+        return nil
+    }
+
+    /// The longest night allowed with this gym window: the gym-by mark must
+    /// still leave a gap before the next bedtime.
+    static func maximumSleepMinutes(windowMinutes: Int) -> Int {
+        1440 - windowMinutes - minimumAwakeGapMinutes
+    }
+
+    /// Clamps a night to what the dial can show.
+    static func clampedSleep(_ sleep: Int, windowMinutes: Int) -> Int {
+        min(max(sleep, minimumSleepMinutes), maximumSleepMinutes(windowMinutes: windowMinutes))
+    }
+
     /// Travel minutes implied by a dragged gym-by position.
     ///
     /// The handle can ask for any window on the circle; this is where it is
-    /// clamped to the product range. It never touches wake time — the caller
+    /// clamped to the product range. It never touches wake time. The caller
     /// only ever receives a travel value.
     static func travelMinutes(desiredWindow: Int, getReadyMinutes: Int) -> Int {
         let requested = desiredWindow - getReadyMinutes
@@ -74,84 +152,100 @@ enum DayDialModel {
         let circumference = 2 * .pi * Double(radius)
         return Int((along / circumference * 1440 * damping).rounded())
     }
+
+    /// "7 hr 15 min", the way Apple's sleep schedule reads it.
+    static func durationText(minutes: Int) -> String {
+        let hours = minutes / 60
+        let rest = minutes % 60
+        if hours == 0 { return "\(rest) min" }
+        if rest == 0 { return "\(hours) hr" }
+        return "\(hours) hr \(rest) min"
+    }
 }
 
 // MARK: - The dial
 
-/// The Day Dial: the 24-hour ring from `RhythmDial`, extended with a second,
-/// inner arc for the gym window and a third handle for gym-by.
+/// The Day Dial, after Apple's Change Wake Up screen.
 ///
-/// The outer arc is sleep, bedtime to wake time, drawn in ink. The inner arc
-/// is the gym window, wake time to gym-by, and it is the one coral accent on
-/// the screen. Dragging the moon or sun moves the sleep window; dragging the
-/// dumbbell changes travel minutes and never touches wake time.
+/// One wide gutter around a bare 24-hour face. Two bars live inside that
+/// gutter and share it: the night in ink, bedtime to wake, and the gym
+/// window in coral, wake to gym-by. The icons are the ends of the bars, not
+/// separate handles floating on top. Drag an icon to move that end, drag the
+/// body of the night to slide the whole night.
 ///
-/// Gestures follow `docs/UI-RULES.md` §6: 1:1 tracking, a drag-start handle
-/// lock so the finger cannot jump between handles mid-gesture, rubber-banding
-/// at the travel limits, and velocity handed off on release.
+/// Gestures follow `docs/UI-RULES.md` §6: 1:1 tracking with the grab offset
+/// preserved, one grab per gesture, rubber-banding at the travel limits, and
+/// velocity handed off on release.
 struct DayDial: View {
     @Binding var bedtime: TimeOfDay
     @Binding var wakeTime: TimeOfDay
     @Binding var travelMinutes: Int
     let getReadyMinutes: Int
 
-    var size: CGFloat = 290
+    var size: CGFloat = 320
+
+    /// Reports what the finger is holding so the surrounding card can change
+    /// its readout while the drag is live.
+    var onGrabChange: ((DayDialModel.Grab?) -> Void)?
 
     /// Called when a gesture ends and momentum has been applied: the moment a
     /// rhythm change should be committed and checked against the night lock.
     var onSettle: (() -> Void)?
 
-    private enum Handle { case bedtime, wake, gym }
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Which handle the current drag owns, chosen once at drag start so the
-    /// finger cannot jump between them mid-gesture.
-    @State private var dragging: Handle?
+    @State private var grab: DayDialModel.Grab?
+    /// Where the finger and the values were when the grab began. Every frame
+    /// is applied as a delta from here, so the bar stays glued to the finger
+    /// at the point it was picked up.
+    @State private var grabFingerMinutes: Int = 0
+    @State private var grabBedtime: Int = 0
+    @State private var grabWake: Int = 0
+    @State private var grabTravel: Int = 0
     @State private var lastTickKey: Int = -1
-    /// Visual overshoot, in minutes of arc, while the gym handle is held past
-    /// its clamped value. Springs back to zero on release.
+    @State private var didKnock = false
+    /// Visual overshoot, in minutes of arc, while the gym end is held past
+    /// its clamp. Springs back to zero on release.
     @State private var gymOvershootMinutes: CGFloat = 0
 
     // MARK: Metrics
 
-    private var outerWidth: CGFloat { size * 0.105 }
-    private var outerRadius: CGFloat { (size - outerWidth) / 2 }
-    private var innerWidth: CGFloat { max(9, size * 0.036) }
-    /// Concentric, never overlapping: the inner band sits outside the outer
-    /// band with a gap wide enough for the hour labels.
-    private var innerRadius: CGFloat { outerRadius - outerWidth * 1.55 - innerWidth / 2 }
+    private var gutterWidth: CGFloat { size * 0.165 }
+    private var gutterRadius: CGFloat { (size - gutterWidth) / 2 }
+    private var barWidth: CGFloat { gutterWidth * 0.74 }
+    private var iconSize: CGFloat { barWidth * 0.52 }
+    private var faceRadius: CGFloat { gutterRadius - gutterWidth / 2 - size * 0.012 }
+
+    /// How close, in minutes of arc, a finger must be to an icon to grab it.
+    private var grabTolerance: Int {
+        let arc = barWidth * 0.85
+        return max(35, Int(arc / gutterRadius * 1440 / (2 * .pi)))
+    }
 
     // MARK: Derived
 
-    private var sleepMinutes: Int {
-        (wakeTime.minutesFromMidnight - bedtime.minutesFromMidnight + 1440) % 1440
-    }
-
+    private var bedtimeMinutes: Int { bedtime.minutesFromMidnight }
+    private var wakeMinutes: Int { wakeTime.minutesFromMidnight }
+    private var sleepMinutes: Int { DayDialModel.clockwiseSpan(from: bedtimeMinutes, to: wakeMinutes) }
     private var windowMinutes: Int { getReadyMinutes + travelMinutes }
-
-    private var gymByMinutes: Int {
-        (wakeTime.minutesFromMidnight + windowMinutes) % 1440
-    }
+    private var gymByMinutes: Int { (wakeMinutes + windowMinutes) % 1440 }
 
     private var settleAnimation: Animation {
         reduceMotion
             ? .easeOut(duration: 0.18)
-            : .spring(response: 0.30, dampingFraction: 0.86)
+            : .spring(response: 0.32, dampingFraction: 0.86)
     }
 
     var body: some View {
         ZStack {
-            outerTrack
-            sleepArc
-            innerTrack
-            gymArc
-            tickMarks
-            hourLabels
-            handle(.bedtime)
-            handle(.wake)
-            handle(.gym)
-            centreReadout
+            gutter
+            face
+            sleepBar
+            gymBar
+            hatching
+            barIcon(.bedtime)
+            barIcon(.gym)
+            barIcon(.wake)
         }
         .frame(width: size, height: size)
         .contentShape(.circle)
@@ -162,226 +256,194 @@ struct DayDial: View {
 
     // MARK: - Layers
 
-    private var outerTrack: some View {
+    private var gutter: some View {
         Circle()
-            .strokeBorder(Theme.surfaceMuted, lineWidth: outerWidth)
-            .frame(width: outerRadius * 2 + outerWidth, height: outerRadius * 2 + outerWidth)
-            .overlay {
-                Circle()
-                    .strokeBorder(Theme.border.opacity(0.7), lineWidth: 1)
-            }
-            .overlay {
-                Circle()
-                    .inset(by: outerWidth)
-                    .strokeBorder(Theme.border.opacity(0.5), lineWidth: 1)
-            }
+            .strokeBorder(Theme.surfaceMuted, lineWidth: gutterWidth)
+            .frame(width: size, height: size)
     }
 
-    /// The sleep window, bedtime to wake time, in ink at low opacity.
-    ///
-    /// Deliberately not coral: the gym window owns the accent, and two coral
-    /// arcs would blur which fact the screen is for.
-    private var sleepArc: some View {
-        let start = Double(bedtime.minutesFromMidnight) / 1440
-        let span = Double(sleepMinutes) / 1440
-
-        return Circle()
-            .trim(from: 0, to: max(span, 0.001))
-            .stroke(
-                Theme.ink.opacity(0.16),
-                style: StrokeStyle(lineWidth: outerWidth, lineCap: .round)
-            )
-            .frame(width: outerRadius * 2 + outerWidth, height: outerRadius * 2 + outerWidth)
-            .rotationEffect(.degrees(start * 360 - 90))
-    }
-
-    private var innerTrack: some View {
-        Circle()
-            .strokeBorder(Theme.surfaceMuted.opacity(0.55), lineWidth: innerWidth)
-            .frame(width: innerRadius * 2 + innerWidth, height: innerRadius * 2 + innerWidth)
-            .overlay {
-                Circle()
-                    .strokeBorder(Theme.border.opacity(0.4), lineWidth: 1)
-            }
-    }
-
-    /// The gym window, wake time to gym-by. The one coral accent on the screen,
-    /// and the right one: this window is what the app is for.
-    private var gymArc: some View {
-        let start = Double(wakeTime.minutesFromMidnight) / 1440
-        let span = Double(windowMinutes) / 1440
-
-        return Circle()
-            .trim(from: 0, to: max(span, 0.001))
-            .stroke(
-                Theme.accent,
-                style: StrokeStyle(lineWidth: innerWidth, lineCap: .round)
-            )
-            .frame(width: innerRadius * 2 + innerWidth, height: innerRadius * 2 + innerWidth)
-            .rotationEffect(.degrees(start * 360 - 90))
-            .shadow(color: Theme.accent.opacity(0.22), radius: 8)
-    }
-
-    /// Hour ticks on the outer band, quarter-day marks drawn longer.
-    private var tickMarks: some View {
+    /// The bare clock face: hour numbers, quarter-hour ticks, the moon under
+    /// midnight and the sun above noon. Nothing here is interactive.
+    private var face: some View {
         ZStack {
-            ForEach(0..<24, id: \.self) { hour in
-                let isMajor = hour % 6 == 0
+            Circle()
+                .fill(Theme.surface)
+                .frame(width: faceRadius * 2, height: faceRadius * 2)
+                .overlay {
+                    Circle().strokeBorder(Theme.border, lineWidth: 1)
+                }
 
-                Capsule()
-                    .fill(isMajor ? Theme.inkTertiary : Theme.border)
-                    .frame(width: isMajor ? 2 : 1, height: isMajor ? 10 : 6)
-                    .offset(y: -(outerRadius - outerWidth * 0.95))
-                    .rotationEffect(.degrees(Double(hour) / 24 * 360))
+            Canvas { context, canvasSize in
+                let centre = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+                let outer = faceRadius - size * 0.02
+
+                for tick in 0..<96 {
+                    let isHour = tick % 4 == 0
+                    let length: CGFloat = isHour ? size * 0.024 : size * 0.012
+                    let angle = (Double(tick) / 96 * 360 - 90) * .pi / 180
+                    var path = Path()
+                    path.move(to: CGPoint(
+                        x: centre.x + (outer - length) * cos(angle),
+                        y: centre.y + (outer - length) * sin(angle)
+                    ))
+                    path.addLine(to: CGPoint(
+                        x: centre.x + outer * cos(angle),
+                        y: centre.y + outer * sin(angle)
+                    ))
+                    context.stroke(
+                        path,
+                        with: .color(isHour ? Theme.inkTertiary.opacity(0.9) : Theme.border),
+                        style: StrokeStyle(lineWidth: isHour ? 1.5 : 1, lineCap: .round)
+                    )
+                }
             }
+            .frame(width: faceRadius * 2, height: faceRadius * 2)
+
+            hourNumbers
+
+            Image(systemName: "moon.fill")
+                .font(.system(size: size * 0.05, weight: .bold))
+                .foregroundStyle(Theme.night)
+                .offset(y: -faceRadius * 0.52)
+
+            Image(systemName: "sun.max.fill")
+                .font(.system(size: size * 0.055, weight: .bold))
+                .foregroundStyle(Theme.accentWarm)
+                .offset(y: faceRadius * 0.52)
         }
+        .allowsHitTesting(false)
     }
 
-    /// Hour labels sitting in the gap between the two bands, positioned by
-    /// polar offset so every label stays upright.
-    private var hourLabels: some View {
-        let radius = (outerRadius - outerWidth / 2 + innerRadius + innerWidth / 2) / 2
+    private var hourNumbers: some View {
+        let radius = faceRadius * 0.80
 
         return ZStack {
-            ForEach([0, 6, 12, 18], id: \.self) { hour in
+            ForEach(Array(stride(from: 0, to: 24, by: 2)), id: \.self) { hour in
                 let angle = (Double(hour) / 24 * 360 - 90) * .pi / 180
+                let isMajor = hour % 6 == 0
 
-                Text(hourLabel(hour))
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.inkTertiary)
+                Text("\(hour)")
+                    .font(.system(size: isMajor ? size * 0.056 : size * 0.05, weight: isMajor ? .bold : .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(isMajor ? Theme.ink : Theme.inkTertiary)
                     .offset(x: radius * cos(angle), y: radius * sin(angle))
             }
         }
     }
 
-    private func hourLabel(_ hour: Int) -> String {
-        switch hour {
-        case 0: "12a"
-        case 6: "6a"
-        case 12: "12p"
-        default: "6p"
+    /// The night, bedtime to wake, in ink. Round-capped so it reads as a bar
+    /// lying in the gutter rather than a slice of ring.
+    private var sleepBar: some View {
+        bar(startMinutes: bedtimeMinutes, spanMinutes: Double(sleepMinutes), colour: Theme.ink)
+    }
+
+    /// The gym window, wake to gym-by. The one coral element on the screen,
+    /// and the right one: this window is what the app is for.
+    private var gymBar: some View {
+        let extra = Double(DayDialModel.rubberband(gymOvershootMinutes * 0.25, dimension: size))
+        return bar(
+            startMinutes: wakeMinutes,
+            spanMinutes: Double(windowMinutes) + extra,
+            colour: Theme.accent
+        )
+    }
+
+    private func bar(startMinutes: Int, spanMinutes: Double, colour: Color) -> some View {
+        Circle()
+            .trim(from: 0, to: max(spanMinutes / 1440, 0.0005))
+            .stroke(colour, style: StrokeStyle(lineWidth: barWidth, lineCap: .round))
+            .frame(width: gutterRadius * 2, height: gutterRadius * 2)
+            .rotationEffect(.degrees(DayDialModel.angleDegrees(minutes: startMinutes) - 90))
+    }
+
+    /// The fine radial lines along both bars, as on Apple's dial. Drawn in one
+    /// canvas so a drag never rebuilds a hundred views a frame.
+    private var hatching: some View {
+        Canvas { context, canvasSize in
+            let centre = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+            let length = barWidth * 0.42
+            let clearance = grabTolerance * 3 / 4
+
+            func hatch(from start: Int, span: Int, colour: Color) {
+                var minute = 8
+                while minute < span - clearance {
+                    if minute > clearance {
+                        let angle = (DayDialModel.angleDegrees(minutes: start + minute) - 90) * .pi / 180
+                        var path = Path()
+                        path.move(to: CGPoint(
+                            x: centre.x + (gutterRadius - length / 2) * cos(angle),
+                            y: centre.y + (gutterRadius - length / 2) * sin(angle)
+                        ))
+                        path.addLine(to: CGPoint(
+                            x: centre.x + (gutterRadius + length / 2) * cos(angle),
+                            y: centre.y + (gutterRadius + length / 2) * sin(angle)
+                        ))
+                        context.stroke(path, with: .color(colour), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    }
+                    minute += 8
+                }
+            }
+
+            hatch(from: bedtimeMinutes, span: sleepMinutes, colour: Theme.surface.opacity(0.28))
+            hatch(from: wakeMinutes, span: windowMinutes, colour: Theme.surface.opacity(0.42))
+        }
+        .frame(width: size, height: size)
+        .allowsHitTesting(false)
+    }
+
+    // MARK: - Icons
+
+    /// The icon at the end of a bar. It is the end of the bar, not a handle
+    /// floating above it, so it is drawn in the bar's own light-on-dark.
+    private struct IconSpec {
+        let minutes: Int
+        let symbol: String
+        let label: String
+        let extraDegrees: Double
+    }
+
+    private func iconSpec(_ which: DayDialModel.Grab) -> IconSpec {
+        switch which {
+        case .bedtime:
+            IconSpec(minutes: bedtimeMinutes, symbol: "bed.double.fill", label: "Bedtime", extraDegrees: 0)
+        case .wake, .sleepBody:
+            IconSpec(minutes: wakeMinutes, symbol: "alarm.fill", label: "Wake up", extraDegrees: 0)
+        case .gym:
+            IconSpec(
+                minutes: gymByMinutes,
+                symbol: "figure.strengthtraining.traditional",
+                label: "Gym by",
+                extraDegrees: Double(DayDialModel.rubberband(gymOvershootMinutes * 0.25, dimension: size))
+            )
         }
     }
 
-    // MARK: - Handles
+    private func barIcon(_ which: DayDialModel.Grab) -> some View {
+        let isHeld = grab == which || (which == .bedtime && grab == .sleepBody) || (which == .wake && grab == .sleepBody)
+        let spec = iconSpec(which)
+        let minutes = spec.minutes
+        let symbol = spec.symbol
+        let label = spec.label
+        let extraDegrees = spec.extraDegrees
 
-    @ViewBuilder
-    private func handle(_ which: Handle) -> some View {
-        let isDragging = dragging == which
-
-        switch which {
-        case .bedtime, .wake:
-            let minutes = which == .bedtime ? bedtime.minutesFromMidnight : wakeTime.minutesFromMidnight
-            let offset = DayDialModel.offset(minutes: minutes, radius: outerRadius)
-
-            ZStack {
-                Circle()
-                    .fill(Theme.surface)
-                    .frame(width: outerWidth * 1.55, height: outerWidth * 1.55)
-                    .shadow(color: .black.opacity(0.16), radius: isDragging ? 10 : 5, y: 2)
-
-                Image(systemName: which == .bedtime ? "moon.fill" : "sun.max.fill")
-                    .font(.system(size: outerWidth * 0.62, weight: .bold))
-                    .foregroundStyle(which == .bedtime ? Theme.night : Theme.accentWarm)
-            }
-            .scaleEffect(isDragging && !reduceMotion ? 1.12 : 1)
-            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isDragging)
-            .offset(offset)
+        return Image(systemName: symbol)
+            .font(.system(size: iconSize, weight: .bold))
+            .foregroundStyle(Theme.surface)
+            .frame(width: barWidth, height: barWidth)
+            .contentShape(.circle)
+            .scaleEffect(isHeld && !reduceMotion ? 1.18 : 1)
+            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isHeld)
+            .offset(DayDialModel.offset(minutes: minutes, radius: gutterRadius, extraDegrees: extraDegrees))
             .accessibilityElement()
-            .accessibilityLabel(which == .bedtime ? "Bedtime" : "Wake time")
+            .accessibilityLabel(label)
             .accessibilityValue(time(at: minutes).displayString)
             .accessibilityAdjustableAction { direction in
                 adjust(which, byMinutes: direction == .increment ? 5 : -5)
             }
-
-        case .gym:
-            // Rubber-banded overshoot is visual only: the value stays clamped.
-            let extraDegrees = Double(
-                DayDialModel.rubberband(gymOvershootMinutes * 0.25, dimension: size)
-            )
-            let offset = DayDialModel.offset(
-                minutes: gymByMinutes,
-                radius: innerRadius,
-                extraDegrees: extraDegrees
-            )
-
-            ZStack {
-                Circle()
-                    .fill(Theme.surface)
-                    .frame(width: innerWidth * 2.6, height: innerWidth * 2.6)
-                    .shadow(color: .black.opacity(0.16), radius: isDragging ? 9 : 4, y: 2)
-
-                Image(systemName: "figure.strengthtraining.traditional")
-                    .font(.system(size: innerWidth * 1.15, weight: .bold))
-                    .foregroundStyle(Theme.accent)
-            }
-            .scaleEffect(isDragging && !reduceMotion ? 1.12 : 1)
-            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isDragging)
-            .offset(offset)
-            .accessibilityElement()
-            .accessibilityLabel("Gym by")
-            .accessibilityValue(time(at: gymByMinutes).displayString)
-            .accessibilityAdjustableAction { direction in
-                adjust(.gym, byMinutes: direction == .increment ? 5 : -5)
-            }
-        }
     }
 
     private func time(at minutes: Int) -> TimeOfDay {
-        TimeOfDay(hour: minutes / 60, minute: minutes % 60)
-    }
-
-    // MARK: - Centre readout
-
-    @ViewBuilder
-    private var centreReadout: some View {
-        VStack(spacing: 10) {
-            if dragging == .gym {
-                metric(value: "\(windowMinutes)", unit: "min", caption: "to the gym", tint: Theme.accent, isLarge: true)
-            } else if dragging == .bedtime || dragging == .wake {
-                metric(value: sleepText, unit: "", caption: "sleep", tint: Theme.ink, isLarge: true)
-            } else {
-                metric(value: sleepText, unit: "", caption: "sleep", tint: Theme.ink, isLarge: false)
-                metric(value: "\(windowMinutes)", unit: "min", caption: "to the gym", tint: Theme.accent, isLarge: false)
-            }
-        }
-        .frame(width: size * 0.52)
-        .animation(settleAnimation, value: dragging)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var sleepText: String {
-        "\(sleepMinutes / 60)h \(sleepMinutes % 60)m"
-    }
-
-    private func metric(
-        value: String,
-        unit: String,
-        caption: String,
-        tint: Color,
-        isLarge: Bool
-    ) -> some View {
-        VStack(spacing: 1) {
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: isLarge ? 44 : 24, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(tint)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-
-                if !unit.isEmpty {
-                    Text(unit)
-                        .font(.system(size: isLarge ? 16 : 12, weight: .semibold))
-                        .foregroundStyle(Theme.inkSecondary)
-                }
-            }
-            .contentTransition(.numericText())
-
-            Text(caption)
-                .font(.system(size: isLarge ? 13 : 11, weight: .semibold))
-                .foregroundStyle(Theme.inkTertiary)
-        }
+        TimeOfDay(hour: (minutes % 1440) / 60, minute: minutes % 60)
     }
 
     // MARK: - Gesture
@@ -391,78 +453,108 @@ struct DayDial: View {
             .onChanged { value in
                 let centre = CGPoint(x: size / 2, y: size / 2)
 
-                if dragging == nil {
-                    dragging = handle(at: value.location, centre: centre)
+                if grab == nil {
+                    guard let picked = grab(at: value.startLocation, centre: centre) else { return }
+                    grab = picked
+                    grabFingerMinutes = DayDialModel.minutes(at: value.startLocation, centre: centre)
+                    grabBedtime = bedtimeMinutes
+                    grabWake = wakeMinutes
+                    grabTravel = travelMinutes
+                    didKnock = false
                     Haptics.prepareSelection()
+                    Haptics.press(intensity: 0.7)
+                    onGrabChange?(picked)
                 }
 
-                guard let dragging else { return }
-                let minutes = DayDialModel.minutes(at: value.location, centre: centre)
-                apply(dragging, fingerMinutes: minutes)
+                guard let grab else { return }
+                let finger = DayDialModel.minutes(at: value.location, centre: centre)
+                apply(grab, delta: DayDialModel.wrappedDelta(from: grabFingerMinutes, to: finger))
             }
             .onEnded { value in
                 settle(with: value)
             }
     }
 
-    /// Which handle a touch belongs to.
-    ///
-    /// The gym handle lives on the inner band, so a touch near that radius
-    /// always means the gym handle. That keeps a finger from stealing the sun
-    /// when the window is short and the two handles sit close together.
-    private func handle(at point: CGPoint, centre: CGPoint) -> Handle {
+    /// Only the gutter is live. The face is a clock, not a control.
+    private func grab(at point: CGPoint, centre: CGPoint) -> DayDialModel.Grab? {
         let dx = point.x - centre.x
         let dy = point.y - centre.y
         let distance = sqrt(dx * dx + dy * dy)
+        guard abs(distance - gutterRadius) <= gutterWidth / 2 + 12 else { return nil }
 
-        if abs(distance - innerRadius) <= size * 0.09 { return .gym }
-
-        let minutes = DayDialModel.minutes(at: point, centre: centre)
-
-        func angularDistance(_ time: TimeOfDay) -> Int {
-            let delta = abs(time.minutesFromMidnight - minutes)
-            return min(delta, 1440 - delta)
-        }
-
-        return angularDistance(bedtime) <= angularDistance(wakeTime) ? .bedtime : .wake
+        return DayDialModel.grab(
+            fingerMinutes: DayDialModel.minutes(at: point, centre: centre),
+            bedtime: bedtimeMinutes,
+            wake: wakeMinutes,
+            gymBy: gymByMinutes,
+            tolerance: grabTolerance
+        )
     }
 
-    private func apply(_ handle: Handle, fingerMinutes: Int) {
-        let finger = time(at: fingerMinutes)
+    private func apply(_ grab: DayDialModel.Grab, delta: Int) {
+        var hitLimit = false
 
-        switch handle {
+        switch grab {
         case .bedtime:
-            guard bedtime != finger else { return }
-            bedtime = finger
+            let desired = grabBedtime + delta
+            let sleep = DayDialModel.clockwiseSpan(from: desired, to: grabWake)
+            let clamped = DayDialModel.clampedSleep(sleep, windowMinutes: windowMinutes)
+            hitLimit = clamped != sleep
+            let newBedtime = (grabWake - clamped + 1440) % 1440
+            if newBedtime != bedtimeMinutes { bedtime = time(at: newBedtime) }
+
         case .wake:
-            guard wakeTime != finger else { return }
-            wakeTime = finger
+            let desired = grabWake + delta
+            let sleep = DayDialModel.clockwiseSpan(from: grabBedtime, to: desired)
+            let clamped = DayDialModel.clampedSleep(sleep, windowMinutes: windowMinutes)
+            hitLimit = clamped != sleep
+            let newWake = (grabBedtime + clamped) % 1440
+            if newWake != wakeMinutes { wakeTime = time(at: newWake) }
+
+        case .sleepBody:
+            let newBedtime = (grabBedtime + delta + 1440) % 1440
+            let newWake = (grabWake + delta + 1440) % 1440
+            if newBedtime != bedtimeMinutes { bedtime = time(at: newBedtime) }
+            if newWake != wakeMinutes { wakeTime = time(at: newWake) }
+
         case .gym:
-            let desired = wakeTime.minutes(until: finger)
+            let desiredWindow = getReadyMinutes + grabTravel + delta
             let travel = DayDialModel.travelMinutes(
-                desiredWindow: desired,
+                desiredWindow: desiredWindow,
                 getReadyMinutes: getReadyMinutes
             )
-            guard travel != travelMinutes || gymOvershootMinutes != 0 else { return }
-            travelMinutes = travel
+            hitLimit = travel + getReadyMinutes != desiredWindow
+            if travel != travelMinutes { travelMinutes = travel }
             // What the finger asked for beyond the clamp, shown as a small
             // visual overshoot rather than a hard stop.
-            gymOvershootMinutes = CGFloat(desired - windowMinutes)
+            gymOvershootMinutes = CGFloat(desiredWindow - windowMinutes)
         }
 
-        // One tick per five-minute step of *value*, never per frame: a finger
-        // pinned against the clamp spins without changing anything and must
-        // not buzz.
-        if valueKey(for: handle) != lastTickKey {
-            lastTickKey = valueKey(for: handle)
+        // One tick per five-minute step of value, never per frame: a finger
+        // pinned against a limit spins without changing anything and must not
+        // buzz.
+        let key = valueKey(for: grab)
+        if key != lastTickKey {
+            lastTickKey = key
             Haptics.selection()
+        }
+
+        // One knock the moment the limit is first reached, then silence until
+        // the finger comes back inside and pushes again.
+        if hitLimit {
+            if !didKnock {
+                didKnock = true
+                Haptics.boundary()
+            }
+        } else {
+            didKnock = false
         }
     }
 
-    private func valueKey(for handle: Handle) -> Int {
-        switch handle {
-        case .bedtime: bedtime.minutesFromMidnight
-        case .wake: wakeTime.minutesFromMidnight
+    private func valueKey(for grab: DayDialModel.Grab) -> Int {
+        switch grab {
+        case .bedtime: bedtimeMinutes
+        case .wake, .sleepBody: wakeMinutes
         case .gym: windowMinutes
         }
     }
@@ -470,28 +562,24 @@ struct DayDial: View {
     /// Hands the flick's velocity off: project where the gesture was heading,
     /// snap the projection to the five-minute grid, and let the spring settle.
     private func settle(with value: DragGesture.Value) {
-        guard let handle = dragging else { return }
-        dragging = nil
+        guard let held = grab else { return }
+        grab = nil
         lastTickKey = -1
+        didKnock = false
+        onGrabChange?(nil)
+        Haptics.tap(intensity: 0.6)
 
         let angle: Double
-        let radius: CGFloat
-        switch handle {
-        case .bedtime:
-            angle = DayDialModel.angleDegrees(minutes: bedtime.minutesFromMidnight)
-            radius = outerRadius
-        case .wake:
-            angle = DayDialModel.angleDegrees(minutes: wakeTime.minutesFromMidnight)
-            radius = outerRadius
-        case .gym:
-            angle = DayDialModel.angleDegrees(minutes: gymByMinutes)
-            radius = innerRadius
+        switch held {
+        case .bedtime: angle = DayDialModel.angleDegrees(minutes: bedtimeMinutes)
+        case .wake, .sleepBody: angle = DayDialModel.angleDegrees(minutes: wakeMinutes)
+        case .gym: angle = DayDialModel.angleDegrees(minutes: gymByMinutes)
         }
 
         let projected = DayDialModel.projectedMinutes(
             translation: value.predictedEndTranslation,
             handleAngleDegrees: angle,
-            radius: radius
+            radius: gutterRadius
         )
 
         withAnimation(settleAnimation) {
@@ -499,15 +587,19 @@ struct DayDial: View {
 
             if abs(projected) >= 5 {
                 let delta = DayDialModel.snappedToTick(projected)
-                switch handle {
+                switch held {
                 case .bedtime:
-                    bedtime = bedtime.offset(byMinutes: delta)
+                    let sleep = DayDialModel.clampedSleep(sleepMinutes - delta, windowMinutes: windowMinutes)
+                    bedtime = time(at: (wakeMinutes - sleep + 1440) % 1440)
                 case .wake:
+                    let sleep = DayDialModel.clampedSleep(sleepMinutes + delta, windowMinutes: windowMinutes)
+                    wakeTime = time(at: (bedtimeMinutes + sleep) % 1440)
+                case .sleepBody:
+                    bedtime = bedtime.offset(byMinutes: delta)
                     wakeTime = wakeTime.offset(byMinutes: delta)
                 case .gym:
-                    let desired = windowMinutes + delta
                     travelMinutes = DayDialModel.travelMinutes(
-                        desiredWindow: desired,
+                        desiredWindow: windowMinutes + delta,
                         getReadyMinutes: getReadyMinutes
                     )
                 }
@@ -518,13 +610,15 @@ struct DayDial: View {
     }
 
     /// VoiceOver: every value is reachable without a drag.
-    private func adjust(_ handle: Handle, byMinutes delta: Int) {
+    private func adjust(_ which: DayDialModel.Grab, byMinutes delta: Int) {
         withAnimation(settleAnimation) {
-            switch handle {
+            switch which {
             case .bedtime:
-                bedtime = bedtime.offset(byMinutes: delta)
-            case .wake:
-                wakeTime = wakeTime.offset(byMinutes: delta)
+                let sleep = DayDialModel.clampedSleep(sleepMinutes - delta, windowMinutes: windowMinutes)
+                bedtime = time(at: (wakeMinutes - sleep + 1440) % 1440)
+            case .wake, .sleepBody:
+                let sleep = DayDialModel.clampedSleep(sleepMinutes + delta, windowMinutes: windowMinutes)
+                wakeTime = time(at: (bedtimeMinutes + sleep) % 1440)
             case .gym:
                 let requested = travelMinutes + delta
                 travelMinutes = min(
@@ -534,5 +628,6 @@ struct DayDial: View {
             }
         }
         Haptics.selection()
+        onSettle?()
     }
 }

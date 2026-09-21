@@ -94,6 +94,50 @@ struct DayDialTests {
         #expect(large < 400)
     }
 
+    // MARK: - Grabbing
+
+    /// A finger near an icon takes that icon, in the gutter between them it
+    /// takes the bar, and past the gym mark it takes nothing.
+    @Test func aTouchGrabsWhatIsUnderIt() {
+        let bedtime = 23 * 60, wake = 6 * 60 + 30, gym = 7 * 60 + 15
+
+        #expect(DayDialModel.grab(fingerMinutes: bedtime + 10, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == .bedtime)
+        #expect(DayDialModel.grab(fingerMinutes: wake - 10, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == .wake)
+        #expect(DayDialModel.grab(fingerMinutes: gym + 5, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == .gym)
+        #expect(DayDialModel.grab(fingerMinutes: 2 * 60, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == .sleepBody)
+        #expect(DayDialModel.grab(fingerMinutes: 14 * 60, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == nil)
+    }
+
+    /// On a short gym window wake and gym-by sit close; the gym icon is drawn
+    /// on top, so it must win the tie or it can never be picked up.
+    @Test func theGymIconWinsATieWithWake() {
+        let wake = 6 * 60 + 30, gym = wake + 20
+        #expect(DayDialModel.grab(fingerMinutes: wake + 10, bedtime: 23 * 60, wake: wake, gymBy: gym, tolerance: 35) == .gym)
+    }
+
+    /// A finger crossing midnight is a small step, not a jump of a day.
+    @Test func deltasWrapThroughMidnight() {
+        #expect(DayDialModel.wrappedDelta(from: 1435, to: 5) == 10)
+        #expect(DayDialModel.wrappedDelta(from: 5, to: 1435) == -10)
+        #expect(DayDialModel.wrappedDelta(from: 0, to: 720) == 720)
+    }
+
+    /// The two bars share one gutter, so the night can never be dragged over
+    /// the gym window, and never shorter than the icons need.
+    @Test func sleepIsClampedSoTheBarsNeverLap() {
+        #expect(DayDialModel.clampedSleep(20, windowMinutes: 45) == DayDialModel.minimumSleepMinutes)
+        let longest = DayDialModel.maximumSleepMinutes(windowMinutes: 45)
+        #expect(DayDialModel.clampedSleep(1400, windowMinutes: 45) == longest)
+        #expect(longest + 45 + DayDialModel.minimumAwakeGapMinutes == 1440)
+        #expect(DayDialModel.clampedSleep(450, windowMinutes: 45) == 450)
+    }
+
+    @Test func durationsReadLikeApplesSleepSchedule() {
+        #expect(DayDialModel.durationText(minutes: 495) == "8 hr 15 min")
+        #expect(DayDialModel.durationText(minutes: 480) == "8 hr")
+        #expect(DayDialModel.durationText(minutes: 45) == "45 min")
+    }
+
     // MARK: - Momentum projection
 
     @Test func aFlickClockwiseProjectsForward() {

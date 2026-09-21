@@ -24,6 +24,9 @@ struct AlarmSettingsView: View {
     @State private var isPickingSound = false
     @State private var isEditingWindDown = false
     @State private var alarmAuth: AlarmAuthorization = .notDetermined
+    /// What the finger is holding on the dial, so the header and the line
+    /// under the dial can speak to that while the drag is live.
+    @State private var dialGrab: DayDialModel.Grab?
 
     #if DEBUG
     @State private var isShowingSimulator = false
@@ -117,28 +120,141 @@ struct AlarmSettingsView: View {
 
     // MARK: - Dial
 
+    /// The dial card, after Apple's Change Wake Up screen: the two times on
+    /// top, the dial filling the card, one sentence about the result below.
+    /// The card takes most of the screen because the dial is the screen.
     private var dialCard: some View {
-        VStack(spacing: 12) {
-            DayDial(
-                bedtime: bedtimeBinding,
-                wakeTime: wakeBinding,
-                travelMinutes: travelBinding,
-                getReadyMinutes: rhythm.getReadyMinutes,
-                onSettle: commitRhythmAfterDial
-            )
+        VStack(spacing: 0) {
+            dialHeader
+                .padding(.horizontal, 18)
+                .padding(.top, 22)
 
-            if let line = guardrailLine {
-                Text(line)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.inkSecondary)
-                    .multilineTextAlignment(.center)
-                    .transition(.opacity)
+            GeometryReader { geometry in
+                DayDial(
+                    bedtime: bedtimeBinding,
+                    wakeTime: wakeBinding,
+                    travelMinutes: travelBinding,
+                    getReadyMinutes: rhythm.getReadyMinutes,
+                    size: geometry.size.width,
+                    onGrabChange: { grab in
+                        withAnimation(Theme.stateChange) { dialGrab = grab }
+                    },
+                    onSettle: commitRhythmAfterDial
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
+            .aspectRatio(1, contentMode: .fit)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 20)
+
+            dialFooter
+                .padding(.horizontal, 18)
+                .padding(.bottom, 24)
         }
-        .padding(16)
         .frame(maxWidth: .infinity)
         .warmCard(radius: Theme.cardRadius)
-        .animation(Theme.stateChange, value: guardrailLine)
+    }
+
+    /// Bedtime on the left, wake up on the right, exactly as Apple lays it
+    /// out. The one being dragged lifts to full ink so the eye knows which
+    /// number is moving.
+    private var dialHeader: some View {
+        HStack(alignment: .top) {
+            headerTime(
+                icon: "bed.double.fill",
+                label: "bedtime",
+                time: rhythm.bedtime,
+                note: "tonight",
+                isLive: dialGrab == .bedtime || dialGrab == .sleepBody
+            )
+            Spacer()
+            headerTime(
+                icon: "alarm.fill",
+                label: "wake up",
+                time: rhythm.wakeTime,
+                note: "tomorrow",
+                isLive: dialGrab == .wake || dialGrab == .sleepBody,
+                alignment: .trailing
+            )
+        }
+    }
+
+    private func headerTime(
+        icon: String,
+        label: String,
+        time: TimeOfDay,
+        note: String,
+        isLive: Bool,
+        alignment: HorizontalAlignment = .leading
+    ) -> some View {
+        VStack(alignment: alignment, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .bold))
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(Theme.inkSecondary)
+
+            Text(time.displayString)
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Theme.ink)
+                .contentTransition(.numericText())
+                .scaleEffect(isLive ? 1.06 : 1, anchor: alignment == .leading ? .leading : .trailing)
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isLive)
+                .animation(.spring(response: 0.3, dampingFraction: 1), value: time)
+
+            Text(note)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.inkTertiary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The result, in one line, changing with the finger. Holding the gym end
+    /// talks about the gym; anything else talks about the night.
+    private var dialFooter: some View {
+        VStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(footerHeadline)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(dialGrab == .gym ? Theme.accent : Theme.ink)
+                    .contentTransition(.numericText())
+            }
+            .animation(.spring(response: 0.3, dampingFraction: 1), value: footerHeadline)
+
+            Text(footerLine)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.inkSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentTransition(.opacity)
+                .animation(Theme.stateChange, value: footerLine)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var footerHeadline: String {
+        if dialGrab == .gym {
+            return "\(rhythm.windowMinutes) min to the gym"
+        }
+        return "\(DayDialModel.durationText(minutes: rhythm.sleepMinutes)) of sleep"
+    }
+
+    /// Guardrails live inline, never in an alert. Otherwise the line says
+    /// what the schedule actually does.
+    private var footerLine: String {
+        if let guardrail = guardrailLine { return guardrail }
+        if dialGrab == .gym {
+            return "gym by \(rhythm.wakeTime.offset(byMinutes: rhythm.windowMinutes).displayString). apps lock when the alarm rings."
+        }
+        let sleep = rhythm.sleepMinutes
+        if sleep < 6 * 60 { return "that's a short night. the alarm won't care." }
+        if sleep >= 7 * 60 { return "this schedule gives you a full night." }
+        return "a bit under seven hours. workable."
     }
 
     /// Guardrails live inline, never in an alert. The absolute ceiling cannot
