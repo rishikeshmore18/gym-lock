@@ -9,6 +9,7 @@ import SwiftUI
 /// `RhythmChangeProposer` exists to protect.
 struct WindDownEditorSheet: View {
     @Environment(AppStore.self) private var store
+    @Environment(GymSessionCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
 
     @State private var followsRhythm = true
@@ -113,16 +114,17 @@ struct WindDownEditorSheet: View {
         }
     }
 
-    /// Copy matches what the build actually does. Locking without the app
-    /// running needs background machinery that does not exist yet; when it
-    /// lands, this line becomes a promise.
+    /// Copy matches what the build actually does. The lock engages when
+    /// GymLock next runs inside the window, so the heads-up notification is
+    /// what makes that next run happen. When a `DeviceActivityMonitor`
+    /// extension lands, this line becomes a straight promise.
     private var honestNote: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "info.circle.fill")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Theme.inkTertiary)
 
-            Text("apps lock when you next open gymlock after the window starts.")
+            Text("a heads-up arrives when the window starts. apps lock when you next open gymlock after that.")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -143,5 +145,8 @@ struct WindDownEditorSheet: View {
         if followsRhythm {
             store.applyRhythmToNightLock()
         }
+        // Someone setting the window at 11:15 while standing inside it should
+        // see the lock go on without a relaunch.
+        coordinator.reconcileWindDown()
     }
 }

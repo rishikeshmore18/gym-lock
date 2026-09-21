@@ -59,6 +59,12 @@ extension GymSessionCoordinator {
         case foregroundAfterResolved
         case alarmFiredWhileAppOpen
 
+        // The two locks: how the evening and the morning share one shield.
+        case windDownLockStart
+        case windDownLockEnd
+        case windDownHandoverToGym
+        case windDownWhileSessionLive
+
         var id: String { rawValue }
 
         var section: String {
@@ -84,6 +90,9 @@ extension GymSessionCoordinator {
                  .foregroundAfterWindow, .foregroundAfterResolved,
                  .alarmFiredWhileAppOpen:
                 "doors"
+            case .windDownLockStart, .windDownLockEnd,
+                 .windDownHandoverToGym, .windDownWhileSessionLive:
+                "locks"
             }
         }
 
@@ -126,11 +135,15 @@ extension GymSessionCoordinator {
             case .foregroundAfterWindow: "opened app after window (none)"
             case .foregroundAfterResolved: "opened app after resolving (none)"
             case .alarmFiredWhileAppOpen: "alarm fired while app open"
+            case .windDownLockStart: "wind-down: lock now"
+            case .windDownLockEnd: "wind-down: window ends"
+            case .windDownHandoverToGym: "wind-down: handover to gym"
+            case .windDownWhileSessionLive: "wind-down while session live"
             }
         }
 
         static var sections: [String] {
-            ["doors", "flow", "screen time", "arrival", "health", "fallbacks"]
+            ["doors", "locks", "flow", "screen time", "arrival", "health", "fallbacks"]
         }
     }
 
@@ -352,7 +365,91 @@ extension GymSessionCoordinator {
             debugClearResolvedSlots()
             debugWriteHandoff(wantsSnooze: false)
             NotificationCenter.default.post(name: .gymLockAlarmHandoffAvailable, object: nil)
+
+        // MARK: The two locks
+        //
+        // Each of these walks the real reconcile path rather than poking the
+        // shield directly, so what the panel shows is what a foreground would
+        // actually do.
+
+        case .windDownLockStart:
+            // A window that is open right now, then the same foreground
+            // catch-up a real evening takes.
+            debugEnsureShieldSelection()
+            debugSetWindDownWindow(startMinutesAgo: 30, endMinutesFromNow: 30)
+            debugReconcileWindDown()
+
+        case .windDownLockEnd:
+            // First make sure the lock is genuinely on, then move the window
+            // so it has just ended: the reconcile must lift the shield by the
+            // clock, with nothing else happening.
+            if shield.owner != .windDown { simulate(.windDownLockStart) }
+            guard shield.isShielded else { return }
+            debugSetWindDownWindow(startMinutesAgo: 120, endMinutesFromNow: -1)
+            debugReconcileWindDown()
+
+        case .windDownHandoverToGym:
+            // The alarm fires while the night lock is still holding the
+            // shield. The gym lock must take ownership in the same call, so
+            // the shield is never off: both readings being true is the proof.
+            if shield.owner != .windDown { simulate(.windDownLockStart) }
+            guard shield.isShielded else { return }
+            let wasShieldedBeforeHandover = shield.isShielded
+            simulate(.alarmFired)
+            debugStore?.record(
+                .shieldApplied,
+                sessionID: session?.id,
+                detail: wasShieldedBeforeHandover && shield.isShielded
+                    ? "handover: shield never off, owner now \(shield.owner?.rawValue ?? "none")"
+                    : "handover gap: wind-down shield was off"
+            )
+
+        case .windDownWhileSessionLive:
+            // A session owns the shield and the wind-down window opens around
+            // it. The correct outcome is that nothing changes: the night
+            // controller sees a .gymSession owner and stops claiming.
+            if session == nil { simulate(.alarmFired) }
+            guard session != nil else { return }
+            let ownerBefore = shield.owner
+            debugSetWindDownWindow(startMinutesAgo: 30, endMinutesFromNow: 30)
+            debugReconcileWindDown()
+            debugStore?.record(
+                .shieldApplied,
+                sessionID: session?.id,
+                detail: shield.owner == .gymSession && ownerBefore == .gymSession
+                    ? "wind-down ignored the session's shield"
+                    : "owner changed while session live: \(ownerBefore?.rawValue ?? "none") to \(shield.owner?.rawValue ?? "none")"
+            )
         }
+    }
+
+    // MARK: - Lock helpers
+
+    /// The shield backends refuse to apply anything without a selection, so
+    /// every lock step makes sure there is one first.
+    private func debugEnsureShieldSelection() {
+        if let demo = shield as? DemoShieldService, !demo.hasSelection {
+            demo.setDemoSelection(count: 5)
+        }
+        shield.debugSetAuthorization(.approved)
+        debugStore?.hasConfiguredBlockedApps = true
+    }
+
+    /// Sets a hand-tuned wind-down window that opened `startMinutesAgo` and
+    /// closes `endMinutesFromNow` from now, whatever the clock says.
+    private func debugSetWindDownWindow(startMinutesAgo: Int, endMinutesFromNow: Int) {
+        guard let store = debugStore else { return }
+
+        var plan = store.plan
+        plan.nightLock.isEnabled = true
+        plan.nightLock.followsRhythm = false
+        plan.nightLock.customStart = TimeOfDay(
+            from: Date().addingTimeInterval(-Double(startMinutesAgo) * 60)
+        )
+        plan.nightLock.customEnd = TimeOfDay(
+            from: Date().addingTimeInterval(Double(endMinutesFromNow) * 60)
+        )
+        store.plan = plan
     }
 
     // MARK: - Door helpers

@@ -391,7 +391,13 @@ struct AlarmSettingsView: View {
                     "",
                     isOn: Binding(
                         get: { plan.nightLock.isEnabled },
-                        set: { store.plan.nightLock.isEnabled = $0; Haptics.tap() }
+                        set: {
+                            store.plan.nightLock.isEnabled = $0
+                            Haptics.tap()
+                            // Switching it on while inside the window should
+                            // take hold now, not on the next foreground.
+                            coordinator.reconcileWindDown()
+                        }
                     )
                 )
                 .labelsHidden()

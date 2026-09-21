@@ -32,6 +32,20 @@ enum ShieldAuthorization: String, Hashable {
     case unavailable
 }
 
+/// Which lock currently holds the shield.
+///
+/// `AppShielding.apply` overwrites rather than stacks, so only one lock can
+/// hold the shield at a time. The owner is what stops the session reconciler
+/// from releasing a shield that now belongs to the night, and what stops the
+/// wind-down controller from claiming one that belongs to a morning.
+enum ShieldOwner: String, Codable, Hashable {
+    /// Applied by the evening wind-down window. Released by the clock.
+    case windDown
+    /// Applied by the gym session. Released by arrival, resolution, or the
+    /// failsafe.
+    case gymSession
+}
+
 /// The one way apps get shielded and released.
 ///
 /// Views never touch `ManagedSettingsStore`. Everything goes through this, which
@@ -48,16 +62,23 @@ protocol AppShielding: AnyObject {
     var selectionCount: Int { get }
     /// True while a shield is actively applied.
     var isShielded: Bool { get }
+    /// Which lock owns the current shield, or nil when nothing is shielded.
+    var owner: ShieldOwner? { get }
 
     func refreshAuthorization()
     @discardableResult
     func requestAuthorization() async -> ShieldAuthorization
 
-    /// Applies the shield with a mandatory expiry.
+    /// Applies the shield with a mandatory expiry and a named owner.
     ///
     /// There is no unbounded form of this call on purpose: every lock carries
     /// its own deadline, so no code path can produce a shield that outlives the
-    /// reason for it.
+    /// reason for it. Applying with a different owner while a shield is already
+    /// standing is the handover: the new lock takes ownership in the same call,
+    /// with no gap in between.
+    func apply(until deadline: Date, sessionID: UUID?, owner: ShieldOwner)
+
+    /// Applies the shield on behalf of the gym session.
     func apply(until deadline: Date, sessionID: UUID?)
 
     /// Lifts the shield because the user earned it or resolved the day.
@@ -81,6 +102,16 @@ protocol AppShielding: AnyObject {
     /// revoking real Screen Time permission in Settings.
     func debugSetAuthorization(_ value: ShieldAuthorization)
     #endif
+}
+
+// MARK: - Session default
+
+extension AppShielding {
+    /// The pre-wind-down spelling: every caller before Phase C meant the gym
+    /// session, and they still do.
+    func apply(until deadline: Date, sessionID: UUID?) {
+        apply(until: deadline, sessionID: sessionID, owner: .gymSession)
+    }
 }
 
 // MARK: - Policy
@@ -123,6 +154,33 @@ struct ShieldLedger: Codable, Hashable {
     var appliedAt: Date
     var failsafeDeadline: Date
     var sessionID: UUID?
+    /// Which lock put the shield on. Ledgers written before the wind-down lock
+    /// existed were all session-owned, so they decode as `.gymSession`.
+    var owner: ShieldOwner
+
+    init(
+        appliedAt: Date,
+        failsafeDeadline: Date,
+        sessionID: UUID?,
+        owner: ShieldOwner = .gymSession
+    ) {
+        self.appliedAt = appliedAt
+        self.failsafeDeadline = failsafeDeadline
+        self.sessionID = sessionID
+        self.owner = owner
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        appliedAt = try container.decode(Date.self, forKey: .appliedAt)
+        failsafeDeadline = try container.decode(Date.self, forKey: .failsafeDeadline)
+        sessionID = try container.decodeIfPresent(UUID.self, forKey: .sessionID)
+        owner = try container.decodeIfPresent(ShieldOwner.self, forKey: .owner) ?? .gymSession
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case appliedAt, failsafeDeadline, sessionID, owner
+    }
 
     func hasExpired(at now: Date) -> Bool { now >= failsafeDeadline }
 }

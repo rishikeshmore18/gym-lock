@@ -75,6 +75,9 @@ final class GymSessionCoordinator {
     private var ticker: Task<Void, Never>?
     /// The long-lived observers, held somewhere that can clean itself up.
     private let observers = AlarmObserverBag()
+    /// The evening lock. Independent of the session: it holds the shield by
+    /// the clock, and only ever inside its own window.
+    let windDown = WindDownController()
 
     /// Injected so the coordinator can read the plan and write outcomes without
     /// owning a second copy of either.
@@ -123,6 +126,7 @@ final class GymSessionCoordinator {
         // A cold launch from an alarm tap has no scene-phase change to wait
         // for: the app is already active by the time this runs.
         resumeSessionIfDue()
+        reconcileWindDown()
     }
 
     /// The second belt on door one.
@@ -178,6 +182,8 @@ final class GymSessionCoordinator {
         resolveElapsedSnooze()
         // Door three: the user ignored the alarm and simply opened the app.
         resumeSessionIfDue()
+        // Door four, in effect: the evening lock catches up with the clock.
+        reconcileWindDown()
         Task { await health.fetchNewWorkouts() }
     }
 
@@ -216,6 +222,40 @@ final class GymSessionCoordinator {
 
         if decision.wantsSnooze {
             snooze()
+        }
+    }
+
+    // MARK: - Wind-down
+
+    /// Brings the evening lock in line with the clock and its notification
+    /// with the plan.
+    ///
+    /// Called on attach and on every foreground, and after any edit to the
+    /// wind-down window, because a user setting the window at 11:15 while
+    /// standing inside it should see the lock go on without a relaunch.
+    func reconcileWindDown(now: Date = Date()) {
+        guard let store else { return }
+        windDown.reconcile(now: now, plan: store.plan, shield: shield)
+        syncWindDownNotification(plan: store.plan)
+    }
+
+    /// One heads-up at the window's start, cancelled the moment the lock is
+    /// off. It exists because the lock engages on the next run of the app, and
+    /// the notification is what gives the evening a next run.
+    private func syncWindDownNotification(plan: MorningPlan) {
+        let notifier = self.notifier
+        guard plan.nightLock.isEnabled else {
+            Task { await notifier.cancelWindDownStart() }
+            return
+        }
+
+        let start = plan.nightLock.start(in: plan.rhythm).nextDate(after: Date())
+        Task {
+            if let start {
+                await notifier.scheduleWindDownStart(at: start)
+            } else {
+                await notifier.cancelWindDownStart()
+            }
         }
     }
 
@@ -294,7 +334,13 @@ final class GymSessionCoordinator {
         guard shield.hasSelection else { return }
 
         let deadline = ShieldPolicy.deadline(forWindowMinutes: session.windowMinutes)
-        shield.apply(until: deadline, sessionID: session.id)
+
+        // The handover. If the wind-down lock currently owns the shield, this
+        // call takes ownership in one step: the shield is re-applied with the
+        // session's own deadline and the owner flips to `.gymSession` with no
+        // release in between, so there is never a second where the blocked
+        // apps are free between the night and the morning.
+        shield.apply(until: deadline, sessionID: session.id, owner: .gymSession)
 
         if var updated = self.session {
             updated.shieldFailsafeDeadline = deadline
@@ -306,8 +352,13 @@ final class GymSessionCoordinator {
     }
 
     /// Lifts the shield because the user earned it or resolved the day.
+    ///
+    /// Only the gym session's own shield answers to the session. A wind-down
+    /// shield belongs to the night and is released by the clock, never by
+    /// something the morning did.
     private func releaseShield(sessionID: UUID?) {
         guard shield.isShielded else { return }
+        guard shield.owner == .gymSession || shield.owner == nil else { return }
         shield.release()
         store?.record(.shieldRemoved, sessionID: sessionID)
     }
@@ -335,7 +386,15 @@ final class GymSessionCoordinator {
     /// needs its shield applied; a session that ended needs it gone.
     private func reconcileShieldWithSession() {
         guard let current = session, current.state.isLive else {
-            if shield.isShielded { releaseShield(sessionID: nil) }
+            if shield.isShielded {
+                if shield.owner == .windDown {
+                    // The night lock answers for itself, against its own
+                    // window, not against the session.
+                    reconcileWindDown()
+                } else {
+                    releaseShield(sessionID: nil)
+                }
+            }
             return
         }
 
@@ -1288,6 +1347,10 @@ final class GymSessionCoordinator {
 
     func debugClearResolvedSlots() {
         defaults.removeObject(forKey: Key.resolvedSlots)
+    }
+
+    func debugReconcileWindDown() {
+        reconcileWindDown()
     }
     #endif
 }

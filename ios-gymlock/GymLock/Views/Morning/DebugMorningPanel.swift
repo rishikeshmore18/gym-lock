@@ -68,6 +68,8 @@ struct DebugMorningPanel: View {
             row("shield backend", coordinator.shieldCapability.headline)
             row("shield permission", coordinator.shield.authorization.rawValue)
             row("shield active", coordinator.shield.isShielded ? "yes" : "no")
+            row("shield owner", coordinator.shield.owner?.rawValue ?? "none")
+            row("wind-down active", coordinator.windDown.isActive ? "yes" : "no")
             row("blocked items", "\(coordinator.shield.selectionCount)")
             row("gym", store.primaryGym?.name ?? "not set")
             row("location", locationLabel)
@@ -171,6 +173,7 @@ struct DebugMorningPanel: View {
             .badGPSAccuracy, .goodGPSAccuracy,
             .healthDenied, .noHealthWorkout, .driveBy,
             .foregroundAfterWindow, .foregroundAfterResolved,
+            .windDownLockStart, .windDownLockEnd, .windDownWhileSessionLive,
         ]
         let isReadingOnly = staysOpen.contains(step)
 

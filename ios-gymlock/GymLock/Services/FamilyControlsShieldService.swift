@@ -31,6 +31,9 @@ final class FamilyControlsShieldService: AppShielding {
 
     private(set) var authorization: ShieldAuthorization = .notDetermined
     private(set) var isShielded = false
+
+    /// Which lock currently holds the shield, read straight from the ledger.
+    var owner: ShieldOwner? { ledgerStore.current?.owner }
     private(set) var selectionCount = 0
 
     private let ledgerStore: ShieldLedgerStore
@@ -138,7 +141,7 @@ final class FamilyControlsShieldService: AppShielding {
 
     // MARK: - Shielding
 
-    func apply(until deadline: Date, sessionID: UUID?) {
+    func apply(until deadline: Date, sessionID: UUID?, owner: ShieldOwner) {
         guard authorization == .approved, hasSelection else { return }
 
         let capped = min(
@@ -151,7 +154,12 @@ final class FamilyControlsShieldService: AppShielding {
         // can clear it; the reverse ordering could strand a shield with no
         // record of it.
         ledgerStore.save(
-            ShieldLedger(appliedAt: Date(), failsafeDeadline: capped, sessionID: sessionID)
+            ShieldLedger(
+                appliedAt: Date(),
+                failsafeDeadline: capped,
+                sessionID: sessionID,
+                owner: owner
+            )
         )
 
         applyTokens()
@@ -202,7 +210,8 @@ final class FamilyControlsShieldService: AppShielding {
             ShieldLedger(
                 appliedAt: ledger.appliedAt,
                 failsafeDeadline: Date().addingTimeInterval(-1),
-                sessionID: ledger.sessionID
+                sessionID: ledger.sessionID,
+                owner: ledger.owner
             )
         )
     }

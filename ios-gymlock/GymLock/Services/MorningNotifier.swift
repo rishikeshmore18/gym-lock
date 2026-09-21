@@ -22,6 +22,9 @@ final class MorningNotifier {
         static let moved = "gymlock.session.moved"
         static let arrival = "gymlock.session.arrival"
         static let snooze = "gymlock.session.snooze"
+        /// Not session-scoped, so deliberately not in `all`: ending a morning
+        /// must not cancel tonight's heads-up.
+        static let windDown = "gymlock.session.windDown"
 
         static let all = [departure, deadline, comeback, moved, arrival, snooze]
     }
@@ -148,6 +151,34 @@ final class MorningNotifier {
 
     func cancelSnoozeRefire() async {
         await cancel(ID.snooze)
+    }
+
+    // MARK: - Wind-down
+
+    /// One time-sensitive heads-up when the evening window opens.
+    ///
+    /// It does not claim apps lock at that moment, because without a
+    /// `DeviceActivityMonitor` extension they do not: the lock engages the
+    /// next time GymLock runs. The notification's whole job is to be that
+    /// next run. `timeSensitive` so it gets through a sleep Focus, which is
+    /// precisely when the window opens.
+    func scheduleWindDownStart(at date: Date) async {
+        await cancel(ID.windDown)
+
+        let interval = date.timeIntervalSinceNow
+        guard interval > 30 else { return }
+
+        await deliver(
+            id: ID.windDown,
+            title: "wind-down",
+            body: "the window started. apps lock when you next open gymlock.",
+            after: interval,
+            interruption: .timeSensitive
+        )
+    }
+
+    func cancelWindDownStart() async {
+        await cancel(ID.windDown)
     }
 
     // MARK: - Comeback

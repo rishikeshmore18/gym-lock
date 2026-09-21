@@ -23,6 +23,9 @@ final class DemoShieldService: AppShielding {
     private(set) var authorization: ShieldAuthorization = .notDetermined
     private(set) var isShielded = false
 
+    /// Which lock currently holds the shield, read straight from the ledger.
+    var owner: ShieldOwner? { ledgerStore.current?.owner }
+
     /// A stand-in count so the flow can show a plausible number.
     private(set) var selectionCount = 0
 
@@ -57,13 +60,18 @@ final class DemoShieldService: AppShielding {
         defaults.set(selectionCount, forKey: selectionKey)
     }
 
-    func apply(until deadline: Date, sessionID: UUID?) {
+    func apply(until deadline: Date, sessionID: UUID?, owner: ShieldOwner) {
         let capped = min(
             deadline,
             Date().addingTimeInterval(ShieldPolicy.absoluteMaximumHours * 3600)
         )
         ledgerStore.save(
-            ShieldLedger(appliedAt: Date(), failsafeDeadline: capped, sessionID: sessionID)
+            ShieldLedger(
+                appliedAt: Date(),
+                failsafeDeadline: capped,
+                sessionID: sessionID,
+                owner: owner
+            )
         )
         isShielded = true
     }
@@ -103,7 +111,8 @@ final class DemoShieldService: AppShielding {
             ShieldLedger(
                 appliedAt: ledger.appliedAt,
                 failsafeDeadline: Date().addingTimeInterval(-1),
-                sessionID: ledger.sessionID
+                sessionID: ledger.sessionID,
+                owner: ledger.owner
             )
         )
     }
