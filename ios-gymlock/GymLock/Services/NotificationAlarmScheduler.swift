@@ -77,7 +77,14 @@ final class NotificationAlarmScheduler: AlarmScheduling {
         components.minute = request.time.minute
         components.weekday = day.rawValue
 
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        // A one-off pins the full date so it cannot come back next week.
+        let trigger: UNCalendarNotificationTrigger
+        if let fireDate = request.fireDate {
+            let full = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+            trigger = UNCalendarNotificationTrigger(dateMatching: full, repeats: false)
+        } else {
+            trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        }
         let notification = UNNotificationRequest(
             identifier: request.notificationIdentifier(for: day),
             content: content,

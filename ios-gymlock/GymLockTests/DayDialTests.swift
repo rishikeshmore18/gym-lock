@@ -39,9 +39,30 @@ struct DayDialTests {
     // MARK: - The gym handle
 
     @Test func travelClampsToTheProductRange() {
-        #expect(DayDialModel.travelMinutes(desiredWindow: 200, getReadyMinutes: 20) == 60)
+        // The ceiling is the two-hour window, not an arbitrary travel cap.
+        #expect(DayDialModel.travelMinutes(desiredWindow: 200, getReadyMinutes: 20) == 100)
         #expect(DayDialModel.travelMinutes(desiredWindow: 5, getReadyMinutes: 20) == 0)
         #expect(DayDialModel.travelMinutes(desiredWindow: 45, getReadyMinutes: 20) == 25)
+    }
+
+    /// The gym bar can be dragged anywhere the dial has room for it; the only
+    /// hard limits are the two-hour window and the space left by the night.
+    @Test func theGymWindowIsOnlyLimitedByTheDayAndTheCeiling() {
+        let wide = DayDialModel.clampedWindow(110, getReadyMinutes: 20, sleepMinutes: 450, sessionMinutes: 60)
+        #expect(wide == 110)
+        let tooWide = DayDialModel.clampedWindow(300, getReadyMinutes: 20, sleepMinutes: 450, sessionMinutes: 60)
+        #expect(tooWide == MorningRhythm.absoluteMaximumWindow)
+        let tooShort = DayDialModel.clampedWindow(3, getReadyMinutes: 20, sleepMinutes: 450, sessionMinutes: 60)
+        #expect(tooShort == 20)
+    }
+
+    @Test func theGymVisitHasItsOwnLength() {
+        #expect(DayDialModel.clampedSession(90, sleepMinutes: 450, windowMinutes: 35) == 90)
+        #expect(DayDialModel.clampedSession(5, sleepMinutes: 450, windowMinutes: 35) == MorningRhythm.sessionRange.lowerBound)
+        #expect(DayDialModel.clampedSession(999, sleepMinutes: 450, windowMinutes: 35) == MorningRhythm.sessionRange.upperBound)
+        // A long night leaves less room for the visit.
+        let squeezed = DayDialModel.clampedSession(240, sleepMinutes: 1200, windowMinutes: 35)
+        #expect(squeezed == 1440 - 1200 - 35 - DayDialModel.minimumGapMinutes)
     }
 
     /// Even a wildly out-of-range drag must land inside the travel range and
@@ -55,7 +76,7 @@ struct DayDialTests {
         }
     }
 
-    /// Moving the sun handle moves wake time; the gym arc must follow it
+    /// Moving the alarm end moves wake time; the gym bar must follow it
     /// rigidly, which it can only do if the window never changes underneath.
     @Test func movingWakeTimePreservesTheWindow() {
         var rhythm = MorningRhythm.default
@@ -99,20 +120,26 @@ struct DayDialTests {
     /// A finger near an icon takes that icon, in the gutter between them it
     /// takes the bar, and past the gym mark it takes nothing.
     @Test func aTouchGrabsWhatIsUnderIt() {
-        let bedtime = 23 * 60, wake = 6 * 60 + 30, gym = 7 * 60 + 15
+        let bedtime = 23 * 60, wake = 6 * 60 + 30, gym = 7 * 60 + 30, done = 8 * 60 + 30
+        func grab(_ finger: Int) -> DayDialModel.Grab? {
+            DayDialModel.grab(fingerMinutes: finger, bedtime: bedtime, wake: wake, gymBy: gym, gymDone: done, tolerance: 20)
+        }
 
-        #expect(DayDialModel.grab(fingerMinutes: bedtime + 10, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == .bedtime)
-        #expect(DayDialModel.grab(fingerMinutes: wake - 10, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == .wake)
-        #expect(DayDialModel.grab(fingerMinutes: gym + 5, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == .gym)
-        #expect(DayDialModel.grab(fingerMinutes: 2 * 60, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == .sleepBody)
-        #expect(DayDialModel.grab(fingerMinutes: 14 * 60, bedtime: bedtime, wake: wake, gymBy: gym, tolerance: 35) == nil)
+        #expect(grab(bedtime + 10) == .bedtime)
+        #expect(grab(wake - 10) == .wake)
+        #expect(grab(gym + 5) == .gymStart)
+        #expect(grab(done - 5) == .gymEnd)
+        #expect(grab(2 * 60) == .sleepBody)
+        #expect(grab(8 * 60) == .gymBody)
+        #expect(grab(7 * 60) == nil)
+        #expect(grab(14 * 60) == nil)
     }
 
-    /// On a short gym window wake and gym-by sit close; the gym icon is drawn
-    /// on top, so it must win the tie or it can never be picked up.
+    /// On a short window wake and gym arrival sit close; the gym icon is
+    /// drawn on top, so it must win the tie or it can never be picked up.
     @Test func theGymIconWinsATieWithWake() {
         let wake = 6 * 60 + 30, gym = wake + 20
-        #expect(DayDialModel.grab(fingerMinutes: wake + 10, bedtime: 23 * 60, wake: wake, gymBy: gym, tolerance: 35) == .gym)
+        #expect(DayDialModel.grab(fingerMinutes: wake + 10, bedtime: 23 * 60, wake: wake, gymBy: gym, gymDone: gym + 60, tolerance: 35) == .gymStart)
     }
 
     /// A finger crossing midnight is a small step, not a jump of a day.
@@ -125,11 +152,51 @@ struct DayDialTests {
     /// The two bars share one gutter, so the night can never be dragged over
     /// the gym window, and never shorter than the icons need.
     @Test func sleepIsClampedSoTheBarsNeverLap() {
-        #expect(DayDialModel.clampedSleep(20, windowMinutes: 45) == DayDialModel.minimumSleepMinutes)
-        let longest = DayDialModel.maximumSleepMinutes(windowMinutes: 45)
-        #expect(DayDialModel.clampedSleep(1400, windowMinutes: 45) == longest)
-        #expect(longest + 45 + DayDialModel.minimumAwakeGapMinutes == 1440)
-        #expect(DayDialModel.clampedSleep(450, windowMinutes: 45) == 450)
+        #expect(DayDialModel.clampedSleep(20, windowMinutes: 45, sessionMinutes: 60) == DayDialModel.minimumSleepMinutes)
+        let longest = DayDialModel.maximumSleepMinutes(windowMinutes: 45, sessionMinutes: 60)
+        #expect(DayDialModel.clampedSleep(1400, windowMinutes: 45, sessionMinutes: 60) == longest)
+        #expect(longest + 45 + 60 + DayDialModel.minimumGapMinutes == 1440)
+        #expect(DayDialModel.clampedSleep(450, windowMinutes: 45, sessionMinutes: 60) == 450)
+    }
+
+    // MARK: - Next alarm only
+
+    /// A one-off change stands in for the weekly ring on its day and then
+    /// gets out of the way.
+    @Test func aOneOffAlarmReplacesTheNextRingOnly() throws {
+        var plan = MorningPlan.default
+        let slot = AlarmSlot(days: Set(Weekday.allCases), alarmTime: TimeOfDay(hour: 6, minute: 30))
+        plan.slots = [slot]
+
+        let calendar = Calendar(identifier: .gregorian)
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 9, day: 21, hour: 12)))
+        let tomorrow = try #require(calendar.date(from: DateComponents(year: 2026, month: 9, day: 22, hour: 5, minute: 45)))
+
+        var oneOff = plan.rhythm
+        oneOff.wakeTime = TimeOfDay(hour: 5, minute: 45)
+        plan.nextAlarmOverride = NextAlarmOverride(slotID: slot.id, fireDate: tomorrow, rhythm: oneOff)
+
+        let next = try #require(plan.nextOccurrence(after: now, calendar: calendar))
+        #expect(next.fireDate == tomorrow)
+        #expect(next.slot.alarmTime == TimeOfDay(hour: 5, minute: 45))
+        #expect(plan.rhythm(at: tomorrow, calendar: calendar).wakeTime == TimeOfDay(hour: 5, minute: 45))
+        #expect(plan.slot(forAlarmID: plan.nextAlarmOverride?.id)?.id == slot.id)
+
+        // The schedule itself is untouched, and the day after is back to normal.
+        #expect(plan.rhythm.wakeTime == TimeOfDay(hour: 6, minute: 30))
+        let afterwards = try #require(calendar.date(byAdding: .day, value: 1, to: tomorrow))
+        #expect(plan.rhythm(at: afterwards, calendar: calendar).wakeTime == TimeOfDay(hour: 6, minute: 30))
+        #expect(plan.activeOverride(at: afterwards) == nil)
+    }
+
+    /// Plans saved before the workout length existed still decode.
+    @Test func oldPlansDecodeWithADefaultVisitLength() throws {
+        let json = """
+        {"bedtime":{"hour":23,"minute":0},"wakeTime":{"hour":6,"minute":30},"getReadyMinutes":20,"travelMinutes":15,"hasBeenSet":true}
+        """
+        let rhythm = try JSONDecoder().decode(MorningRhythm.self, from: Data(json.utf8))
+        #expect(rhythm.gymSessionMinutes == 60)
+        #expect(rhythm.gymDoneTime == TimeOfDay(hour: 8, minute: 5))
     }
 
     @Test func durationsReadLikeApplesSleepSchedule() {
@@ -138,34 +205,4 @@ struct DayDialTests {
         #expect(DayDialModel.durationText(minutes: 45) == "45 min")
     }
 
-    // MARK: - Momentum projection
-
-    @Test func aFlickClockwiseProjectsForward() {
-        // At the top of the dial, clockwise (later) runs toward +x.
-        let projected = DayDialModel.projectedMinutes(
-            translation: CGSize(width: 100, height: 0),
-            handleAngleDegrees: 0,
-            radius: 120
-        )
-        #expect(projected > 0)
-    }
-
-    @Test func aFlickCounterClockwiseProjectsBackward() {
-        let projected = DayDialModel.projectedMinutes(
-            translation: CGSize(width: -100, height: 0),
-            handleAngleDegrees: 0,
-            radius: 120
-        )
-        #expect(projected < 0)
-    }
-
-    @Test func aStationaryLiftProjectsNothing() {
-        #expect(
-            DayDialModel.projectedMinutes(
-                translation: .zero,
-                handleAngleDegrees: 90,
-                radius: 120
-            ) == 0
-        )
-    }
 }

@@ -216,7 +216,8 @@ final class GymSessionCoordinator {
             AlarmHandoff.clear()
         }
 
-        let slot = store.plan.slots.first { $0.id == decision.slotID }
+        // A one-off alarm carries its own id; the plan maps it back to its slot.
+        let slot = store.plan.slot(forAlarmID: decision.slotID)
 
         // `startAt` rather than `now`: the deadline is measured from when the
         // alarm actually rang, so ignoring it for ten minutes does not quietly
@@ -419,7 +420,8 @@ final class GymSessionCoordinator {
         let plan = store.plan
         let profile = store.profile
 
-        let requests = plan.enabledSlots.map { slot in
+        let soundFile = notificationSoundFileName(for: profile)
+        var requests = plan.enabledSlots.map { slot in
             GymAlarmRequest(
                 slotID: slot.id,
                 time: slot.alarmTime,
@@ -430,14 +432,48 @@ final class GymSessionCoordinator {
                 // The notification backend needs the caf, not the mp3: the
                 // system sound facility cannot decode mp3 and silently plays
                 // its own default instead.
-                soundFileName: notificationSoundFileName(for: profile),
+                soundFileName: soundFile,
                 // The alert is built by the system long before the app runs, so
                 // the morning-only snooze rule has to be decided here.
                 allowsSnooze: slot.daypart.usesSleepRhythm
             )
         }
 
+        // "Change next alarm only": one extra alarm at the one-off time, and
+        // the weekly alarm skips that day so the two never both ring.
+        if let override = plan.activeOverride(), override.fireDate > Date(),
+           let slot = plan.slots.first(where: { $0.id == override.slotID }), slot.isEnabled,
+           let day = override.weekday() {
+            if let index = requests.firstIndex(where: { $0.slotID == slot.id }) {
+                requests[index].weekdays.remove(day)
+                if requests[index].weekdays.isEmpty { requests.remove(at: index) }
+            }
+            requests.append(
+                GymAlarmRequest(
+                    slotID: override.id,
+                    time: TimeOfDay(from: override.fireDate),
+                    weekdays: [day],
+                    title: "Gym time",
+                    message: "You planned this.",
+                    soundResource: profile.alarmSound.resourceName,
+                    soundFileName: soundFile,
+                    allowsSnooze: SessionDaypart(TimeOfDay(from: override.fireDate)).usesSleepRhythm,
+                    fireDate: override.fireDate
+                )
+            )
+        }
+
         await alarms.replaceAll(with: requests)
+    }
+
+    /// Drops a one-off alarm once its morning is over, so the weekly alarm
+    /// for that day comes back on the next sync.
+    func expireNextAlarmOverrideIfNeeded(now: Date = Date()) {
+        guard let store, let override = store.plan.nextAlarmOverride,
+              !override.isActive(at: now)
+        else { return }
+        store.plan.nextAlarmOverride = nil
+        Task { await syncAlarms() }
     }
 
     /// Which file a notification should name, following the same fallback
@@ -700,7 +736,13 @@ final class GymSessionCoordinator {
         }
 
         let plan = store.plan
-        let alarmTime = slot?.alarmTime ?? plan.rhythm.wakeTime
+        // The rhythm for *this* morning: a one-off change if the user made
+        // one for today, the weekly schedule otherwise.
+        let rhythm = plan.rhythm(at: date, calendar: calendar)
+        let isOverrideMorning = plan.activeOverride(at: date).map {
+            calendar.isDate(date, inSameDayAs: $0.fireDate) && $0.slotID == slot?.id
+        } ?? false
+        let alarmTime = isOverrideMorning ? rhythm.wakeTime : (slot?.alarmTime ?? plan.rhythm.wakeTime)
         let daypart = SessionDaypart(alarmTime)
 
         var new = GymSession(
@@ -708,8 +750,8 @@ final class GymSessionCoordinator {
             slotID: slot?.id,
             alarmTime: alarmTime,
             isMorningSession: daypart.usesSleepRhythm,
-            getReadyMinutes: plan.rhythm.getReadyMinutes,
-            travelMinutes: plan.rhythm.travelMinutes,
+            getReadyMinutes: rhythm.getReadyMinutes,
+            travelMinutes: rhythm.travelMinutes,
             state: .alarmFired
         )
         new.alarmFiredAt = date

@@ -24,6 +24,12 @@ struct GymAlarmRequest: Hashable {
     /// built by the system before the app is running, so the rule has to travel
     /// with the request rather than being asked for at the moment of the tap.
     var allowsSnooze: Bool = false
+    /// Set for a one-off alarm: it rings once at this exact moment and never
+    /// repeats. `time` and `weekdays` still describe it for backends that
+    /// only think in weekly terms.
+    var fireDate: Date? = nil
+
+    var isOneOff: Bool { fireDate != nil }
 }
 
 /// How capable the current alarm backend is, so the UI can be honest about what

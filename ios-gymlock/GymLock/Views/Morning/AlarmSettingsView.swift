@@ -27,6 +27,10 @@ struct AlarmSettingsView: View {
     /// What the finger is holding on the dial, so the header and the line
     /// under the dial can speak to that while the drag is live.
     @State private var dialGrab: DayDialModel.Grab?
+    /// The dial edits this, not the plan. Nothing reaches the schedule or the
+    /// OS until the tick is tapped and the user says which alarm to change.
+    @State private var draft: MorningRhythm?
+    @State private var isChoosingScope = false
 
     #if DEBUG
     @State private var isShowingSimulator = false
@@ -69,25 +73,38 @@ struct AlarmSettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Haptics.tap()
+                    GlassCircleButton(symbol: "chevron.left", label: "Back", tint: Theme.ink) {
+                        // Leaving with an unsaved dial change throws the draft
+                        // away, as Apple's X does. The tick is how you keep it.
+                        draft = nil
                         dismiss()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("back")
-                                .font(.system(size: 16, weight: .medium))
-                        }
                     }
-                    .foregroundStyle(Theme.inkSecondary)
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if hasDraftChanges {
+                        GlassCircleButton(symbol: "checkmark", label: "Save change", tint: Theme.accent) {
+                            isChoosingScope = true
+                        }
+                        .transition(.scale(scale: 0.4).combined(with: .opacity))
+                    }
+                }
+            }
+            .animation(.spring(response: 0.38, dampingFraction: 0.6), value: hasDraftChanges)
+            .confirmationDialog(
+                "apply this change to every training day?",
+                isPresented: $isChoosingScope,
+                titleVisibility: .visible
+            ) {
+                Button("change next alarm only") { commitDraft(scope: .nextOnly) }
+                Button("change this schedule") { commitDraft(scope: .schedule) }
+                Button("cancel", role: .cancel) {}
             }
         }
         .tint(Theme.accent)
         .task {
             store.seedPlanIfNeeded()
             if rhythmOnOpen == nil { rhythmOnOpen = store.plan.rhythm }
+            coordinator.expireNextAlarmOverrideIfNeeded()
             alarmAuth = await coordinator.alarmAuthorization()
         }
         .onDisappear {
@@ -120,6 +137,22 @@ struct AlarmSettingsView: View {
 
     // MARK: - Dial
 
+    /// What the dial shows: the unsaved draft while one exists, the plan
+    /// otherwise.
+    private var shown: MorningRhythm { draft ?? rhythm }
+
+    private var hasDraftChanges: Bool {
+        guard let draft else { return false }
+        return draft != rhythm
+    }
+
+    private var dialBinding: Binding<MorningRhythm> {
+        Binding(
+            get: { draft ?? store.plan.rhythm },
+            set: { draft = $0 }
+        )
+    }
+
     /// The dial card, after Apple's Change Wake Up screen: the two times on
     /// top, the dial filling the card, one sentence about the result below.
     /// The card takes most of the screen because the dial is the screen.
@@ -131,15 +164,11 @@ struct AlarmSettingsView: View {
 
             GeometryReader { geometry in
                 DayDial(
-                    bedtime: bedtimeBinding,
-                    wakeTime: wakeBinding,
-                    travelMinutes: travelBinding,
-                    getReadyMinutes: rhythm.getReadyMinutes,
+                    rhythm: dialBinding,
                     size: geometry.size.width,
                     onGrabChange: { grab in
                         withAnimation(Theme.stateChange) { dialGrab = grab }
-                    },
-                    onSettle: commitRhythmAfterDial
+                    }
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
             }
@@ -149,10 +178,49 @@ struct AlarmSettingsView: View {
 
             dialFooter
                 .padding(.horizontal, 18)
-                .padding(.bottom, 24)
+                .padding(.bottom, overrideLine == nil ? 24 : 14)
+
+            if let overrideLine {
+                overrideRow(overrideLine)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 18)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
         .frame(maxWidth: .infinity)
         .warmCard(radius: Theme.cardRadius)
+        .animation(Theme.stateChange, value: overrideLine)
+    }
+
+    /// A one-off change in force, said plainly, with the way out next to it.
+    private var overrideLine: String? {
+        guard let override = plan.activeOverride() else { return nil }
+        let day = Calendar.current.isDateInTomorrow(override.fireDate)
+            ? "tomorrow"
+            : override.fireDate.formatted(.dateTime.weekday(.wide)).lowercased()
+        return "next alarm only: \(override.rhythm.wakeTime.displayString) \(day). the week stays as it was."
+    }
+
+    private func overrideRow(_ line: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(line)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button {
+                Haptics.tap()
+                store.plan.nextAlarmOverride = nil
+                resyncAlarms()
+            } label: {
+                Text("undo")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(Theme.surfaceMuted, in: .rect(cornerRadius: 12))
     }
 
     /// Bedtime on the left, wake up on the right, exactly as Apple lays it
@@ -163,7 +231,7 @@ struct AlarmSettingsView: View {
             headerTime(
                 icon: "bed.double.fill",
                 label: "bedtime",
-                time: rhythm.bedtime,
+                time: shown.bedtime,
                 note: "tonight",
                 isLive: dialGrab == .bedtime || dialGrab == .sleepBody
             )
@@ -171,7 +239,7 @@ struct AlarmSettingsView: View {
             headerTime(
                 icon: "alarm.fill",
                 label: "wake up",
-                time: rhythm.wakeTime,
+                time: shown.wakeTime,
                 note: "tomorrow",
                 isLive: dialGrab == .wake || dialGrab == .sleepBody,
                 alignment: .trailing
@@ -220,7 +288,7 @@ struct AlarmSettingsView: View {
                 Text(footerHeadline)
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(dialGrab == .gym ? Theme.accent : Theme.ink)
+                    .foregroundStyle(dialGrab?.isGym == true ? Theme.accent : Theme.ink)
                     .contentTransition(.numericText())
             }
             .animation(.spring(response: 0.3, dampingFraction: 1), value: footerHeadline)
@@ -238,72 +306,45 @@ struct AlarmSettingsView: View {
     }
 
     private var footerHeadline: String {
-        if dialGrab == .gym {
-            return "\(rhythm.windowMinutes) min to the gym"
+        switch dialGrab {
+        case .gymStart, .gymBody:
+            return "\(shown.windowMinutes) min to the gym"
+        case .gymEnd:
+            return "\(DayDialModel.durationText(minutes: shown.gymSessionMinutes)) at the gym"
+        default:
+            return "\(DayDialModel.durationText(minutes: shown.sleepMinutes)) of sleep"
         }
-        return "\(DayDialModel.durationText(minutes: rhythm.sleepMinutes)) of sleep"
     }
 
     /// Guardrails live inline, never in an alert. Otherwise the line says
     /// what the schedule actually does.
     private var footerLine: String {
         if let guardrail = guardrailLine { return guardrail }
-        if dialGrab == .gym {
-            return "gym by \(rhythm.wakeTime.offset(byMinutes: rhythm.windowMinutes).displayString). apps lock when the alarm rings."
+        switch dialGrab {
+        case .gymStart, .gymBody:
+            return "gym by \(shown.gymByTime.displayString). apps lock when the alarm rings."
+        case .gymEnd:
+            return "done by \(shown.gymDoneTime.displayString)."
+        default:
+            let sleep = shown.sleepMinutes
+            if sleep < 6 * 60 { return "that's a short night. the alarm won't care." }
+            if sleep >= 7 * 60 { return "this schedule gives you a full night." }
+            return "a bit under seven hours. workable."
         }
-        let sleep = rhythm.sleepMinutes
-        if sleep < 6 * 60 { return "that's a short night. the alarm won't care." }
-        if sleep >= 7 * 60 { return "this schedule gives you a full night." }
-        return "a bit under seven hours. workable."
     }
 
-    /// Guardrails live inline, never in an alert. The absolute ceiling cannot
-    /// be reached from the dial alone, but it is still the first thing to say
-    /// if get-ready and travel ever stack up to it.
+    /// Guardrails live inline, never in an alert.
     private var guardrailLine: String? {
-        if rhythm.exceedsAbsoluteMaximum {
+        if shown.exceedsAbsoluteMaximum {
             return "over 2 hours isn't a lock, it's a calendar."
         }
-        if rhythm.exceedsNormalMaximum {
+        if shown.exceedsNormalMaximum {
             return "that's a long window. still fine."
         }
-        if rhythm.isBelowMinimum {
+        if shown.isBelowMinimum {
             return "that's under 10 minutes. you'll be rushing."
         }
         return nil
-    }
-
-    /// Moving the sun moves the wake time, and on this screen the wake time
-    /// and the alarm time are the same thing: the primary morning slot's time
-    /// follows the handle live.
-    private var wakeBinding: Binding<TimeOfDay> {
-        Binding(
-            get: { store.plan.rhythm.wakeTime },
-            set: { new in
-                store.plan.rhythm.wakeTime = new
-                if let index = primaryMorningSlotIndex {
-                    store.plan.slots[index].alarmTime = new
-                }
-                store.applyRhythmToNightLock()
-            }
-        )
-    }
-
-    private var bedtimeBinding: Binding<TimeOfDay> {
-        Binding(
-            get: { store.plan.rhythm.bedtime },
-            set: { new in
-                store.plan.rhythm.bedtime = new
-                store.applyRhythmToNightLock()
-            }
-        )
-    }
-
-    private var travelBinding: Binding<Int> {
-        Binding(
-            get: { store.plan.rhythm.travelMinutes },
-            set: { store.plan.rhythm.travelMinutes = $0 }
-        )
     }
 
     /// Only a morning slot is coupled to the sleep rhythm; an evening alarm is
@@ -313,19 +354,49 @@ struct AlarmSettingsView: View {
         return store.plan.slots.firstIndex { $0.id == primary.id }
     }
 
-    /// A dial gesture just ended. The rhythm is already live from the drag;
-    /// the only question left is whether it moved under a hand-tuned night
-    /// lock, and that is asked exactly once, on settle.
-    private func commitRhythmAfterDial() {
-        let current = store.plan.rhythm
-        let previous = rhythmOnOpen ?? current
+    private enum CommitScope { case nextOnly, schedule }
 
-        if let prompt = RhythmChangeProposer.prompt(for: current, since: previous, plan: plan) {
-            nightLockPrompt = prompt
-        } else {
-            store.applyRhythmToNightLock()
-            rhythmOnOpen = current
+    /// The tick was tapped and the user said which alarm to change. This is
+    /// the one place a dial change reaches the plan, the night lock and the
+    /// OS.
+    private func commitDraft(scope: CommitScope) {
+        guard let draft else { return }
+        Haptics.commit()
+
+        switch scope {
+        case .schedule:
+            let previous = rhythmOnOpen ?? store.plan.rhythm
+            var updated = draft
+            updated.hasBeenSet = true
+            store.plan.rhythm = updated
+            // The wake time and the alarm time are the same thing here.
+            if let index = primaryMorningSlotIndex {
+                store.plan.slots[index].alarmTime = updated.wakeTime
+            }
+            // A schedule change makes any lingering one-off meaningless.
+            store.plan.nextAlarmOverride = nil
+
+            if let prompt = RhythmChangeProposer.prompt(for: updated, since: previous, plan: plan) {
+                nightLockPrompt = prompt
+            } else {
+                store.applyRhythmToNightLock()
+                rhythmOnOpen = updated
+            }
+
+        case .nextOnly:
+            guard let slot = primarySlot else { break }
+            // The next training day, at the new wake time. If today's alarm
+            // has already gone the next one is tomorrow or later.
+            if let fireDate = draft.wakeTime.nextDate(after: Date(), on: slot.days) {
+                store.plan.nextAlarmOverride = NextAlarmOverride(
+                    slotID: slot.id,
+                    fireDate: fireDate,
+                    rhythm: draft
+                )
+            }
         }
+
+        self.draft = nil
         resyncAlarms()
     }
 

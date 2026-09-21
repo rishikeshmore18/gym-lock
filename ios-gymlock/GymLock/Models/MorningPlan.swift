@@ -41,11 +41,14 @@ enum SessionDaypart: String, Codable, Hashable, CaseIterable {
 /// Every duration here is wall-clock minutes rather than a stored `Date`, so the
 /// values survive timezone changes and daylight-saving transitions untouched —
 /// 6:30 AM stays 6:30 AM wherever the user wakes up.
-struct MorningRhythm: Codable, Hashable {
+struct MorningRhythm: Hashable {
     var bedtime: TimeOfDay
     var wakeTime: TimeOfDay
     var getReadyMinutes: Int
     var travelMinutes: Int
+    /// How long the user plans to be at the gym once they arrive. Drawn as
+    /// the coral bar on the day dial; nothing locks or unlocks on it.
+    var gymSessionMinutes: Int = 60
     /// False until the user has actually been through the rhythm screen, so the
     /// app can tell a real answer from a default.
     var hasBeenSet: Bool
@@ -61,7 +64,11 @@ struct MorningRhythm: Codable, Hashable {
     static let absoluteMaximumWindow = 120
 
     static let getReadyRange = 5...60
-    static let travelRange = 0...60
+    /// Wide enough that get-ready plus travel can reach the absolute window
+    /// ceiling; the ceiling itself is enforced by `absoluteMaximumWindow`.
+    static let travelRange = 0...115
+    /// A workout shorter than this is a warm-up; longer than this is a day out.
+    static let sessionRange = 15...240
 
     static let getReadyPresets = [10, 15, 20, 30, 45]
     static let travelPresets = [5, 10, 15, 20, 30, 45, 60]
@@ -96,12 +103,69 @@ struct MorningRhythm: Codable, Hashable {
     /// When they should be at the gym.
     var gymByTime: TimeOfDay { wakeTime.offset(byMinutes: windowMinutes) }
 
+    /// When the planned workout ends.
+    var gymDoneTime: TimeOfDay { wakeTime.offset(byMinutes: windowMinutes + gymSessionMinutes) }
+
     var exceedsAbsoluteMaximum: Bool { windowMinutes > Self.absoluteMaximumWindow }
     var exceedsNormalMaximum: Bool { windowMinutes > Self.normalMaximumWindow }
     var isBelowMinimum: Bool { windowMinutes < Self.minimumWindow }
 
     /// True when the window is usable as-is.
     var isWithinGuardrails: Bool { !exceedsAbsoluteMaximum && !isBelowMinimum }
+}
+
+extension MorningRhythm: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case bedtime, wakeTime, getReadyMinutes, travelMinutes, gymSessionMinutes, hasBeenSet
+    }
+
+    /// Plans saved before the workout length existed decode with the default,
+    /// so nobody's stored schedule is thrown away by the upgrade.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        bedtime = try container.decode(TimeOfDay.self, forKey: .bedtime)
+        wakeTime = try container.decode(TimeOfDay.self, forKey: .wakeTime)
+        getReadyMinutes = try container.decode(Int.self, forKey: .getReadyMinutes)
+        travelMinutes = try container.decode(Int.self, forKey: .travelMinutes)
+        gymSessionMinutes = try container.decodeIfPresent(Int.self, forKey: .gymSessionMinutes) ?? 60
+        hasBeenSet = try container.decode(Bool.self, forKey: .hasBeenSet)
+    }
+}
+
+// MARK: - Next alarm only
+
+/// A one-time change to the very next alarm, leaving the weekly schedule as
+/// it was: Apple's "Change Next Alarm Only".
+///
+/// Carries its own id because the alarm backends key alarms by id and the
+/// slot's weekly alarm must keep its own. Once the morning it describes is
+/// over the override is dropped and the schedule resumes untouched.
+struct NextAlarmOverride: Codable, Hashable, Identifiable {
+    var id: UUID
+    /// The slot whose next ring this replaces.
+    var slotID: UUID
+    /// The exact moment the one-off alarm rings.
+    var fireDate: Date
+    /// The rhythm in force for that one morning.
+    var rhythm: MorningRhythm
+
+    init(id: UUID = UUID(), slotID: UUID, fireDate: Date, rhythm: MorningRhythm) {
+        self.id = id
+        self.slotID = slotID
+        self.fireDate = fireDate
+        self.rhythm = rhythm
+    }
+
+    /// The override outlives its ring long enough for the morning to be
+    /// resumed, then expires so the weekly alarm for that day comes back.
+    func isActive(at now: Date) -> Bool {
+        let closesAt = fireDate.addingTimeInterval(Double(rhythm.windowMinutes + 30) * 60)
+        return now < closesAt
+    }
+
+    func weekday(calendar: Calendar = .current) -> Weekday? {
+        Weekday(rawValue: calendar.component(.weekday, from: fireDate))
+    }
 }
 
 // MARK: - Night lock
@@ -186,7 +250,7 @@ struct AlarmSlot: Codable, Hashable, Identifiable {
 ///
 /// The profile records what the user told us about themselves; this records the
 /// schedule they are actually running. Both live on `AppStore`.
-struct MorningPlan: Codable, Hashable {
+struct MorningPlan: Hashable {
     var rhythm: MorningRhythm
     var nightLock: NightLockWindow
     var slots: [AlarmSlot]
@@ -197,6 +261,8 @@ struct MorningPlan: Codable, Hashable {
     var recentMissions: [ActivationMissionType]
     /// Set once the plan has been reviewed on the Morning Alarm Plan screen.
     var hasBeenReviewed: Bool
+    /// A one-off change to the next alarm, if the user asked for one.
+    var nextAlarmOverride: NextAlarmOverride? = nil
 
     static let `default` = MorningPlan(
         rhythm: .default,
@@ -208,6 +274,32 @@ struct MorningPlan: Codable, Hashable {
     )
 
     // MARK: Derived
+
+    /// The override, but only while it still means something.
+    func activeOverride(at now: Date = Date()) -> NextAlarmOverride? {
+        guard let nextAlarmOverride, nextAlarmOverride.isActive(at: now),
+              slots.contains(where: { $0.id == nextAlarmOverride.slotID })
+        else { return nil }
+        return nextAlarmOverride
+    }
+
+    /// The rhythm that governs a morning starting at `date`: the one-off if
+    /// this is the morning it was made for, the schedule otherwise.
+    func rhythm(at date: Date = Date(), calendar: Calendar = .current) -> MorningRhythm {
+        guard let override = activeOverride(at: date),
+              calendar.isDate(date, inSameDayAs: override.fireDate)
+        else { return rhythm }
+        return override.rhythm
+    }
+
+    /// The slot an alarm id stands for. A one-off alarm carries its own id,
+    /// so this is how the morning it starts finds its way back to the slot.
+    func slot(forAlarmID id: UUID?) -> AlarmSlot? {
+        guard let id else { return nil }
+        if let slot = slots.first(where: { $0.id == id }) { return slot }
+        guard let override = nextAlarmOverride, override.id == id else { return nil }
+        return slots.first { $0.id == override.slotID }
+    }
 
     var enabledSlots: [AlarmSlot] {
         slots.filter { $0.isEnabled && !$0.days.isEmpty }
@@ -227,16 +319,40 @@ struct MorningPlan: Codable, Hashable {
     var windowMinutes: Int { rhythm.windowMinutes }
 
     /// The slot that will ring next, and the date it will ring on.
+    ///
+    /// A one-off override stands in for its slot's ring on that day: the slot
+    /// comes back with the override's alarm time so every screen that reads
+    /// "next alarm" agrees with what will actually ring.
     func nextOccurrence(after date: Date = Date(), calendar: Calendar = .current) -> (slot: AlarmSlot, fireDate: Date)? {
-        enabledSlots
-            .compactMap { slot -> (AlarmSlot, Date)? in
-                guard let next = slot.alarmTime.nextDate(after: date, on: slot.days, calendar: calendar) else {
-                    return nil
-                }
-                return (slot, next)
+        let override = activeOverride(at: date)
+
+        var candidates = enabledSlots.compactMap { slot -> (AlarmSlot, Date)? in
+            var days = slot.days
+            if let override, override.slotID == slot.id, let day = override.weekday(calendar: calendar) {
+                // The weekly ring on the override's day is replaced, not added to.
+                days.remove(day)
             }
+            guard !days.isEmpty,
+                  let next = slot.alarmTime.nextDate(after: date, on: days, calendar: calendar)
+            else { return nil }
+            return (slot, next)
+        }
+
+        if let override, override.fireDate > date,
+           var slot = slots.first(where: { $0.id == override.slotID }), slot.isEnabled {
+            slot.alarmTime = TimeOfDay(from: override.fireDate)
+            candidates.append((slot, override.fireDate))
+        }
+
+        return candidates
             .min { $0.1 < $1.1 }
             .map { (slot: $0.0, fireDate: $0.1) }
+    }
+
+    /// The rhythm the next alarm will run on.
+    func nextRhythm(after date: Date = Date(), calendar: Calendar = .current) -> MorningRhythm {
+        guard let next = nextOccurrence(after: date, calendar: calendar) else { return rhythm }
+        return rhythm(at: next.fireDate, calendar: calendar)
     }
 
     /// Sessions planned in a rolling 28-day period, used for the skip
@@ -267,6 +383,23 @@ struct MorningPlan: Codable, Hashable {
         plan.rhythm.wakeTime = profile.alarmTime
 
         return plan
+    }
+}
+
+extension MorningPlan: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case rhythm, nightLock, slots, missionsEnabled, recentMissions, hasBeenReviewed, nextAlarmOverride
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rhythm = try container.decode(MorningRhythm.self, forKey: .rhythm)
+        nightLock = try container.decode(NightLockWindow.self, forKey: .nightLock)
+        slots = try container.decode([AlarmSlot].self, forKey: .slots)
+        missionsEnabled = try container.decode(Bool.self, forKey: .missionsEnabled)
+        recentMissions = try container.decode([ActivationMissionType].self, forKey: .recentMissions)
+        hasBeenReviewed = try container.decode(Bool.self, forKey: .hasBeenReviewed)
+        nextAlarmOverride = try container.decodeIfPresent(NextAlarmOverride.self, forKey: .nextAlarmOverride)
     }
 }
 

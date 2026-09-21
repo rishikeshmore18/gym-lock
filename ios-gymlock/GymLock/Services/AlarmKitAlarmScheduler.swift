@@ -111,12 +111,17 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
             tintColor: Theme.accent
         )
 
-        let schedule = Alarm.Schedule.relative(
-            .init(
-                time: .init(hour: request.time.hour, minute: request.time.minute),
-                repeats: .weekly(request.weekdays.map(\.localeWeekday))
+        // A one-off rings at a fixed date; the schedule repeats weekly.
+        let schedule: Alarm.Schedule = if let fireDate = request.fireDate {
+            .fixed(fireDate)
+        } else {
+            .relative(
+                .init(
+                    time: .init(hour: request.time.hour, minute: request.time.minute),
+                    repeats: .weekly(request.weekdays.map(\.localeWeekday))
+                )
             )
-        )
+        }
 
         // Without a `stopIntent` the alarm silences and the app is never told
         // anything happened, which is precisely the bug that made the alarm
