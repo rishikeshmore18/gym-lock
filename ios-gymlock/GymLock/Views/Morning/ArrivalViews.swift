@@ -197,6 +197,9 @@ struct GymArrivedView: View {
     let momentumWeeks: Int
     let gymVisitsThisMonth: Int
     let shieldCapability: ShieldCapability
+    /// Only used for the share label: nothing else on this screen depends on
+    /// the hour, because arriving reads the same at 6:30 and at 18:30.
+    let voice: SessionVoice
     let onDone: () -> Void
     /// Opens the Story editor for this morning. The peak of the product is
     /// the one place sharing is worth offering, and it is offered, not pushed:
@@ -251,7 +254,7 @@ struct GymArrivedView: View {
                     .foregroundStyle(Theme.inkTertiary)
                     .frame(minHeight: 36)
                     .padding(.bottom, 8)
-                    .accessibilityLabel("Share this morning")
+                    .accessibilityLabel(voice.shareAccessibilityLabel)
                 }
             }
         }

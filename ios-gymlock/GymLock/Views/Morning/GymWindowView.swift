@@ -12,6 +12,9 @@ import SwiftUI
 struct GymWindowView: View {
     let session: GymSession
     let lockedApps: [DistractingApp]
+    /// Every line on this screen, chosen by the hour the session runs at.
+    private var voice: SessionVoice { SessionVoice(session: session) }
+
     let onDeparted: () -> Void
     let onEnd: () -> Void
 
@@ -96,13 +99,17 @@ struct GymWindowView: View {
 
     private func heading(hasLeft: Bool) -> some View {
         VStack(spacing: 4) {
-            Text(hasLeft ? "on your way" : "gym window started")
+            Text(voice.windowHeading(hasLeft: hasLeft))
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
 
-            Text(hasLeft ? "finish the trip." : "stay locked in. you've got this.")
+            Text(voice.windowSupport(hasLeft: hasLeft))
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.inkSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
     }
@@ -154,12 +161,13 @@ struct GymWindowView: View {
                 .background(Theme.accent, in: .circle)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(hasLeft ? "you're moving" : "stay locked in")
+                Text(voice.windowFooterTitle(hasLeft: hasLeft))
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(Theme.ink)
-                Text(hasLeft ? "the hard part is behind you." : "you're building discipline.")
+                Text(voice.windowFooterDetail(hasLeft: hasLeft))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)

@@ -11,6 +11,10 @@ enum GymSessionState: String, Codable, Hashable {
     case alarmScheduled
     case alarmFired
     case awaitingDecision
+    /// The one snooze, running. The user is still in the flow and their apps
+    /// are still locked — a snooze buys five minutes of sleep, not five
+    /// minutes of scrolling.
+    case snoozed
     case activationMission
     case preparing
     case departed
@@ -48,7 +52,7 @@ enum GymSessionState: String, Codable, Hashable {
     /// escalating and starts supporting.
     var hasCommitted: Bool {
         switch self {
-        case .idle, .alarmScheduled, .alarmFired, .awaitingDecision:
+        case .idle, .alarmScheduled, .alarmFired, .awaitingDecision, .snoozed:
             false
         default:
             true
@@ -62,7 +66,7 @@ enum GymSessionState: String, Codable, Hashable {
     /// user is confirmed at the gym, or resolves the day another way.
     var wantsShield: Bool {
         switch self {
-        case .alarmFired, .awaitingDecision, .activationMission,
+        case .alarmFired, .awaitingDecision, .snoozed, .activationMission,
              .preparing, .departed, .approachingGym,
              .windowExpired, .quickWorkoutActive:
             true
@@ -143,6 +147,17 @@ struct GymSession: Codable, Hashable, Identifiable {
     /// True once the 75% nudge has been shown, so it only ever appears once.
     var hasShownPreparationNudge: Bool
 
+    // MARK: Snooze
+
+    /// When the single snooze was taken. Its presence is the whole rule: the
+    /// button is not drawn a second time, so there is no counter to show and
+    /// nothing to shame anybody with.
+    var snoozeUsedAt: Date?
+    /// When the snooze re-fires. Absolute, like the window deadline, so a
+    /// relaunch or a suspended app resolves to the truth rather than restarting
+    /// the five minutes.
+    var snoozeExpiresAt: Date?
+
     var quickWorkoutMinutes: Int?
     var quickWorkoutStartedAt: Date?
     var quickWorkoutDeadline: Date?
@@ -189,6 +204,9 @@ struct GymSession: Codable, Hashable, Identifiable {
     /// A short grace period after "still going" on an expired window. This is
     /// not a fresh timer.
     static let graceMinutes = 10
+    /// The one snooze, in minutes. Short on purpose: long enough to be worth
+    /// taking, too short to fall back asleep properly.
+    static let snoozeMinutes = 5
     /// Fraction of the window at which the "still getting ready?" nudge appears.
     static let nudgeFraction: Double = 0.75
 
@@ -226,6 +244,8 @@ struct GymSession: Codable, Hashable, Identifiable {
         quickWorkoutStartedAt = nil
         quickWorkoutDeadline = nil
         cantTodayResolution = nil
+        snoozeUsedAt = nil
+        snoozeExpiresAt = nil
         arrivalCandidateAt = nil
         arrivedAt = nil
         gymArrivalVerified = false
@@ -244,6 +264,23 @@ struct GymSession: Codable, Hashable, Identifiable {
     }
 
     var canExtend: Bool { extensionMinutesUsed == 0 }
+
+    /// True once the single snooze has been spent, for the rest of this
+    /// session. Drives both the missing button and the shorter copy.
+    var hasSnoozed: Bool { snoozeUsedAt != nil }
+
+    /// Seconds left of the snooze, from the wall clock.
+    func snoozeRemaining(at now: Date = Date()) -> TimeInterval {
+        guard let snoozeExpiresAt else { return 0 }
+        return max(0, snoozeExpiresAt.timeIntervalSince(now))
+    }
+
+    /// True when a running snooze has elapsed and the alarm owes the user a
+    /// second look at the decision.
+    func snoozeHasElapsed(at now: Date = Date()) -> Bool {
+        guard state == .snoozed, let snoozeExpiresAt else { return false }
+        return now >= snoozeExpiresAt
+    }
 
     /// Seconds left before the window closes, from the wall clock.
     func remaining(at now: Date = Date()) -> TimeInterval {

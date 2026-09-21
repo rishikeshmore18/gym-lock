@@ -11,6 +11,7 @@ import Foundation
 enum SessionEventKind: String, Codable, Hashable, CaseIterable {
     case planned
     case alarmFired
+    case snoozed
     case committed
     case missionCompleted
     case departed
@@ -30,6 +31,7 @@ enum SessionEventKind: String, Codable, Hashable, CaseIterable {
         switch self {
         case .planned: "planned"
         case .alarmFired: "alarm fired"
+        case .snoozed: "snoozed once"
         case .committed: "I'm going"
         case .missionCompleted: "mission completed"
         case .departed: "departed"

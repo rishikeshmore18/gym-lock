@@ -21,8 +21,9 @@ final class MorningNotifier {
         static let comeback = "gymlock.session.comeback"
         static let moved = "gymlock.session.moved"
         static let arrival = "gymlock.session.arrival"
+        static let snooze = "gymlock.session.snooze"
 
-        static let all = [departure, deadline, comeback, moved, arrival]
+        static let all = [departure, deadline, comeback, moved, arrival, snooze]
     }
 
     @discardableResult
@@ -121,6 +122,34 @@ final class MorningNotifier {
         )
     }
 
+    // MARK: - Snooze
+
+    /// Brings the alarm back after the single snooze.
+    ///
+    /// A notification rather than silence, because the overwhelmingly likely
+    /// case is that the phone went back down on the nightstand and the app was
+    /// suspended within seconds. `timeSensitive` so it still arrives through a
+    /// sleep Focus — this is the one message in the whole app that exists
+    /// specifically to wake somebody.
+    func scheduleSnoozeRefire(at date: Date) async {
+        await cancel(ID.snooze)
+
+        let interval = date.timeIntervalSinceNow
+        guard interval > 1 else { return }
+
+        await deliver(
+            id: ID.snooze,
+            title: "Time to move",
+            body: "your five minutes are up. your apps are still locked.",
+            after: interval,
+            interruption: .timeSensitive
+        )
+    }
+
+    func cancelSnoozeRefire() async {
+        await cancel(ID.snooze)
+    }
+
     // MARK: - Comeback
 
     /// One notification on the next realistic opportunity after a missed day.
@@ -151,14 +180,20 @@ final class MorningNotifier {
 
     // MARK: - Private
 
-    private func deliver(id: String, title: String, body: String, after interval: TimeInterval) async {
+    private func deliver(
+        id: String,
+        title: String,
+        body: String,
+        after interval: TimeInterval,
+        interruption: UNNotificationInterruptionLevel = .active
+    ) async {
         guard await requestAuthorizationIfNeeded() else { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
-        content.interruptionLevel = .active
+        content.interruptionLevel = interruption
 
         let trigger = UNTimeIntervalNotificationTrigger(
             timeInterval: max(1, interval),

@@ -10,6 +10,7 @@ import SwiftUI
 /// "Still going" gives a short grace period, not a fresh timer. Restarting the
 /// full window would make the deadline meaningless.
 struct PlansChangedView: View {
+    let voice: SessionVoice
     let onStillGoing: () -> Void
     let onQuickWorkout: () -> Void
     let onCantToday: () -> Void
@@ -31,7 +32,7 @@ struct PlansChangedView: View {
                                 .font(.system(size: 32, weight: .bold))
                                 .foregroundStyle(Theme.ink)
 
-                            Text("the window closed. that's information, not a verdict.")
+                            Text(voice.plansChangedSupport)
                                 .font(.system(size: 16, weight: .medium))
                                 .foregroundStyle(Theme.inkSecondary)
                                 .multilineTextAlignment(.center)

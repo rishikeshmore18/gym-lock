@@ -12,6 +12,8 @@ import SwiftUI
 struct StillGettingReadyView: View {
     let session: GymSession
     let onLeaving: () -> Void
+
+    private var voice: SessionVoice { SessionVoice(session: session) }
     let onExtend: () -> Void
     let onQuickWorkout: () -> Void
     let onDismiss: () -> Void
@@ -81,11 +83,13 @@ struct StillGettingReadyView: View {
 
     private var heading: some View {
         VStack(spacing: 8) {
-            Text("still getting ready?")
+            Text(voice.nudgeHeading)
                 .font(.system(size: 30, weight: .bold))
                 .foregroundStyle(Theme.ink)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
 
-            Text("you've got this. let's make today a good one.")
+            Text(voice.nudgeSupport)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Theme.inkSecondary)
                 .multilineTextAlignment(.center)

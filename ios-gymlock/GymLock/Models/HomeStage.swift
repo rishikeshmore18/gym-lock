@@ -260,7 +260,7 @@ enum HomeCardDeriver {
         let pathSteps: Int
 
         switch session.state {
-        case .alarmFired, .awaitingDecision, .activationMission, .preparing:
+        case .alarmFired, .awaitingDecision, .snoozed, .activationMission, .preparing:
             hero = .committed(step: 1, total: total)
             pathSteps = 1
         case .quickWorkoutOffered, .quickWorkoutActive:
@@ -345,7 +345,7 @@ enum HomeCardDeriver {
 
     private static func nextDuringSession(_ session: GymSession, store: AppStore) -> NextCard {
         switch session.state {
-        case .alarmFired, .awaitingDecision, .activationMission, .preparing, .quickWorkoutOffered, .quickWorkoutActive:
+        case .alarmFired, .awaitingDecision, .snoozed, .activationMission, .preparing, .quickWorkoutOffered, .quickWorkoutActive:
             let leave = session.leaveMoment.map { Date.formattedClock($0) }
                 ?? store.plan.rhythm.leaveTime.displayString
             return NextCard(eyebrow: "LEAVE", value: leave, detail: nil, showsArrow: true)

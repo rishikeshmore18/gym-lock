@@ -11,6 +11,7 @@ import SwiftUI
 /// has to be. One extra screen, three visible doors, no guilt language, and
 /// nothing blocked.
 struct CantTodayView: View {
+    let voice: SessionVoice
     let hasEasySkipRemaining: Bool
     let skipsUsed: Int
     let allowance: Int
@@ -73,7 +74,7 @@ struct CantTodayView: View {
             VStack(spacing: 12) {
                 MorningChoiceRow(
                     title: "reschedule within 24h",
-                    subtitle: "pick it back up tomorrow",
+                    subtitle: voice.rescheduleDetail,
                     systemImage: "calendar.badge.clock"
                 ) {
                     onReschedule()
@@ -89,7 +90,7 @@ struct CantTodayView: View {
 
                 MorningChoiceRow(
                     title: "take today off",
-                    subtitle: "no penalty, no catch-up",
+                    subtitle: voice.dayOffDetail,
                     systemImage: "moon.zzz.fill"
                 ) {
                     onTakeTheDayOff()
@@ -107,7 +108,7 @@ struct CantTodayView: View {
 
                 MorningChoiceRow(
                     title: "reschedule within 24h",
-                    subtitle: "pick it back up tomorrow",
+                    subtitle: voice.rescheduleDetail,
                     systemImage: "calendar.badge.clock"
                 ) {
                     onReschedule()

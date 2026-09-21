@@ -122,6 +122,11 @@ final class GymSessionCoordinator {
     func applicationDidBecomeActive() {
         enforceShieldFailsafe()
         reconcileShieldWithSession()
+        // A snooze that ran out while the app was backgrounded must resolve the
+        // moment the user looks at the phone. Without this, someone who taps
+        // "5 more min" and puts the phone down could come back to a screen
+        // still promising an alarm that already passed.
+        resolveElapsedSnooze()
         Task { await health.fetchNewWorkouts() }
     }
 
@@ -134,7 +139,11 @@ final class GymSessionCoordinator {
         guard let session, session.state.isLive else { return nil }
 
         switch session.state {
-        case .alarmFired, .awaitingDecision:
+        // A running snooze stays on the decision screen. The screen itself
+        // knows it is counting down, which keeps the five minutes and the
+        // decision in one place rather than inventing a screen the user has to
+        // be moved off again.
+        case .alarmFired, .awaitingDecision, .snoozed:
             return .decision
         case .activationMission:
             return .mission
@@ -550,7 +559,12 @@ final class GymSessionCoordinator {
         guard var current = session else { return }
 
         current.committedAt = Date()
+        current.snoozeExpiresAt = nil
         current.state = .activationMission
+
+        // A snooze re-fire arriving after the user is already up would be the
+        // app waking someone who is standing in their kitchen.
+        Task { [notifier] in await notifier.cancelSnoozeRefire() }
 
         // A temporary anchor, captured now and deleted when the session ends.
         // Never labelled or stored as a home address.
@@ -571,6 +585,59 @@ final class GymSessionCoordinator {
 
         persist()
         startTicking()
+    }
+
+    // MARK: - Snooze
+
+    /// The one snooze.
+    ///
+    /// Deliberately not a general-purpose delay. The apps stay locked, the
+    /// session stays live, and the button is not offered again for the rest of
+    /// this session — `snoozeUsedAt` being set is the whole rule, so there is
+    /// no counter to display and nobody gets told off for using it once.
+    ///
+    /// Morning only: someone whose alarm rings after work is already awake, and
+    /// a snooze there would be a procrastination button at exactly the moment
+    /// the product exists to remove procrastination.
+    func snooze() {
+        guard var current = session else { return }
+        guard SessionVoice(session: current).allowsSnooze else { return }
+        guard current.state == .alarmFired || current.state == .awaitingDecision else { return }
+
+        let now = Date()
+        current.snoozeUsedAt = now
+        current.snoozeExpiresAt = now.addingTimeInterval(Double(GymSession.snoozeMinutes) * 60)
+        current.state = .snoozed
+        session = current
+
+        store?.record(.snoozed, sessionID: current.id)
+        Haptics.soft()
+        persist()
+
+        // Two belts. The ticker resolves it while the app is open; the
+        // notification covers the far more likely case of a phone going back
+        // face-down on the nightstand.
+        startTicking()
+        Task { [notifier] in
+            await notifier.scheduleSnoozeRefire(at: current.snoozeExpiresAt ?? now)
+        }
+    }
+
+    /// Brings the alarm back after the snooze has run out.
+    ///
+    /// Idempotent: a re-fire that arrives after the user already resolved the
+    /// day is dropped, because `state` is no longer `.snoozed`.
+    func resolveElapsedSnooze(at now: Date = Date()) {
+        guard var current = session, current.snoozeHasElapsed(at: now) else { return }
+
+        current.state = .awaitingDecision
+        current.snoozeExpiresAt = nil
+        session = current
+        persist()
+
+        // The shield never came off, so there is nothing to re-apply — only the
+        // decision to put back in front of the user.
+        Haptics.medium()
     }
 
     /// Pushes today's session later without abandoning it.
@@ -996,6 +1063,10 @@ final class GymSessionCoordinator {
             handleExpiry()
         }
 
+        // A snooze survives termination: the expiry is an absolute date, so a
+        // relaunch either resumes the remaining seconds or resolves it at once.
+        resolveElapsedSnooze()
+
         reconcileShieldWithSession()
         startTicking()
     }
@@ -1029,6 +1100,11 @@ final class GymSessionCoordinator {
         guard var current = session else {
             ticker?.cancel()
             ticker = nil
+            return
+        }
+
+        if current.state == .snoozed {
+            resolveElapsedSnooze()
             return
         }
 

@@ -13,6 +13,8 @@ struct DepartedView: View {
     let session: GymSession
     let onContinue: () -> Void
 
+    private var voice: SessionVoice { SessionVoice(session: session) }
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hasAppeared = false
 
@@ -40,12 +42,13 @@ struct DepartedView: View {
                         .opacity(hasAppeared ? 1 : 0)
 
                     VStack(spacing: 2) {
-                        Text("you're already moving.")
+                        Text(voice.departureSupport)
                         Text("just get there.")
                     }
                     .font(.system(size: 19, weight: .medium))
                     .foregroundStyle(Theme.inkSecondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .opacity(hasAppeared ? 1 : 0)
 
                     runner

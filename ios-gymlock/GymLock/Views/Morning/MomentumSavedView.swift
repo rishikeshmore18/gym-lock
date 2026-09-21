@@ -13,6 +13,8 @@ struct MomentumSavedView: View {
     let recentMomentum: [Bool]
     let onKeepGoing: () -> Void
     let onDone: () -> Void
+    /// Only used for the share label: the result reads the same at any hour.
+    let voice: SessionVoice
     /// Opens the Story editor for this morning — offered, never pushed.
     var onShare: (() -> Void)?
 
@@ -63,7 +65,7 @@ struct MomentumSavedView: View {
                     .foregroundStyle(Theme.inkTertiary)
                     .frame(minHeight: 36)
                     .padding(.bottom, 8)
-                    .accessibilityLabel("Share this morning")
+                    .accessibilityLabel(voice.shareAccessibilityLabel)
                 }
             }
         }

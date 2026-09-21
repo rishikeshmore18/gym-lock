@@ -69,8 +69,9 @@ struct MorningFlowView: View {
         switch route {
         case .decision:
             AlarmFiredView(
-                alarmTime: session.alarmTime,
+                session: session,
                 onGoing: { coordinator.commitToGoing() },
+                onSnooze: { coordinator.snooze() },
                 onMoveTime: { coordinator.moveTodaysTime(by: $0) },
                 onCantToday: { coordinator.beginCantToday() }
             )
@@ -100,6 +101,7 @@ struct MorningFlowView: View {
 
         case .plansChanged:
             PlansChangedView(
+                voice: SessionVoice(session: session),
                 onStillGoing: { coordinator.grantGrace() },
                 onQuickWorkout: { coordinator.offerQuickWorkout() },
                 onCantToday: { coordinator.beginCantToday() }
@@ -124,11 +126,13 @@ struct MorningFlowView: View {
                 recentMomentum: store.log.recentMomentum(),
                 onKeepGoing: { coordinator.acknowledgeResult() },
                 onDone: { coordinator.acknowledgeResult() },
+                voice: SessionVoice(session: session),
                 onShare: { shareOrigin = .session(day: session.day) }
             )
 
         case .cantToday:
             CantTodayView(
+                voice: SessionVoice(session: session),
                 hasEasySkipRemaining: coordinator.hasEasySkipRemaining,
                 skipsUsed: coordinator.easySkipsUsed,
                 allowance: coordinator.easySkipAllowance,
@@ -162,6 +166,7 @@ struct MorningFlowView: View {
                 momentumWeeks: store.streak.weeks,
                 gymVisitsThisMonth: store.log.verifiedGymVisitsThisMonth,
                 shieldCapability: coordinator.shieldCapability,
+                voice: SessionVoice(session: session),
                 onDone: { coordinator.acknowledgeResult() },
                 onShare: { shareOrigin = .session(day: session.day) }
             )

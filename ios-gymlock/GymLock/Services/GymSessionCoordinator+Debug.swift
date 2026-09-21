@@ -12,6 +12,9 @@ extension GymSessionCoordinator {
     enum DebugStep: String, CaseIterable, Identifiable {
         // The flow
         case alarmFired
+        case snoozedMorning
+        case snoozeElapsed
+        case alarmFiredEvening
         case imGoing
         case missionComplete
         case departed
@@ -47,7 +50,8 @@ extension GymSessionCoordinator {
 
         var section: String {
             switch self {
-            case .alarmFired, .imGoing, .missionComplete, .departed,
+            case .alarmFired, .snoozedMorning, .snoozeElapsed, .alarmFiredEvening,
+                 .imGoing, .missionComplete, .departed,
                  .countdownAt75, .countdownExpired:
                 "flow"
             case .familyControlsAuthorized, .familyControlsDenied,
@@ -66,6 +70,9 @@ extension GymSessionCoordinator {
         var label: String {
             switch self {
             case .alarmFired: "alarm fired"
+            case .snoozedMorning: "tapped 5 more min"
+            case .snoozeElapsed: "snooze ran out"
+            case .alarmFiredEvening: "alarm fired (evening)"
             case .imGoing: "tapped I'm going"
             case .missionComplete: "mission complete"
             case .departed: "departed"
@@ -104,6 +111,33 @@ extension GymSessionCoordinator {
             endSession()
             debugStore?.debugSeedGym()
             beginSession(for: debugStore?.plan.enabledSlots.first)
+
+        case .snoozedMorning:
+            // Forced to a morning time first: the snooze does not exist at any
+            // other hour, so simulating it from an evening slot would silently
+            // do nothing and look like a bug.
+            simulate(.alarmFired)
+            guard var current = session else { return }
+            current.alarmTime = TimeOfDay(hour: 6, minute: 30)
+            current.isMorningSession = true
+            debugReplace(current)
+            snooze()
+
+        case .snoozeElapsed:
+            if session?.state != .snoozed { simulate(.snoozedMorning) }
+            guard var current = session else { return }
+            current.snoozeExpiresAt = Date().addingTimeInterval(-1)
+            debugReplace(current)
+            resolveElapsedSnooze()
+
+        case .alarmFiredEvening:
+            // The other half of the copy: same flow, no snooze, different
+            // wording from the alarm screen right through to "can't today".
+            simulate(.alarmFired)
+            guard var current = session else { return }
+            current.alarmTime = TimeOfDay(hour: 18, minute: 0)
+            current.isMorningSession = false
+            debugReplace(current)
 
         case .imGoing:
             if session == nil { simulate(.alarmFired) }
