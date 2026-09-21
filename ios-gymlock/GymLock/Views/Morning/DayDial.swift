@@ -210,11 +210,39 @@ struct DayDial: View {
 
     // MARK: Metrics
 
-    private var gutterWidth: CGFloat { size * 0.165 }
+    private var gutterWidth: CGFloat { size * 0.18 }
     private var gutterRadius: CGFloat { (size - gutterWidth) / 2 }
-    private var barWidth: CGFloat { gutterWidth * 0.74 }
-    private var iconSize: CGFloat { barWidth * 0.52 }
+    private var barWidth: CGFloat { gutterWidth * 0.86 }
+    private var iconSize: CGFloat { barWidth * 0.5 }
     private var faceRadius: CGFloat { gutterRadius - gutterWidth / 2 - size * 0.012 }
+
+    /// Minutes of arc per point along the bar centreline.
+    private var minutesPerPoint: Double { 1440 / (2 * .pi * Double(gutterRadius)) }
+    /// Half a round cap, in minutes: how far the stroke centreline must stop
+    /// short of a bar's true start and end so the cap lands exactly on them.
+    private var capMinutes: Double { Double(barWidth / 2) * minutesPerPoint }
+    /// Daylight between the night bar and the gym bar at wake, so the two read
+    /// as two pills sharing one gutter and never as one bent shape.
+    private var gapMinutes: Double { Double(size * 0.022) * minutesPerPoint }
+
+    /// Where a bar's stroke centreline really runs, once its round caps are
+    /// pulled inside its span. Very short spans collapse to a dot at the
+    /// span's middle rather than poking past their ends.
+    private func barCentreline(startMinutes: Double, spanMinutes: Double) -> (start: Double, span: Double) {
+        let inset = min(capMinutes, spanMinutes / 2)
+        return (startMinutes + inset, max(spanMinutes - 2 * inset, 0.05))
+    }
+
+    private var sleepCentreline: (start: Double, span: Double) {
+        barCentreline(startMinutes: Double(bedtimeMinutes), spanMinutes: Double(sleepMinutes))
+    }
+
+    private var gymCentreline: (start: Double, span: Double) {
+        barCentreline(
+            startMinutes: Double(wakeMinutes) + gapMinutes,
+            spanMinutes: max(Double(windowMinutes) - gapMinutes, 1)
+        )
+    }
 
     /// How close, in minutes of arc, a finger must be to an icon to grab it.
     private var grabTolerance: Int {
@@ -334,26 +362,24 @@ struct DayDial: View {
     /// The night, bedtime to wake, in ink. Round-capped so it reads as a bar
     /// lying in the gutter rather than a slice of ring.
     private var sleepBar: some View {
-        bar(startMinutes: bedtimeMinutes, spanMinutes: Double(sleepMinutes), colour: Theme.ink)
+        let line = sleepCentreline
+        return bar(startMinutes: line.start, spanMinutes: line.span, colour: Theme.ink)
     }
 
     /// The gym window, wake to gym-by. The one coral element on the screen,
     /// and the right one: this window is what the app is for.
     private var gymBar: some View {
         let extra = Double(DayDialModel.rubberband(gymOvershootMinutes * 0.25, dimension: size))
-        return bar(
-            startMinutes: wakeMinutes,
-            spanMinutes: Double(windowMinutes) + extra,
-            colour: Theme.accent
-        )
+        let line = gymCentreline
+        return bar(startMinutes: line.start, spanMinutes: line.span + extra, colour: Theme.accent)
     }
 
-    private func bar(startMinutes: Int, spanMinutes: Double, colour: Color) -> some View {
+    private func bar(startMinutes: Double, spanMinutes: Double, colour: Color) -> some View {
         Circle()
             .trim(from: 0, to: max(spanMinutes / 1440, 0.0005))
             .stroke(colour, style: StrokeStyle(lineWidth: barWidth, lineCap: .round))
             .frame(width: gutterRadius * 2, height: gutterRadius * 2)
-            .rotationEffect(.degrees(DayDialModel.angleDegrees(minutes: startMinutes) - 90))
+            .rotationEffect(.degrees(startMinutes / 1440 * 360 - 90))
     }
 
     /// The fine radial lines along both bars, as on Apple's dial. Drawn in one
@@ -385,7 +411,11 @@ struct DayDial: View {
             }
 
             hatch(from: bedtimeMinutes, span: sleepMinutes, colour: Theme.surface.opacity(0.28))
-            hatch(from: wakeMinutes, span: windowMinutes, colour: Theme.surface.opacity(0.42))
+            hatch(
+                from: wakeMinutes + Int(gapMinutes.rounded()),
+                span: windowMinutes - Int(gapMinutes.rounded()),
+                colour: Theme.surface.opacity(0.42)
+            )
         }
         .frame(width: size, height: size)
         .allowsHitTesting(false)
@@ -405,12 +435,17 @@ struct DayDial: View {
     private func iconSpec(_ which: DayDialModel.Grab) -> IconSpec {
         switch which {
         case .bedtime:
-            IconSpec(minutes: bedtimeMinutes, symbol: "bed.double.fill", label: "Bedtime", extraDegrees: 0)
+            IconSpec(minutes: Int(sleepCentreline.start.rounded()), symbol: "bed.double.fill", label: "Bedtime", extraDegrees: 0)
         case .wake, .sleepBody:
-            IconSpec(minutes: wakeMinutes, symbol: "alarm.fill", label: "Wake up", extraDegrees: 0)
+            IconSpec(
+                minutes: Int((sleepCentreline.start + sleepCentreline.span).rounded()),
+                symbol: "alarm.fill",
+                label: "Wake up",
+                extraDegrees: 0
+            )
         case .gym:
             IconSpec(
-                minutes: gymByMinutes,
+                minutes: Int((gymCentreline.start + gymCentreline.span).rounded()),
                 symbol: "figure.strengthtraining.traditional",
                 label: "Gym by",
                 extraDegrees: Double(DayDialModel.rubberband(gymOvershootMinutes * 0.25, dimension: size))
@@ -436,10 +471,20 @@ struct DayDial: View {
             .offset(DayDialModel.offset(minutes: minutes, radius: gutterRadius, extraDegrees: extraDegrees))
             .accessibilityElement()
             .accessibilityLabel(label)
-            .accessibilityValue(time(at: minutes).displayString)
+            .accessibilityValue(time(at: accessibilityMinutes(which)).displayString)
             .accessibilityAdjustableAction { direction in
                 adjust(which, byMinutes: direction == .increment ? 5 : -5)
             }
+    }
+
+    /// The icon is drawn at the bar's cap centre; VoiceOver still speaks the
+    /// real time it stands for.
+    private func accessibilityMinutes(_ which: DayDialModel.Grab) -> Int {
+        switch which {
+        case .bedtime: bedtimeMinutes
+        case .wake, .sleepBody: wakeMinutes
+        case .gym: gymByMinutes
+        }
     }
 
     private func time(at minutes: Int) -> TimeOfDay {
