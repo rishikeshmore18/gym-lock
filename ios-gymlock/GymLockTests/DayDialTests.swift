@@ -16,6 +16,17 @@ struct DayDialTests {
         return CGPoint(x: centre.x + offset.width, y: centre.y + offset.height)
     }
 
+    // The real dial at 320pt: a gutter radius of about 131pt, a bar 49.5pt
+    // wide, a glyph 23.8pt wide, and therefore a round cap 43 minutes of arc
+    // deep. Every geometry test below uses these so the numbers mean what
+    // they mean on a real screen.
+    private static let ring: CGFloat = 131.2
+    private static let barWidth: CGFloat = 49.536
+    private static let glyph: CGFloat = 23.777
+    private static let cap = 43
+    private static let tolerance = 86
+    private static let slop = 24
+
     // MARK: - Angle to minutes
 
     /// All four quadrants, plus the awkward edges: exactly midnight, a few
@@ -45,8 +56,6 @@ struct DayDialTests {
         #expect(DayDialModel.travelMinutes(desiredWindow: 45, getReadyMinutes: 20) == 25)
     }
 
-    /// The gym bar can be dragged anywhere the dial has room for it; the only
-    /// hard limits are the two-hour window and the space left by the night.
     @Test func theGymWindowIsOnlyLimitedByTheDayAndTheCeiling() {
         let wide = DayDialModel.clampedWindow(110, getReadyMinutes: 20, sleepMinutes: 450, sessionMinutes: 60)
         #expect(wide == 110)
@@ -74,6 +83,80 @@ struct DayDialTests {
             #expect(MorningRhythm.travelRange.contains(travel))
             #expect(60 + travel <= MorningRhythm.absoluteMaximumWindow)
         }
+    }
+
+    // MARK: - Dragging the visit around the whole day
+
+    /// Inside the two-hour window the drag is absorbed by the window itself
+    /// and nothing else moves.
+    @Test func aShortDragJustWidensTheWindow() {
+        let shift = DayDialModel.shiftGym(
+            desiredWindow: 110,
+            getReadyMinutes: 20,
+            sleepMinutes: 450,
+            sessionMinutes: 60
+        )
+        #expect(shift.windowMinutes == 110)
+        #expect(shift.towMinutes == 0)
+    }
+
+    /// Past the ceiling the window stops growing and the alarm is towed
+    /// instead, which is what lets the visit travel past noon rather than
+    /// dying against an invisible wall two hours after the alarm.
+    @Test func draggingTheVisitPastTheWindowCeilingTowsTheAlarm() {
+        let shift = DayDialModel.shiftGym(
+            desiredWindow: 300,
+            getReadyMinutes: 20,
+            sleepMinutes: 450,
+            sessionMinutes: 60
+        )
+        #expect(shift.windowMinutes == MorningRhythm.absoluteMaximumWindow)
+        #expect(shift.towMinutes == 300 - MorningRhythm.absoluteMaximumWindow)
+    }
+
+    /// The whole point: a 07:00 alarm must be able to put the gym at 16:00.
+    /// The window is unchanged, so the promise the app makes about the alarm
+    /// leading into the trip still holds.
+    @Test func theVisitCanBeDraggedRightRoundTheDial() {
+        let getReady = 20
+        let session = 60
+        let sleep = 450
+        var towed = 0
+
+        for desired in stride(from: 0, through: 1200, by: 15) {
+            let shift = DayDialModel.shiftGym(
+                desiredWindow: desired,
+                getReadyMinutes: getReady,
+                sleepMinutes: sleep,
+                sessionMinutes: session
+            )
+            // Whatever is asked for, the visit ends up exactly there: the
+            // window plus whatever the night was towed by.
+            #expect(shift.windowMinutes + shift.towMinutes == desired)
+            #expect(shift.windowMinutes <= MorningRhythm.absoluteMaximumWindow)
+            if shift.towMinutes > 0 { towed += 1 }
+        }
+
+        #expect(towed > 0)
+    }
+
+    /// Towing moves the night bodily, so the user does not silently lose
+    /// sleep by dragging their workout later.
+    @Test func towingKeepsTheNightTheSameLength() {
+        var rhythm = MorningRhythm.default
+        let sleepBefore = rhythm.sleepMinutes
+
+        let shift = DayDialModel.shiftGym(
+            desiredWindow: 400,
+            getReadyMinutes: rhythm.getReadyMinutes,
+            sleepMinutes: sleepBefore,
+            sessionMinutes: rhythm.gymSessionMinutes
+        )
+        rhythm.bedtime = rhythm.bedtime.offset(byMinutes: shift.towMinutes)
+        rhythm.wakeTime = rhythm.wakeTime.offset(byMinutes: shift.towMinutes)
+
+        #expect(rhythm.sleepMinutes == sleepBefore)
+        #expect(rhythm.windowMinutes <= MorningRhythm.absoluteMaximumWindow)
     }
 
     /// Moving the alarm end moves wake time; the gym bar must follow it
@@ -115,27 +198,53 @@ struct DayDialTests {
         #expect(large < 400)
     }
 
-    // MARK: - How many icons a bar can carry
+    // MARK: - Drawn geometry
 
-    // The real dial at 320pt: a gutter radius of about 131pt, a bar 49pt
-    // wide, and a glyph 24pt wide.
-    private static let ring: CGFloat = 131
-    private static let barWidth: CGFloat = 49
-    private static let glyph: CGFloat = 24
+    /// A stroke with round caps cannot draw shorter than it is wide, so a
+    /// one-hour visit occupies 86 minutes of arc even though it means 60.
+    /// Everything the finger touches has to be measured against this, which
+    /// is the whole reason the grab zones were landing in the wrong place.
+    @Test func aShortBarIsDrawnWiderThanItsValue() {
+        let drawn = DayDialModel.drawnExtent(start: 450, span: 60, capMinutes: Self.cap)
+        #expect(drawn.span == 2 * Self.cap)
+        // Centred on the value, so it spills equally past both ends.
+        #expect(drawn.start == 480 - Self.cap)
+    }
+
+    /// A bar longer than its own caps is drawn exactly where its value says.
+    @Test func aLongBarIsDrawnAtItsValue() {
+        let drawn = DayDialModel.drawnExtent(start: 1380, span: 450, capMinutes: Self.cap)
+        #expect(drawn.start == 1380)
+        #expect(drawn.span == 450)
+    }
+
+    @Test func drawnGeometryWrapsThroughMidnight() {
+        let drawn = DayDialModel.drawnExtent(start: 1430, span: 10, capMinutes: Self.cap)
+        #expect(drawn.span == 2 * Self.cap)
+        // 23:55 centre, minus a cap, lands before midnight rather than at a
+        // negative minute.
+        #expect(drawn.start == (1435 - Self.cap + 1440) % 1440)
+        #expect(drawn.start < 1440)
+    }
+
+    // MARK: - How many icons a bar can carry
 
     private func fitsBothIcons(_ span: Int, wasShowing: Bool = false) -> Bool {
         DayDialModel.showsBothIcons(
-            spanMinutes: span,
-            radius: Self.ring,
+            drawnArcLength: DayDialModel.drawnArcLength(
+                spanMinutes: span,
+                radius: Self.ring,
+                barWidth: Self.barWidth
+            ),
             barWidth: Self.barWidth,
             glyphWidth: Self.glyph,
             wasShowing: wasShowing
         )
     }
 
-    /// The default one-hour gym visit is far too short for two icons: its arc
-    /// is narrower than the bar is wide. Drawing both is exactly the overlap
-    /// this rule exists to prevent.
+    /// The default one-hour gym visit is far too short for two icons: drawn,
+    /// it is barely wider than the bar itself. Drawing both is exactly the
+    /// overlap this rule exists to prevent.
     @Test func aShortBarCarriesOnlyOneIcon() {
         #expect(fitsBothIcons(60) == false)
         #expect(fitsBothIcons(90) == false)
@@ -160,6 +269,19 @@ struct DayDialTests {
         #expect(fitsBothIcons(appearsAt - 5, wasShowing: true))
     }
 
+    /// The drawn length never goes below the bar width, however short the
+    /// value, because that is what a round cap does.
+    @Test func drawnLengthNeverFallsBelowTheBarWidth() {
+        for span in stride(from: 0, through: 120, by: 5) {
+            let drawn = DayDialModel.drawnArcLength(
+                spanMinutes: span,
+                radius: Self.ring,
+                barWidth: Self.barWidth
+            )
+            #expect(drawn >= Self.barWidth)
+        }
+    }
+
     @Test func arcLengthMatchesTheRing() {
         let full = DayDialModel.arcLength(minutes: 1440, radius: 100)
         #expect(abs(full - CGFloat(2 * Double.pi * 100)) < 0.001)
@@ -168,26 +290,31 @@ struct DayDialTests {
 
     // MARK: - Grabbing
 
-    private func sleepBar(_ start: Int, _ span: Int, showsBothIcons: Bool = true) -> DayDialModel.Bar {
-        DayDialModel.Bar(
+    private func bar(
+        _ start: Int,
+        _ span: Int,
+        startGrab: DayDialModel.Grab,
+        endGrab: DayDialModel.Grab,
+        bodyGrab: DayDialModel.Grab
+    ) -> DayDialModel.Bar {
+        let drawn = DayDialModel.drawnExtent(start: start, span: span, capMinutes: Self.cap)
+        return DayDialModel.Bar(
             start: start,
             span: span,
-            startGrab: .bedtime,
-            endGrab: .wake,
-            bodyGrab: .sleepBody,
-            showsBothIcons: showsBothIcons
+            drawnStart: drawn.start,
+            drawnSpan: drawn.span,
+            startGrab: startGrab,
+            endGrab: endGrab,
+            bodyGrab: bodyGrab
         )
     }
 
-    private func gymBar(_ start: Int, _ span: Int, showsBothIcons: Bool) -> DayDialModel.Bar {
-        DayDialModel.Bar(
-            start: start,
-            span: span,
-            startGrab: .gymStart,
-            endGrab: .gymEnd,
-            bodyGrab: .gymBody,
-            showsBothIcons: showsBothIcons
-        )
+    private func sleepBar(_ start: Int, _ span: Int) -> DayDialModel.Bar {
+        bar(start, span, startGrab: .bedtime, endGrab: .wake, bodyGrab: .sleepBody)
+    }
+
+    private func gymBar(_ start: Int, _ span: Int) -> DayDialModel.Bar {
+        bar(start, span, startGrab: .gymStart, endGrab: .gymEnd, bodyGrab: .gymBody)
     }
 
     /// A finger near an end takes that end, the middle of a bar takes the
@@ -196,10 +323,10 @@ struct DayDialTests {
         let bedtime = 23 * 60
         let wake = 6 * 60 + 30
         let gym = 7 * 60 + 30
-        // A three-hour visit, long enough for the gym bar to show both ends.
-        let bars = [gymBar(gym, 180, showsBothIcons: true), sleepBar(bedtime, 450)]
+        // A three-hour visit, long enough to be drawn at its own value.
+        let bars = [gymBar(gym, 180), sleepBar(bedtime, 450)]
         func grab(_ finger: Int) -> DayDialModel.Grab? {
-            DayDialModel.grab(fingerMinutes: finger, bars: bars, tolerance: 20)
+            DayDialModel.grab(fingerMinutes: finger, bars: bars, tolerance: Self.tolerance, slop: 0)
         }
 
         #expect(grab(bedtime + 10) == .bedtime)
@@ -211,64 +338,70 @@ struct DayDialTests {
         #expect(grab(14 * 60) == nil)
     }
 
-    /// A collapsed bar is a handle: anywhere inside the pill slides the whole
-    /// thing, rather than resizing an end that has no icon to show for it.
-    @Test func aCollapsedBarSlidesFromAnywhereInside() {
+    /// The bug the user hit: on a one-hour visit, a finger on the visible end
+    /// of the pill must resize it, not slide the whole thing. The end is
+    /// where it *looks*, which is 43 minutes past the value.
+    @Test func theVisibleEndOfAShortBarResizesIt() {
         let gym = 7 * 60 + 30
-        let bars = [gymBar(gym, 60, showsBothIcons: false), sleepBar(23 * 60, 450)]
+        let bars = [gymBar(gym, 60), sleepBar(23 * 60, 450)]
         func grab(_ finger: Int) -> DayDialModel.Grab? {
-            DayDialModel.grab(fingerMinutes: finger, bars: bars, tolerance: 85)
+            DayDialModel.grab(fingerMinutes: finger, bars: bars, tolerance: Self.tolerance, slop: Self.slop)
         }
 
-        #expect(grab(gym) == .gymBody)
-        #expect(grab(gym + 5) == .gymBody)
+        // The drawn pill runs from gym-13 to gym+73 around a 60-minute value.
+        #expect(grab(gym + 70) == .gymEnd)
+        #expect(grab(gym - 10) == .gymStart)
+        // And its middle still slides the visit.
         #expect(grab(gym + 30) == .gymBody)
-        #expect(grab(gym + 60) == .gymBody)
     }
 
-    /// Its length stays reachable from just past either cap, which is the
-    /// only room left once the inside belongs to the body.
-    @Test func aCollapsedBarResizesFromJustOutsideIt() {
-        let gym = 7 * 60 + 30
-        let bars = [gymBar(gym, 60, showsBothIcons: false), sleepBar(23 * 60, 450)]
+    /// Even the shortest pill keeps a middle third to slide by, so a visit
+    /// can never become all handle and no body.
+    @Test func everyBarKeepsAMiddleToSlideBy() {
+        for span in stride(from: 15, through: 240, by: 15) {
+            let gym = 7 * 60 + 30
+            let pill = gymBar(gym, span)
+            let middle = (pill.drawnStart + pill.drawnSpan / 2) % 1440
+            let zone = DayDialModel.zone(fingerMinutes: middle, bar: pill, tolerance: Self.tolerance)
+            #expect(zone == .body)
+        }
+    }
+
+    /// A long night does not get two-hour handles: the end zones are capped
+    /// at one bar width however long the bar is.
+    @Test func aLongBarHasProportionateHandles() {
+        let pill = sleepBar(23 * 60, 450)
+        // A third of the way in is comfortably body, not an end.
+        #expect(DayDialModel.zone(fingerMinutes: (23 * 60 + 150) % 1440, bar: pill, tolerance: Self.tolerance) == .body)
+        // Just inside the leading cap is the bedtime end.
+        #expect(DayDialModel.zone(fingerMinutes: (23 * 60 + 10) % 1440, bar: pill, tolerance: Self.tolerance) == .start)
+    }
+
+    /// An end beats a body, so where the two pills overlap the buried alarm
+    /// is still reachable instead of being swallowed by the visit on top.
+    @Test func aBuriedEndIsStillReachableUnderAnotherBar() {
+        let wake = 6 * 60 + 30
+        // A visit whose drawn pill covers the alarm end of the night.
+        let bars = [gymBar(wake - 30, 60), sleepBar(23 * 60, 450)]
+        #expect(
+            DayDialModel.grab(fingerMinutes: wake - 5, bars: bars, tolerance: Self.tolerance, slop: 0) == .wake
+        )
+    }
+
+    /// Off both pills, the nearest end wins rather than the topmost bar.
+    /// Without that, the visit steals touches that plainly belong to the
+    /// alarm sitting a few minutes away from it.
+    @Test func aNearMissGoesToTheNearestEnd() {
+        let wake = 6 * 60 + 30
+        let gym = wake + 120
+        let bars = [gymBar(gym, 60), sleepBar(23 * 60, 450)]
         func grab(_ finger: Int) -> DayDialModel.Grab? {
-            DayDialModel.grab(fingerMinutes: finger, bars: bars, tolerance: 85)
+            DayDialModel.grab(fingerMinutes: finger, bars: bars, tolerance: Self.tolerance, slop: Self.slop)
         }
 
-        #expect(grab(gym + 90) == .gymEnd)
-        #expect(grab(gym - 20) == .gymStart)
-        // Far beyond the reach of either end, nothing is grabbed.
-        #expect(grab(gym + 400) == nil)
-    }
-
-    /// The empty window between the alarm and the gym is split down the
-    /// middle: nearer the alarm takes the alarm, nearer the gym takes the
-    /// gym. Without that, a generous tolerance lets the gym steal the alarm.
-    @Test func theGapBetweenTwoBarsIsSplitByWhicheverEndIsNearer() {
-        let wake = 6 * 60 + 30
-        let gym = wake + 40
-        let bars = [gymBar(gym, 60, showsBothIcons: false), sleepBar(23 * 60, 450)]
-        func grab(_ finger: Int) -> DayDialModel.Grab? {
-            DayDialModel.grab(fingerMinutes: finger, bars: bars, tolerance: 85)
-        }
-
-        #expect(grab(wake + 5) == .wake)
-        #expect(grab(gym - 5) == .gymStart)
-    }
-
-    /// On a genuine tie the gym bar wins, because it is the one drawn on top.
-    @Test func theGymEndWinsATieWithWake() {
-        let wake = 6 * 60 + 30
-        let gym = wake + 20
-        let bars = [gymBar(gym, 60, showsBothIcons: false), sleepBar(23 * 60, 450)]
-        #expect(DayDialModel.grab(fingerMinutes: wake + 10, bars: bars, tolerance: 85) == .gymStart)
-    }
-
-    /// An expanded bar keeps its middle third for sliding, so a long night is
-    /// never all handle and no body.
-    @Test func anExpandedBarKeepsAMiddleToSlideBy() {
-        let bars = [sleepBar(23 * 60, 450, showsBothIcons: true)]
-        #expect(DayDialModel.grab(fingerMinutes: (23 * 60 + 225) % 1440, bars: bars, tolerance: 600) == .sleepBody)
+        #expect(grab(wake + 10) == .wake)
+        // Far from everything, nothing is grabbed: a stray tap moves nothing.
+        #expect(grab(14 * 60) == nil)
     }
 
     /// A finger crossing midnight is a small step, not a jump of a day.

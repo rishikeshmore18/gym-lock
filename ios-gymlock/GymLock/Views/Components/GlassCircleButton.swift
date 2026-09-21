@@ -1,18 +1,25 @@
 import SwiftUI
 
 /// The round Liquid Glass buttons Apple puts in the corners of its full-screen
-/// editors: the X and the tick on Change Wake Up, the close circle in Photos.
+/// editors: the close circle in Photos, the X and tick on Change Wake Up.
+///
+/// On iOS 26 this is Apple's own `.glass` and `.glassProminent` button style.
+/// Nothing here reimplements the interaction: the material lenses, brightens
+/// and squashes under the finger by itself, and that is where the bubble feel
+/// comes from. An earlier version wrapped the material in a custom
+/// `ButtonStyle`, which replaced all of that with a hand-rolled scale and lost
+/// the feel entirely.
+///
+/// These are also deliberately **not** toolbar items. A `ToolbarItem` on
+/// iOS 26 styles its own content, so glass applied inside one is dropped and
+/// the button collapses to a bare tinted glyph. The Alarm screen draws its own
+/// header row instead.
 ///
 /// Two roles, matching Apple's own pairing:
-/// - `.neutral` — plain interactive glass with an ink glyph. Dismiss, back.
-/// - `.prominent` — ink-tinted glass with a white glyph. The one action that
-///   commits. Coral is not used here: on this screen the single accent
+/// - `.neutral` — plain glass with an ink glyph. Dismiss, back.
+/// - `.prominent` — ink-tinted glass with a white glyph, for the one action
+///   that commits. Coral is not used: on this screen the single accent
 ///   belongs to the gym bar on the dial.
-///
-/// Presses behave like a bubble. The disc squashes under the finger and
-/// springs back past its resting size on release. On iOS 26 the glass itself
-/// also lenses and brightens under the touch, which is where most of the life
-/// comes from; the spring is what carries it on iOS 18.
 struct GlassCircleButton: View {
     enum Role {
         case neutral
@@ -22,87 +29,135 @@ struct GlassCircleButton: View {
     let symbol: String
     let label: String
     var role: Role = .neutral
-    var diameter: CGFloat = 36
+    var diameter: CGFloat = 40
     let action: () -> Void
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    @ViewBuilder
     var body: some View {
-        Button {
-            Haptics.tap()
+        if #available(iOS 26.0, *) {
+            if reduceTransparency {
+                fallback
+            } else {
+                appleGlass
+            }
+        } else {
+            fallback
+        }
+    }
+
+    private var glyph: some View {
+        Image(systemName: symbol)
+            .font(.system(size: diameter * 0.40, weight: .semibold))
+            .foregroundStyle(role == .prominent ? Color.white : Theme.ink)
+            .frame(width: diameter, height: diameter)
+    }
+
+    /// The real thing.
+    @available(iOS 26.0, *)
+    @ViewBuilder
+    private var appleGlass: some View {
+        let button = Button {
+            Haptics.press(intensity: 0.5)
             action()
         } label: {
-            Image(systemName: symbol)
-                .font(.system(size: diameter * 0.44, weight: .bold))
-                .foregroundStyle(role == .prominent ? Theme.surface : Theme.ink)
-                .frame(width: diameter, height: diameter)
-                .contentShape(.circle)
+            glyph
         }
-        .buttonStyle(BubbleGlassButtonStyle(role: role))
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(label)
+
+        switch role {
+        case .neutral:
+            button.buttonStyle(.glass)
+        case .prominent:
+            button.buttonStyle(.glassProminent).tint(Theme.ink)
+        }
+    }
+
+    /// iOS 18 has no Liquid Glass, so the disc is built by hand: a blurred
+    /// base, a specular highlight across the top, a rim that catches light on
+    /// one side and darkens on the other, and a lift shadow. The warm
+    /// off-white canvas gives clear material almost nothing to refract, so
+    /// without the rim and the shadow the button reads as a bare icon.
+    private var fallback: some View {
+        Button {
+            Haptics.press(intensity: 0.5)
+            action()
+        } label: {
+            glyph
+        }
+        .buttonStyle(
+            LegacyGlassButtonStyle(role: role, isOpaque: reduceTransparency)
+        )
         .accessibilityLabel(label)
     }
 }
 
-/// Squash on press, spring past resting size on release.
-private struct BubbleGlassButtonStyle: ButtonStyle {
+private struct LegacyGlassButtonStyle: ButtonStyle {
     let role: GlassCircleButton.Role
+    let isOpaque: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .modifier(GlassDisc(role: role, isPressed: configuration.isPressed, reduceTransparency: reduceTransparency))
-            .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? 0.86 : 1))
-            .opacity(reduceMotion && configuration.isPressed ? 0.6 : 1)
+        let pressed = configuration.isPressed
+
+        return configuration.label
+            .background { disc(pressed: pressed) }
+            .scaleEffect(reduceMotion ? 1 : (pressed ? 0.90 : 1))
             .animation(
-                reduceMotion ? .easeOut(duration: 0.12) : .bouncy(duration: 0.34, extraBounce: 0.3),
-                value: configuration.isPressed
+                reduceMotion ? .easeOut(duration: 0.12) : .bouncy(duration: 0.32, extraBounce: 0.3),
+                value: pressed
             )
-            .onChange(of: configuration.isPressed) { _, pressed in
-                if pressed { Haptics.press(intensity: 0.55) }
-            }
     }
-}
 
-/// The material itself, with honest fallbacks. A warm off-white canvas gives
-/// clear glass almost nothing to refract, so the pre-iOS-26 path leans on a
-/// hairline and a soft drop shadow to keep the disc visible.
-private struct GlassDisc: ViewModifier {
-    let role: GlassCircleButton.Role
-    let isPressed: Bool
-    let reduceTransparency: Bool
+    private var isProminent: Bool { role == .prominent }
 
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(role == .prominent ? Theme.ink : Theme.surface, in: .circle)
-                .overlay {
-                    Circle().strokeBorder(role == .prominent ? Color.clear : Theme.border, lineWidth: 1)
-                }
-        } else if #available(iOS 26.0, *) {
-            if role == .prominent {
-                content.glassEffect(.regular.tint(Theme.ink).interactive(), in: .circle)
+    private func disc(pressed: Bool) -> some View {
+        ZStack {
+            if isProminent {
+                Circle().fill(Theme.ink)
+            } else if isOpaque {
+                Circle().fill(Theme.surface)
             } else {
-                content.glassEffect(.regular.interactive(), in: .circle)
+                Circle().fill(.ultraThinMaterial)
+                Circle().fill(Theme.surface.opacity(0.45))
             }
-        } else {
-            content
-                .background(
-                    role == .prominent ? AnyShapeStyle(Theme.ink) : AnyShapeStyle(.ultraThinMaterial),
-                    in: .circle
-                )
-                .overlay {
-                    Circle().strokeBorder(
-                        Color.black.opacity(role == .prominent ? 0 : 0.07),
-                        lineWidth: 1
+
+            // Specular highlight: light arrives from the top, as it does on
+            // every piece of glass Apple draws.
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(isProminent ? 0.26 : 0.8),
+                            .white.opacity(0),
+                        ],
+                        startPoint: .top,
+                        endPoint: .center
                     )
-                }
-                .shadow(
-                    color: .black.opacity(isPressed ? 0.05 : 0.12),
-                    radius: isPressed ? 3 : 9,
-                    y: isPressed ? 1 : 3
+                )
+
+            Circle()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(isProminent ? 0.42 : 0.95),
+                            .black.opacity(isProminent ? 0.22 : 0.10),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
                 )
         }
+        .compositingGroup()
+        .shadow(
+            color: .black.opacity(pressed ? 0.07 : 0.16),
+            radius: pressed ? 3 : 8,
+            y: pressed ? 1 : 3
+        )
     }
 }
 

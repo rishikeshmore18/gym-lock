@@ -68,22 +68,13 @@ struct AlarmSettingsView: View {
                     .padding(.bottom, 32)
                 }
                 .scrollIndicators(.hidden)
+                .safeAreaInset(edge: .top) { header }
             }
-            .navigationTitle("alarm")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    GlassCircleButton(symbol: "chevron.left", label: "Back") {
-                        // Leaving with an unsaved dial change throws the draft
-                        // away, as Apple's X does. The tick is how you keep it.
-                        draft = nil
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    commitButton
-                }
-            }
+            // The header is drawn here rather than put in a toolbar on
+            // purpose. A `ToolbarItem` styles its own content on iOS 26, which
+            // strips the glass off anything inside it and repaints the glyph
+            // with the screen tint — the buttons end up as bare coral ticks.
+            .toolbar(.hidden, for: .navigationBar)
         }
         .tint(Theme.accent)
         .task {
@@ -118,6 +109,33 @@ struct AlarmSettingsView: View {
         .nightLockPromptAlert($nightLockPrompt, store: store) {
             rhythmOnOpen = store.plan.rhythm
         }
+    }
+
+    // MARK: - Header
+
+    /// Back on the left, the title in the middle, the tick on the right, the
+    /// way Apple lays out a full-screen editor. Content scrolls underneath,
+    /// which is what gives the glass something to refract.
+    private var header: some View {
+        ZStack {
+            Text("alarm")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(Theme.ink)
+
+            HStack(spacing: 0) {
+                GlassCircleButton(symbol: "chevron.left", label: "Back") {
+                    // Leaving with an unsaved dial change throws the draft
+                    // away, as Apple's X does. The tick is how you keep it.
+                    draft = nil
+                    dismiss()
+                }
+                Spacer(minLength: 0)
+                commitButton
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
     }
 
     // MARK: - Commit
@@ -160,17 +178,10 @@ struct AlarmSettingsView: View {
     }
 
     private func scopeButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button {
+        GlassChoiceButton(title: title) {
             isChoosingScope = false
             action()
-        } label: {
-            Text(title)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Theme.ink)
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .contentShape(.capsule)
         }
-        .buttonStyle(GlassChoiceButtonStyle())
     }
 
     // MARK: - Dial

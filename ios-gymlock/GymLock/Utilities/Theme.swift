@@ -37,6 +37,9 @@ enum Theme {
     /// Deep blue reserved for the inside of the celestial illustration.
     /// The app canvas never becomes this — only the artwork does.
     static let night = Color(red: 0.141, green: 0.169, blue: 0.271)
+    /// Warm yellow for the sun on a clock face. Paired with `night` as a
+    /// celestial marker, never used as an accent.
+    static let sun = Color(red: 0.976, green: 0.780, blue: 0.180)
 
     // MARK: - Morning motion
 
