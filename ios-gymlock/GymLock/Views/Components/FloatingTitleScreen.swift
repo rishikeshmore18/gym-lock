@@ -1,23 +1,10 @@
 import SwiftUI
 
-/// Metrics for the floating header, kept out of the generic view so they can be
-/// plain stored constants and so the tabs can reason about the same numbers.
+/// Spacing this screen owns. The title's own numbers live in
+/// `CollapsingTitleMetrics`, shared with every other screen that glides a
+/// title, so none of them can drift apart.
 private enum HeaderMetrics {
-    /// Page title at rest. 26 bold is the house screen-title size.
-    static let expandedSize: CGFloat = 26
-    /// Where it settles once collapsed — the system's inline title size.
-    static let collapsedSize: CGFloat = 17
-    /// How far the finger has to travel to complete the collapse. Short enough
-    /// that the title is out of the way by the time the second card arrives,
-    /// long enough that it never snaps.
-    static let collapseDistance: CGFloat = 56
-    /// The band the title lives in, and therefore the space reserved for it at
-    /// the top of the content.
-    static let bandHeight: CGFloat = 52
-    /// Matches the horizontal padding the tab screens give their cards, so the
-    /// expanded title sits on the same left edge as everything below it.
-    static let pageMargin: CGFloat = 20
-    static let pillPadding: CGFloat = 14
+    static let bandHeight = CollapsingTitleMetrics.bandHeight
     /// A little air between the last card and the glass of the tab bar.
     static let bottomAir: CGFloat = 16
 }
@@ -39,14 +26,8 @@ struct FloatingTitleScreen<Content: View>: View {
     let title: String
     @ViewBuilder var content: () -> Content
 
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
     @State private var scrollOffset: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
-    /// Width of the title at its collapsed size, measured rather than guessed
-    /// so the pill centres correctly for any word and any Dynamic Type size.
-    /// Measured at a fixed size, so it cannot feed back into the collapse.
-    @State private var collapsedTitleWidth: CGFloat = 0
     @State private var bottomInset: CGFloat = 0
 
     var body: some View {
@@ -73,98 +54,14 @@ struct FloatingTitleScreen<Content: View>: View {
             containerWidth = value.width
             bottomInset = value.height
         }
-        .overlay(alignment: .top) { header }
-    }
-
-    // MARK: Header
-
-    private var header: some View {
-        ZStack(alignment: .leading) {
-            Text(title)
-                .font(.system(size: titleSize, weight: .bold))
-                .foregroundStyle(Theme.ink)
-                .lineLimit(1)
-                .padding(.horizontal, HeaderMetrics.pillPadding)
-                .padding(.vertical, 7)
-                .background { pill }
-                .offset(x: titleX, y: -2 * collapse)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilitySortPriority(1)
+        .overlay(alignment: .top) {
+            CollapsingTitle(
+                title: title,
+                collapse: CollapsingTitleMetrics.collapse(forOffset: scrollOffset),
+                overscroll: CollapsingTitleMetrics.overscroll(forOffset: scrollOffset),
+                containerWidth: containerWidth
+            )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: HeaderMetrics.bandHeight)
-        .background(alignment: .topLeading) { collapsedWidthProbe }
-        // The pill is chrome floating over the page; taps belong to the cards
-        // passing underneath it.
-        .allowsHitTesting(false)
-    }
-
-    /// The glass only exists once the title has left the page and needs to be
-    /// told apart from whatever is now scrolling behind it. At rest there is
-    /// nothing behind the title, so a pill there would be decoration.
-    @ViewBuilder
-    private var pill: some View {
-        Group {
-            if reduceTransparency {
-                Capsule()
-                    .fill(Theme.surface)
-                    .overlay { Capsule().strokeBorder(Theme.border, lineWidth: 1) }
-            } else if #available(iOS 26.0, *) {
-                Color.clear.glassEffect(.regular, in: .capsule)
-            } else {
-                Capsule()
-                    .fill(.ultraThinMaterial)
-                    .overlay { Capsule().strokeBorder(.white.opacity(0.55), lineWidth: 1) }
-                    .shadow(color: .black.opacity(0.07), radius: 10, y: 4)
-            }
-        }
-        .opacity(pillOpacity)
-    }
-
-    /// An invisible copy at the collapsed size. Its width is what the pill has
-    /// to be centred on, and because its size never changes it cannot start a
-    /// measure-layout-measure loop with the title it is measuring for.
-    private var collapsedWidthProbe: some View {
-        Text(title)
-            .font(.system(size: HeaderMetrics.collapsedSize, weight: .bold))
-            .lineLimit(1)
-            .fixedSize()
-            .hidden()
-            .accessibilityHidden(true)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { collapsedTitleWidth = $0 }
-    }
-
-    // MARK: Derived
-
-    /// 0 while the page is at the top, 1 once the title has fully collapsed.
-    private var collapse: CGFloat {
-        min(max(scrollOffset / HeaderMetrics.collapseDistance, 0), 1)
-    }
-
-    /// Held back slightly so the glass does not appear while the title is still
-    /// obviously a page title, then in fully by the time it reaches the centre.
-    private var pillOpacity: CGFloat {
-        min(max((collapse - 0.35) / 0.5, 0), 1)
-    }
-
-    private var titleSize: CGFloat {
-        let base = HeaderMetrics.expandedSize
-            - (HeaderMetrics.expandedSize - HeaderMetrics.collapsedSize) * collapse
-        // Pulling the page down past the top grows the title a little, the way
-        // a system large title does. Capped hard — this is a hint of give, not
-        // a stretch effect.
-        let overscroll = scrollOffset < 0 ? min(-scrollOffset, 40) * 0.09 : 0
-        // Half-point steps: an unrounded size shimmers as the text re-renders
-        // on every frame of the scroll.
-        return ((base + overscroll) * 2).rounded() / 2
-    }
-
-    private var titleX: CGFloat {
-        let expanded = HeaderMetrics.pageMargin - HeaderMetrics.pillPadding
-        guard containerWidth > 0, collapsedTitleWidth > 0 else { return expanded }
-        let pillWidth = collapsedTitleWidth + HeaderMetrics.pillPadding * 2
-        let centred = (containerWidth - pillWidth) / 2
-        return expanded + (centred - expanded) * collapse
     }
 
     /// Guarantees the last card clears the floating tab bar.

@@ -20,7 +20,6 @@ struct AlarmSettingsView: View {
     /// checked against the night lock at the right moment.
     @State private var rhythmOnOpen: MorningRhythm?
     @State private var nightLockPrompt: RhythmChangeProposer.Prompt?
-    @State private var editingSlot: AlarmSlot?
     @State private var isPickingSound = false
     @State private var isEditingWindDown = false
     @State private var alarmAuth: AlarmAuthorization = .notDetermined
@@ -31,6 +30,12 @@ struct AlarmSettingsView: View {
     /// OS until the tick is tapped and the user says which alarm to change.
     @State private var draft: MorningRhythm?
     @State private var isChoosingScope = false
+    /// Drives the title's glide, exactly as on the Progress tab.
+    @State private var scrollOffset: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    /// Measured rather than assumed, so the title lands on the buttons' centre
+    /// line at any Dynamic Type size.
+    @State private var headerHeight: CGFloat = 52
 
     #if DEBUG
     @State private var isShowingSimulator = false
@@ -51,8 +56,13 @@ struct AlarmSettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 14) {
+                        // The room the large title occupies while it is still
+                        // large. It is drawn in the overlay rather than here so
+                        // it can outlive the scroll and become the pill.
+                        Color.clear.frame(height: CollapsingTitleMetrics.bandHeight)
+
                         dialCard
-                        alarmCard
+                        repeatCard
                         soundCard
                         windDownCard
                         gymLockCard
@@ -64,11 +74,19 @@ struct AlarmSettingsView: View {
                         #endif
                     }
                     .padding(.horizontal, 20)
-                    .padding(.top, 8)
                     .padding(.bottom, 32)
                 }
                 .scrollIndicators(.hidden)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentOffset.y + geometry.contentInsets.top
+                } action: { _, offset in
+                    scrollOffset = offset
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
+                    containerWidth = $0
+                }
                 .safeAreaInset(edge: .top) { header }
+                .overlay(alignment: .top) { glidingTitle }
             }
             // The header is drawn here rather than put in a toolbar on
             // purpose. A `ToolbarItem` styles its own content on iOS 26, which
@@ -86,14 +104,6 @@ struct AlarmSettingsView: View {
         .onDisappear {
             soundPlayer?.stop()
             resyncAlarms()
-        }
-        .sheet(item: $editingSlot) { slot in
-            AlarmSlotEditor(slot: slot) { updated in
-                apply(updated)
-            } onDelete: {
-                store.plan.slots.removeAll { $0.id == slot.id }
-                resyncAlarms()
-            }
         }
         .sheet(isPresented: $isPickingSound) {
             AlarmSoundPickerSheet()
@@ -113,29 +123,51 @@ struct AlarmSettingsView: View {
 
     // MARK: - Header
 
-    /// Back on the left, the title in the middle, the tick on the right, the
-    /// way Apple lays out a full-screen editor. Content scrolls underneath,
-    /// which is what gives the glass something to refract.
+    /// Back on the left, the tick on the right, the way Apple lays out a
+    /// full-screen editor. Content scrolls underneath, which is what gives the
+    /// glass something to refract.
+    ///
+    /// The title is not in here. It starts as a large heading over the first
+    /// card and glides into the gap between these two buttons as the page
+    /// scrolls, so this row only owns the buttons and the height they need.
     private var header: some View {
-        ZStack {
-            Text("alarm")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(Theme.ink)
-
-            HStack(spacing: 0) {
-                GlassCircleButton(symbol: "chevron.left", label: "Back") {
-                    // Leaving with an unsaved dial change throws the draft
-                    // away, as Apple's X does. The tick is how you keep it.
-                    draft = nil
-                    dismiss()
-                }
-                Spacer(minLength: 0)
-                commitButton
+        HStack(spacing: 0) {
+            GlassCircleButton(symbol: "chevron.left", label: "Back") {
+                // Leaving with an unsaved dial change throws the draft
+                // away, as Apple's X does. The tick is how you keep it.
+                draft = nil
+                dismiss()
             }
+            Spacer(minLength: 0)
+            commitButton
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
         .padding(.bottom, 8)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+    }
+
+    /// The page title, travelling exactly as it does on the Progress tab: a
+    /// large left-aligned heading at rest, gliding up and inward as the page
+    /// scrolls until it settles as a small glass pill centred between the back
+    /// button and the tick.
+    ///
+    /// It is an overlay rather than a row in the scroll view so it can outlive
+    /// the content it started above, and it is driven straight off the scroll
+    /// offset so it tracks the finger and reverses the moment the user
+    /// scrolls back up.
+    private var glidingTitle: some View {
+        CollapsingTitle(
+            title: "alarm",
+            collapse: CollapsingTitleMetrics.collapse(forOffset: scrollOffset),
+            overscroll: CollapsingTitleMetrics.overscroll(forOffset: scrollOffset),
+            containerWidth: containerWidth,
+            // At rest it sits in the band reserved at the top of the content,
+            // just below the buttons.
+            expandedCenterY: headerHeight + CollapsingTitleMetrics.bandHeight / 2,
+            // Collapsed, it lands on the buttons' own centre line.
+            collapsedCenterY: headerHeight / 2
+        )
     }
 
     // MARK: - Commit
@@ -504,108 +536,113 @@ struct AlarmSettingsView: View {
         resyncAlarms()
     }
 
-    // MARK: - Alarm card
+    // MARK: - Repeat card
 
-    private var alarmCard: some View {
-        Button {
-            Haptics.tap()
-            openAlarmEditor()
-        } label: {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    cardLabel("alarm")
-
-                    if let slot = primarySlot {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(slot.alarmTime.displayString)
-                                .font(.system(size: 28, weight: .bold))
-                                .monospacedDigit()
-                                .foregroundStyle(slot.isEnabled ? Theme.ink : Theme.inkTertiary)
-
-                            if !slot.isEnabled {
-                                Text("off")
-                                    .font(.system(size: 11, weight: .heavy))
-                                    .foregroundStyle(Theme.inkTertiary)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Theme.surfaceMuted, in: .capsule)
-                            }
-                        }
-                        .contentTransition(.numericText())
-
-                        Text(slot.daysSummary)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Theme.inkSecondary)
-                    } else {
-                        Text("no alarm set. nothing will lock.")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Theme.ink)
-
-                        Text("tap to set one")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Theme.inkSecondary)
-                    }
-                }
+    /// Which days this alarm runs on, and nothing else.
+    ///
+    /// This replaced a card that showed the alarm time with a chevron into an
+    /// editor holding a time wheel and these same day buttons. Now that the
+    /// dial above sets the alarm, that card was reporting a number the user
+    /// had just set two inches higher, and its editor asked for it a third
+    /// time. The time is gone; only the part the dial cannot express is left.
+    ///
+    /// Apple's own Repeat row is the model, down to the row of day circles.
+    /// There is no "never" option: an alarm repeating on nothing is not a
+    /// value to choose, it is an alarm that will not ring, and the card says
+    /// exactly that when it happens instead of offering it as a setting.
+    private var repeatCard: some View {
+        VStack(spacing: 14) {
+            HStack {
+                Text("repeat")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
 
                 Spacer(minLength: 8)
 
-                if primarySlot != nil {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.inkTertiary)
+                Text(repeatSummary)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(hasRepeatDays ? Theme.inkSecondary : Theme.accent)
+                    .contentTransition(.opacity)
+                    .animation(Theme.stateChange, value: repeatSummary)
+            }
+
+            Rectangle()
+                .fill(Theme.border)
+                .frame(height: 1)
+
+            HStack(spacing: 8) {
+                ForEach(Weekday.allCases) { day in
+                    dayCircle(day)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(MorningCardStyle())
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(radius: 22)
+        .accessibilityElement(children: .contain)
     }
 
-    /// A deleted alarm must never be a dead end. Tapping the empty card opens
-    /// the same editor over a fresh draft; nothing is saved unless the user
-    /// saves it.
-    private func openAlarmEditor() {
-        if let slot = primarySlot {
-            editingSlot = slot
-        } else {
-            editingSlot = AlarmSlot(
-                days: store.schedule.trainingDays,
-                alarmTime: rhythm.wakeTime
-            )
+    private var repeatDays: Set<Weekday> { primarySlot?.days ?? [] }
+
+    private var hasRepeatDays: Bool { !repeatDays.isEmpty }
+
+    /// The truth about what this alarm does, not a value to pick. Listing the
+    /// days here would only repeat the circles underneath, so the slot says
+    /// the one thing the circles cannot say on their own.
+    private var repeatSummary: String {
+        switch repeatDays.count {
+        case 0: "nothing will ring"
+        case 7: "every day"
+        case 1: "1 day a week"
+        default: "\(repeatDays.count) days a week"
         }
     }
 
-    /// Saves an edited alarm, and moves wake time with it.
+    private func dayCircle(_ day: Weekday) -> some View {
+        let isOn = repeatDays.contains(day)
+
+        return Button {
+            toggle(day)
+        } label: {
+            Text(String(day.shortLabel.prefix(1)))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(isOn ? Color.white : Theme.inkSecondary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .background(isOn ? Theme.ink : Theme.surfaceMuted, in: .circle)
+                .scaleEffect(isOn ? 1 : 0.94)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isOn)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(day.shortLabel)
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+
+    /// Turns a training day on or off.
     ///
-    /// The alarm going off and getting up are the same event, so being asked
-    /// for both was asking the same question twice — and the two could end up
-    /// disagreeing, with the dial drawing one time and the alarm ringing at
-    /// another. Setting either now sets both. Only a morning alarm is coupled;
-    /// an evening session has nothing to do with the sleep rhythm.
-    private func apply(_ updated: AlarmSlot) {
-        if let index = store.plan.slots.firstIndex(where: { $0.id == updated.id }) {
-            store.plan.slots[index] = updated
-        } else {
-            store.plan.slots.append(updated)
+    /// Picking a day on an alarm that was switched off turns it back on, since
+    /// choosing a day to train is not an ambiguous act. An alarm left with no
+    /// days is kept rather than deleted, so its sound and its place in the plan
+    /// survive to be used again.
+    private func toggle(_ day: Weekday) {
+        Haptics.selection()
+
+        guard let slot = primarySlot,
+              let index = store.plan.slots.firstIndex(where: { $0.id == slot.id })
+        else {
+            // No alarm exists yet, so the first tap creates one at the time
+            // already showing on the dial.
+            store.plan.slots.append(AlarmSlot(days: [day], alarmTime: shown.wakeTime))
+            resyncAlarms()
+            return
         }
 
-        if updated.isEnabled, updated.daypart.usesSleepRhythm, updated.id == primarySlot?.id {
-            let previous = rhythmOnOpen ?? store.plan.rhythm
-            // An unsaved dial edit is the newer intent, so the new alarm time
-            // is folded into it rather than throwing it away.
-            if draft != nil {
-                draft?.setWakeTime(updated.alarmTime)
-            } else {
-                store.plan.rhythm.setWakeTime(updated.alarmTime)
-                store.plan.rhythm.hasBeenSet = true
-                if let prompt = RhythmChangeProposer.prompt(for: store.plan.rhythm, since: previous, plan: store.plan) {
-                    nightLockPrompt = prompt
-                } else {
-                    store.applyRhythmToNightLock()
-                    rhythmOnOpen = store.plan.rhythm
-                }
-            }
+        if store.plan.slots[index].days.contains(day) {
+            store.plan.slots[index].days.remove(day)
+        } else {
+            store.plan.slots[index].days.insert(day)
+            store.plan.slots[index].isEnabled = true
         }
 
         resyncAlarms()

@@ -80,6 +80,37 @@ extension View {
             }
             .shadow(color: Color.black.opacity(0.06), radius: 18, x: 0, y: 8)
     }
+
+    /// A card built from Apple's Liquid Glass rather than the flat warm
+    /// surface. Reserved for cards that are controls end to end — the glass
+    /// reads as something you operate, which is the whole point of the
+    /// material and the reason it is not used on cards that merely report.
+    ///
+    /// The warm off-white canvas gives clear material very little to refract,
+    /// so the iOS 18 fallback adds the rim and lift by hand; without them the
+    /// card would dissolve into the page.
+    @ViewBuilder
+    func glassCard(radius: CGFloat = Theme.cardRadius) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: .rect(cornerRadius: radius))
+        } else {
+            self
+                .background(.ultraThinMaterial, in: .rect(cornerRadius: radius))
+                .background(Theme.surface.opacity(0.55), in: .rect(cornerRadius: radius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: radius)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(0.9), Theme.border],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                }
+                .shadow(color: Color.black.opacity(0.07), radius: 16, x: 0, y: 7)
+        }
+    }
 }
 
 // MARK: - Primary call to action
