@@ -49,6 +49,14 @@ struct MorningRhythm: Hashable {
     /// How long the user plans to be at the gym once they arrive. Drawn as
     /// the coral bar on the day dial; nothing locks or unlocks on it.
     var gymSessionMinutes: Int = 60
+    /// When the user plans to be at the gym.
+    ///
+    /// Stored, not derived, and that is the whole point: the coral bar on the
+    /// dial is its own value, so it can be dragged anywhere in the day without
+    /// dragging the night along behind it. `nil` means "wherever the window
+    /// puts it", which is how every plan saved before the bar became
+    /// independent keeps reading correctly.
+    var gymTime: TimeOfDay? = nil
     /// False until the user has actually been through the rhythm screen, so the
     /// app can tell a real answer from a default.
     var hasBeenSet: Bool
@@ -100,11 +108,17 @@ struct MorningRhythm: Hashable {
     /// When the user should be walking out of the door.
     var leaveTime: TimeOfDay { wakeTime.offset(byMinutes: getReadyMinutes) }
 
-    /// When they should be at the gym.
-    var gymByTime: TimeOfDay { wakeTime.offset(byMinutes: windowMinutes) }
+    /// When they should be at the gym: the bar they placed, or the end of the
+    /// window if they have never moved it.
+    var gymByTime: TimeOfDay { gymTime ?? wakeTime.offset(byMinutes: windowMinutes) }
 
     /// When the planned workout ends.
-    var gymDoneTime: TimeOfDay { wakeTime.offset(byMinutes: windowMinutes + gymSessionMinutes) }
+    var gymDoneTime: TimeOfDay { gymByTime.offset(byMinutes: gymSessionMinutes) }
+
+    /// Minutes from the alarm to the gym bar. This is the gap on the dial, and
+    /// it is not the same thing as the lock window: the gap can be any length,
+    /// while the window that actually blocks apps stays bounded.
+    var gapToGymMinutes: Int { wakeTime.minutes(until: gymByTime) }
 
     var exceedsAbsoluteMaximum: Bool { windowMinutes > Self.absoluteMaximumWindow }
     var exceedsNormalMaximum: Bool { windowMinutes > Self.normalMaximumWindow }
@@ -116,7 +130,7 @@ struct MorningRhythm: Hashable {
 
 extension MorningRhythm: Codable {
     private enum CodingKeys: String, CodingKey {
-        case bedtime, wakeTime, getReadyMinutes, travelMinutes, gymSessionMinutes, hasBeenSet
+        case bedtime, wakeTime, getReadyMinutes, travelMinutes, gymSessionMinutes, gymTime, hasBeenSet
     }
 
     /// Plans saved before the workout length existed decode with the default,
@@ -128,6 +142,7 @@ extension MorningRhythm: Codable {
         getReadyMinutes = try container.decode(Int.self, forKey: .getReadyMinutes)
         travelMinutes = try container.decode(Int.self, forKey: .travelMinutes)
         gymSessionMinutes = try container.decodeIfPresent(Int.self, forKey: .gymSessionMinutes) ?? 60
+        gymTime = try container.decodeIfPresent(TimeOfDay.self, forKey: .gymTime)
         hasBeenSet = try container.decode(Bool.self, forKey: .hasBeenSet)
     }
 }

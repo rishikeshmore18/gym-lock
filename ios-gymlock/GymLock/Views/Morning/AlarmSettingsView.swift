@@ -142,9 +142,16 @@ struct AlarmSettingsView: View {
 
     /// The tick, and the question it asks.
     ///
-    /// The button is always in the hierarchy and only scales out of sight,
-    /// because the popover hangs off it: removing the anchor mid-animation
-    /// would snap the popover away instead of letting it fold back in.
+    /// The button is always in the hierarchy and only scales out of sight, so
+    /// the dialog it presents always has a live anchor to attach to.
+    ///
+    /// The question is a `confirmationDialog`, which is the same control
+    /// Apple's Clock uses for exactly this choice. It was briefly a popover
+    /// hanging off the tick: on an iPhone the tick sits hard against the
+    /// trailing edge, and a fixed-width panel anchored there has nowhere to go
+    /// but off the screen, which is precisely what happened. The system dialog
+    /// places itself, so it cannot be clipped, and it grows properly with
+    /// Dynamic Type instead of overflowing a hand-set width.
     private var commitButton: some View {
         GlassCircleButton(symbol: "checkmark", label: "Save change", role: .prominent) {
             isChoosingScope = true
@@ -154,33 +161,14 @@ struct AlarmSettingsView: View {
         .allowsHitTesting(hasDraftChanges)
         .accessibilityHidden(!hasDraftChanges)
         .animation(.bouncy(duration: 0.42, extraBounce: 0.32), value: hasDraftChanges)
-        .popover(isPresented: $isChoosingScope, arrowEdge: .bottom) {
-            scopeChoice
-        }
-    }
-
-    /// Apple asks this as a popover growing out of the tick, not as a sheet
-    /// thrown up from the bottom of the screen. So do we.
-    private var scopeChoice: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("apply this change to every training day?")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(Theme.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 4)
-
-            scopeButton("change next alarm only") { commitDraft(scope: .nextOnly) }
-            scopeButton("change this schedule") { commitDraft(scope: .schedule) }
-        }
-        .padding(18)
-        .frame(width: 268)
-        .presentationCompactAdaptation(.popover)
-    }
-
-    private func scopeButton(_ title: String, action: @escaping () -> Void) -> some View {
-        GlassChoiceButton(title: title) {
-            isChoosingScope = false
-            action()
+        .confirmationDialog(
+            "apply this change to every training day?",
+            isPresented: $isChoosingScope,
+            titleVisibility: .visible
+        ) {
+            Button("change this schedule") { commitDraft(scope: .schedule) }
+            Button("change next alarm only") { commitDraft(scope: .nextOnly) }
+            Button("cancel", role: .cancel) {}
         }
     }
 
@@ -357,7 +345,7 @@ struct AlarmSettingsView: View {
     private var footerHeadline: String {
         switch dialGrab {
         case .gymStart, .gymBody:
-            return "\(shown.windowMinutes) min to the gym"
+            return "\(DayDialModel.durationText(minutes: shown.gapToGymMinutes)) to the gym"
         case .gymEnd:
             return "\(DayDialModel.durationText(minutes: shown.gymSessionMinutes)) at the gym"
         default:
@@ -383,9 +371,14 @@ struct AlarmSettingsView: View {
     }
 
     /// Guardrails live inline, never in an alert.
+    ///
+    /// The gym bar itself has no ceiling any more, so this no longer refuses a
+    /// late workout. What it does instead is say the true thing about what the
+    /// lock actually covers, because the block is still a run-up and stops
+    /// well short of an afternoon session.
     private var guardrailLine: String? {
-        if shown.exceedsAbsoluteMaximum {
-            return "over 2 hours isn't a lock, it's a calendar."
+        if shown.gapToGymMinutes > MorningRhythm.absoluteMaximumWindow {
+            return "the lock covers the first 2 hours after the alarm."
         }
         if shown.exceedsNormalMaximum {
             return "that's a long window. still fine."

@@ -472,7 +472,13 @@ enum HomeCardDeriver {
         }
     }
 
-    /// "Gym by" — the far edge of the window, and how long the window is.
+    /// "Gym by" — when the user said they would be at the gym, and how long
+    /// after the alarm that is.
+    ///
+    /// Derived from the gap drawn on the dial rather than from the lock
+    /// window. The two used to be the same number; now that the gym bar can be
+    /// placed anywhere in the day they are not, and this card is about the
+    /// plan, not about how long apps stay blocked.
     private static func nextDeadline(
         _ store: AppStore,
         now: Date,
@@ -482,13 +488,13 @@ enum HomeCardDeriver {
             return nil
         }
 
-        let window = store.plan.windowMinutes
-        guard window > 0 else { return nil }
+        let gap = store.plan.rhythm.gapToGymMinutes
+        guard gap > 0 else { return nil }
 
         return NextCard(
             eyebrow: "GYM BY",
-            value: occurrence.slot.gymByTime(window: window).displayString,
-            detail: "\(window) min window",
+            value: occurrence.slot.gymByTime(window: gap).displayString,
+            detail: "\(DayDialModel.durationText(minutes: gap)) after the alarm",
             showsArrow: true
         )
     }

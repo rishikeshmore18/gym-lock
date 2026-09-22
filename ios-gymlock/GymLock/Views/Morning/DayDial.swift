@@ -53,6 +53,10 @@ enum DayDialModel {
     /// Gap kept between the end of the gym visit and the next bedtime so the
     /// two bars never lap.
     static let minimumGapMinutes = 30
+    /// The smallest gap the dial allows between the alarm and the gym. Not the
+    /// lock window — just enough room that the two icons are not on top of
+    /// each other.
+    static let minimumLeadMinutes = 10
 
     /// Converts a touch point to a minute-of-day, snapped to five minutes.
     static func minutes(at point: CGPoint, centre: CGPoint) -> Int {
@@ -216,93 +220,88 @@ enum DayDialModel {
 
     // MARK: Clamps
 
+    /// Every clamp below works in one frame of reference: minutes clockwise
+    /// from the alarm. `awakeSpan` is the stretch between getting up and going
+    /// to bed, `gap` is alarm to gym, `session` is the length of the visit.
+    ///
+    /// Nothing here moves anything. Each bar is clamped against where the
+    /// other one already is, so a drag that runs out of room stops — it never
+    /// pushes or tows the other bar. That independence is the point: the two
+    /// bars are two separate decisions.
+
     /// The longest night allowed alongside this gym plan: the visit must
     /// still end a gap before the next bedtime.
-    static func maximumSleepMinutes(windowMinutes: Int, sessionMinutes: Int) -> Int {
-        1440 - windowMinutes - sessionMinutes - minimumGapMinutes
+    static func maximumSleepMinutes(gapMinutes: Int, sessionMinutes: Int) -> Int {
+        1440 - gapMinutes - sessionMinutes - minimumGapMinutes
     }
 
-    /// Clamps a night to what the dial can show.
-    static func clampedSleep(_ sleep: Int, windowMinutes: Int, sessionMinutes: Int) -> Int {
-        let ceiling = maximumSleepMinutes(windowMinutes: windowMinutes, sessionMinutes: sessionMinutes)
+    /// Clamps a night whose bedtime is moving. Bedtime coming earlier is what
+    /// closes on the end of the gym visit.
+    static func clampedSleep(_ sleep: Int, gapMinutes: Int, sessionMinutes: Int) -> Int {
+        let ceiling = maximumSleepMinutes(gapMinutes: gapMinutes, sessionMinutes: sessionMinutes)
         return min(max(sleep, minimumSleepMinutes), max(ceiling, minimumSleepMinutes))
     }
 
-    /// Clamps an alarm-to-gym window to the product range and to the room
-    /// left on the dial.
-    static func clampedWindow(
-        _ desired: Int,
-        getReadyMinutes: Int,
-        sleepMinutes: Int,
-        sessionMinutes: Int
-    ) -> Int {
-        let floor = max(MorningRhythm.minimumWindow, getReadyMinutes + MorningRhythm.travelRange.lowerBound)
-        let ceiling = min(
-            MorningRhythm.absoluteMaximumWindow,
-            getReadyMinutes + MorningRhythm.travelRange.upperBound,
-            1440 - sleepMinutes - sessionMinutes - minimumGapMinutes
-        )
+    /// Where the gym visit may sit, as minutes after the alarm.
+    ///
+    /// There is deliberately no two-hour ceiling here. The visit may be placed
+    /// anywhere in the waking day; the only limits are a few minutes of lead
+    /// after the alarm and not running into bedtime.
+    static func clampedGap(_ desired: Int, awakeSpan: Int, sessionMinutes: Int) -> Int {
+        let floor = minimumLeadMinutes
+        let ceiling = awakeSpan - sessionMinutes - minimumGapMinutes
         return min(max(desired, floor), max(ceiling, floor))
     }
 
-    /// Clamps the length of the gym visit.
-    static func clampedSession(_ desired: Int, sleepMinutes: Int, windowMinutes: Int) -> Int {
+    /// Clamps the length of the gym visit to the room left before bedtime.
+    static func clampedSession(_ desired: Int, awakeSpan: Int, gapMinutes: Int) -> Int {
         let floor = MorningRhythm.sessionRange.lowerBound
         let ceiling = min(
             MorningRhythm.sessionRange.upperBound,
-            1440 - sleepMinutes - windowMinutes - minimumGapMinutes
+            awakeSpan - gapMinutes - minimumGapMinutes
         )
         return min(max(desired, floor), max(ceiling, floor))
     }
 
-    /// Travel minutes implied by a window, never outside the travel range and
-    /// never past the absolute ceiling. Wake time is not touched.
-    static func travelMinutes(desiredWindow: Int, getReadyMinutes: Int) -> Int {
+    /// How far the alarm may actually move when it is dragged.
+    ///
+    /// Later means a shorter run-up to a gym time that is staying put, so the
+    /// alarm stops a few minutes short of the visit instead of shoving it.
+    static func clampedWakeShift(_ delta: Int, sleepMinutes: Int, gapMinutes: Int) -> Int {
+        let latest = gapMinutes - minimumLeadMinutes
+        let earliest = minimumSleepMinutes - sleepMinutes
+        return min(max(delta, min(earliest, 0)), max(latest, 0))
+    }
+
+    /// How far the whole night may slide, with the gym visit standing still.
+    /// Bounded by the alarm closing on the visit in one direction and bedtime
+    /// closing on it in the other.
+    static func clampedNightShift(
+        _ delta: Int,
+        awakeSpan: Int,
+        gapMinutes: Int,
+        sessionMinutes: Int
+    ) -> Int {
+        let latest = gapMinutes - minimumLeadMinutes
+        let tail = awakeSpan - gapMinutes - sessionMinutes
+        let earliest = minimumGapMinutes - tail
+        return min(max(delta, min(earliest, 0)), max(latest, 0))
+    }
+
+    /// Travel minutes implied by the gap the user has drawn.
+    ///
+    /// The bar can be placed anywhere in the day, but the *lock* is still a
+    /// run-up: it never holds apps for longer than the product allows, and
+    /// `ShieldPolicy` caps it again on the way out. So the window follows the
+    /// gap up to that ceiling and then stops, which is why a visit at noon
+    /// does not mean a five-hour block.
+    static func travelMinutes(gapMinutes: Int, getReadyMinutes: Int) -> Int {
         let ceiling = min(
             MorningRhythm.travelRange.upperBound,
             MorningRhythm.absoluteMaximumWindow - getReadyMinutes
         )
-        let requested = desiredWindow - getReadyMinutes
+        let requested = gapMinutes - getReadyMinutes
         return min(max(requested, MorningRhythm.travelRange.lowerBound), max(ceiling, 0))
-    }
-
-    // MARK: Moving the visit
-
-    /// The result of asking for the gym visit to sit somewhere.
-    struct GymShift: Equatable {
-        /// The alarm-to-gym window after the drag.
-        var windowMinutes: Int
-        /// How far the whole night must move to put the visit where it was
-        /// asked for while keeping that window. Zero while the window still
-        /// has room to absorb the drag.
-        var towMinutes: Int
-    }
-
-    /// Where the visit goes, and what has to move for it to get there.
-    ///
-    /// The window between the alarm and the gym is capped at two hours,
-    /// because that cap is the product: the alarm has to lead into the trip.
-    /// But someone dragging their visit round to 11 am is not asking for a
-    /// four-hour window, they are saying they train later in the day. So the
-    /// window absorbs the drag until it is full, and after that the alarm —
-    /// and with it the whole night, keeping its length — is towed along and
-    /// the window stays exactly where it was.
-    ///
-    /// This is why the visit can now be dragged right round the dial instead
-    /// of hitting an invisible wall two hours after the alarm.
-    static func shiftGym(
-        desiredWindow: Int,
-        getReadyMinutes: Int,
-        sleepMinutes: Int,
-        sessionMinutes: Int
-    ) -> GymShift {
-        let window = clampedWindow(
-            desiredWindow,
-            getReadyMinutes: getReadyMinutes,
-            sleepMinutes: sleepMinutes,
-            sessionMinutes: sessionMinutes
-        )
-        return GymShift(windowMinutes: window, towMinutes: desiredWindow - window)
     }
 
     /// Apple's rubber-band curve: progressive resistance at a boundary, so a
@@ -410,10 +409,15 @@ struct DayDial: View {
     private var bedtimeMinutes: Int { rhythm.bedtime.minutesFromMidnight }
     private var wakeMinutes: Int { rhythm.wakeTime.minutesFromMidnight }
     private var sleepMinutes: Int { DayDialModel.clockwiseSpan(from: bedtimeMinutes, to: wakeMinutes) }
-    private var windowMinutes: Int { rhythm.windowMinutes }
+    /// The waking stretch: getting up to going to bed. Both bars are clamped
+    /// inside this, which is the only thing they share.
+    private var awakeSpan: Int { 1440 - sleepMinutes }
     private var sessionMinutes: Int { rhythm.gymSessionMinutes }
-    private var gymByMinutes: Int { (wakeMinutes + windowMinutes) % 1440 }
+    /// The gym bar's own value. Read from the rhythm rather than added onto
+    /// the alarm, which is what makes the two bars independent.
+    private var gymByMinutes: Int { rhythm.gymByTime.minutesFromMidnight }
     private var gymDoneMinutes: Int { (gymByMinutes + sessionMinutes) % 1440 }
+    private var gapMinutes: Int { DayDialModel.clockwiseSpan(from: wakeMinutes, to: gymByMinutes) }
 
     private var overshootDegrees: Double {
         Double(DayDialModel.rubberband(overshootMinutes * 0.25, dimension: size))
@@ -842,78 +846,108 @@ struct DayDial: View {
         let baseBed = base.bedtime.minutesFromMidnight
         let baseWake = base.wakeTime.minutesFromMidnight
         let baseSleep = DayDialModel.clockwiseSpan(from: baseBed, to: baseWake)
+        let baseAwake = 1440 - baseSleep
+        let baseGym = base.gymByTime.minutesFromMidnight
+        let baseGap = DayDialModel.clockwiseSpan(from: baseWake, to: baseGym)
+        let baseSession = base.gymSessionMinutes
         var next = rhythm
         var overshoot = 0
 
-        /// Moves the night bodily without changing its length, which is what
-        /// towing the alarm behind the gym visit amounts to.
-        func tow(_ minutes: Int) {
-            guard minutes != 0 else { return }
-            next.bedtime = time(at: baseBed + minutes)
-            next.wakeTime = time(at: baseWake + minutes)
+        // Both bars are written explicitly on every drag, even the one that is
+        // not moving. Pinning the still bar is what guarantees it cannot drift
+        // as a side effect of the other one, and it also gives a plan saved
+        // before the gym bar had its own value a real value the first time it
+        // is touched.
+        next.gymTime = time(at: baseGym)
+
+        /// The lock window follows the gap the user drew, up to its own
+        /// ceiling. Called whenever the gap changes, from either end.
+        func syncWindow(gap: Int) {
+            next.travelMinutes = DayDialModel.travelMinutes(
+                gapMinutes: gap,
+                getReadyMinutes: base.getReadyMinutes
+            )
         }
 
         switch grab {
         case .bedtime:
-            let sleep = baseSleep - delta
-            let clamped = DayDialModel.clampedSleep(sleep, windowMinutes: base.windowMinutes, sessionMinutes: base.gymSessionMinutes)
-            overshoot = sleep - clamped
-            next.bedtime = time(at: baseWake - clamped + 1440)
+            // Bedtime sets the length of the night; the alarm stays put, so
+            // the gap to the gym is untouched. Pulling bedtime earlier runs
+            // into the end of the gym visit, and stops there.
+            let desired = baseSleep - delta
+            let sleep = DayDialModel.clampedSleep(
+                desired,
+                gapMinutes: baseGap,
+                sessionMinutes: baseSession
+            )
+            overshoot = desired - sleep
+            next.bedtime = time(at: baseWake - sleep + 1440)
 
         case .wake:
-            let sleep = baseSleep + delta
-            let clamped = DayDialModel.clampedSleep(sleep, windowMinutes: base.windowMinutes, sessionMinutes: base.gymSessionMinutes)
-            overshoot = sleep - clamped
-            next.wakeTime = time(at: baseBed + clamped)
+            // The alarm moves on its own. Later eats into the run-up to a gym
+            // time that is standing still, so it stops a few minutes short of
+            // the visit rather than shoving it along.
+            let shift = DayDialModel.clampedWakeShift(
+                delta,
+                sleepMinutes: baseSleep,
+                gapMinutes: baseGap
+            )
+            overshoot = delta - shift
+            next.wakeTime = time(at: baseWake + shift)
+            syncWindow(gap: baseGap - shift)
 
         case .sleepBody:
-            next.bedtime = time(at: baseBed + delta + 1440)
-            next.wakeTime = time(at: baseWake + delta + 1440)
+            // The whole night slides with its length intact. The gym visit
+            // does not come with it: the alarm closing on the visit stops the
+            // drag one way, bedtime closing on it stops the drag the other.
+            let shift = DayDialModel.clampedNightShift(
+                delta,
+                awakeSpan: baseAwake,
+                gapMinutes: baseGap,
+                sessionMinutes: baseSession
+            )
+            overshoot = delta - shift
+            next.bedtime = time(at: baseBed + shift + 1440)
+            next.wakeTime = time(at: baseWake + shift + 1440)
+            syncWindow(gap: baseGap - shift)
 
         case .gymStart:
             // This end says where the visit begins; the far end stays put. So
             // pulling it later shortens the visit and pulling it earlier
             // lengthens it, until the visit hits its own limits.
-            let absoluteEnd = baseWake + base.windowMinutes + base.gymSessionMinutes
-            let desiredStart = baseWake + base.windowMinutes + delta
-            let session = DayDialModel.clampedSession(
-                absoluteEnd - desiredStart,
-                sleepMinutes: baseSleep,
-                windowMinutes: base.windowMinutes
+            let endGap = baseGap + baseSession
+            let desiredGap = baseGap + delta
+            let session = min(
+                max(endGap - desiredGap, MorningRhythm.sessionRange.lowerBound),
+                max(min(MorningRhythm.sessionRange.upperBound, endGap - DayDialModel.minimumLeadMinutes), MorningRhythm.sessionRange.lowerBound)
             )
-            let start = absoluteEnd - session
-            overshoot = desiredStart - start
+            let gap = endGap - session
+            overshoot = desiredGap - gap
             next.gymSessionMinutes = session
-
-            let shift = DayDialModel.shiftGym(
-                desiredWindow: start - baseWake,
-                getReadyMinutes: base.getReadyMinutes,
-                sleepMinutes: baseSleep,
-                sessionMinutes: session
-            )
-            next.travelMinutes = shift.windowMinutes - base.getReadyMinutes
-            tow(shift.towMinutes)
+            next.gymTime = time(at: baseWake + gap)
+            syncWindow(gap: gap)
 
         case .gymBody:
-            // The whole visit slides. Once the two-hour window is full the
-            // alarm is towed along instead of the drag dying against a wall,
-            // so the visit can be taken right round the dial.
-            let shift = DayDialModel.shiftGym(
-                desiredWindow: base.windowMinutes + delta,
-                getReadyMinutes: base.getReadyMinutes,
-                sleepMinutes: baseSleep,
-                sessionMinutes: base.gymSessionMinutes
+            // The whole visit slides, anywhere in the waking day. There is no
+            // two-hour wall here any more; it only stops where the night is.
+            let desiredGap = baseGap + delta
+            let gap = DayDialModel.clampedGap(
+                desiredGap,
+                awakeSpan: baseAwake,
+                sessionMinutes: baseSession
             )
-            next.travelMinutes = shift.windowMinutes - base.getReadyMinutes
-            tow(shift.towMinutes)
+            overshoot = desiredGap - gap
+            next.gymTime = time(at: baseWake + gap)
+            syncWindow(gap: gap)
 
         case .gymEnd:
+            let desired = baseSession + delta
             let session = DayDialModel.clampedSession(
-                base.gymSessionMinutes + delta,
-                sleepMinutes: baseSleep,
-                windowMinutes: base.windowMinutes
+                desired,
+                awakeSpan: baseAwake,
+                gapMinutes: baseGap
             )
-            overshoot = (base.gymSessionMinutes + delta) - session
+            overshoot = desired - session
             next.gymSessionMinutes = session
         }
 
