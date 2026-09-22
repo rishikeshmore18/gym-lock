@@ -44,6 +44,18 @@ enum CollapsingTitleMetrics {
 /// the same glide works whether it is landing in an empty strip (the tabs) or
 /// in a row that already holds a back button and a tick (the alarm screen).
 struct CollapsingTitle: View {
+    /// Where the title rests before it collapses. It always *ends* centred as a
+    /// pill; this only decides where it starts from.
+    enum Start {
+        /// On the page's left margin, in line with the cards below it — the
+        /// system's large-title behaviour, used by the tabs.
+        case leadingMargin
+        /// Centred over the page. For a screen whose top row already holds a
+        /// button at each edge, where a left-aligned title has nothing to line
+        /// up with and reads as lopsided against them.
+        case centred
+    }
+
     let title: String
     /// 0 at rest, 1 fully collapsed. Use `CollapsingTitleMetrics.collapse`.
     let collapse: CGFloat
@@ -57,6 +69,11 @@ struct CollapsingTitle: View {
     /// Vertical centre once collapsed. A couple of points of lift is what
     /// stops the pill looking like it simply shrank in place.
     var collapsedCenterY: CGFloat = CollapsingTitleMetrics.bandHeight / 2 - 2
+    var start: Start = .leadingMargin
+    /// Size at rest. Overridable because a title that starts centred, with
+    /// nothing beside it competing for the line, can carry more weight than
+    /// one sharing its edge with a page of cards.
+    var expandedSize: CGFloat = CollapsingTitleMetrics.expandedSize
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -66,7 +83,7 @@ struct CollapsingTitle: View {
     @State private var collapsedTitleWidth: CGFloat = 0
 
     var body: some View {
-        ZStack(alignment: .leading) {
+        ZStack(alignment: stackAlignment) {
             Text(title)
                 .font(.system(size: titleSize, weight: .bold))
                 .foregroundStyle(Theme.ink)
@@ -79,7 +96,7 @@ struct CollapsingTitle: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilitySortPriority(1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: stackAlignment)
         .frame(height: CollapsingTitleMetrics.bandHeight)
         .background(alignment: .topLeading) { collapsedWidthProbe }
         // The pill is chrome floating over the page; taps belong to whatever
@@ -130,9 +147,13 @@ struct CollapsingTitle: View {
         min(max((collapse - 0.35) / 0.5, 0), 1)
     }
 
+    private var stackAlignment: Alignment {
+        start == .centred ? .center : .leading
+    }
+
     private var titleSize: CGFloat {
-        let base = CollapsingTitleMetrics.expandedSize
-            - (CollapsingTitleMetrics.expandedSize - CollapsingTitleMetrics.collapsedSize) * collapse
+        let base = expandedSize
+            - (expandedSize - CollapsingTitleMetrics.collapsedSize) * collapse
         // Pulling the page down past the top grows the title a little, the way
         // a system large title does. Capped hard — this is a hint of give, not
         // a stretch effect.
@@ -142,7 +163,13 @@ struct CollapsingTitle: View {
         return ((base + give) * 2).rounded() / 2
     }
 
+    /// A title that starts centred also ends centred, so it has no horizontal
+    /// journey to make: the stack keeps it on the screen's centre line at every
+    /// size and only the vertical glide and the shrink are left to animate.
+    /// This is also what keeps it honest under an overscroll stretch, where an
+    /// offset computed from a measured width would drift by half the growth.
     private var titleX: CGFloat {
+        guard start == .leadingMargin else { return 0 }
         let expanded = CollapsingTitleMetrics.pageMargin - CollapsingTitleMetrics.pillPadding
         guard containerWidth > 0, collapsedTitleWidth > 0 else { return expanded }
         let pillWidth = collapsedTitleWidth + CollapsingTitleMetrics.pillPadding * 2

@@ -30,8 +30,7 @@ struct AlarmSettingsView: View {
     /// OS until the tick is tapped and the user says which alarm to change.
     @State private var draft: MorningRhythm?
     @State private var isChoosingScope = false
-    /// Drives the hairline that fades in under the header once content has
-    /// scrolled beneath it. The title itself no longer moves.
+    /// Drives the title's collapse, exactly as on the Progress tab.
     @State private var scrollOffset: CGFloat = 0
 
     #if DEBUG
@@ -112,24 +111,34 @@ struct AlarmSettingsView: View {
 
     // MARK: - Header
 
-    /// Back, title and tick in one fixed row, the way Apple's own Wake Up
-    /// editor lays it out. This screen is landed on to change one thing and
-    /// left again, never browsed the way the Progress tab is — a title with a
-    /// storey of its own only pushed the dial, which is the actual point of
-    /// the screen, a full card-height further down, leaving the bare gap at
-    /// the top the row above the dial used to sit in.
+    /// Back on the left, the tick on the right, the title between them — and
+    /// that title behaves exactly as the Progress tab's does: large at rest,
+    /// shrinking into a floating glass pill as the page scrolls under it.
     ///
-    /// The title is layered under the button row rather than placed beside
-    /// it, so it stays dead centre on the screen regardless of how wide
-    /// either button is or whether the tick is currently scaled to nothing.
+    /// The title is a layer of its own inside the row rather than a third
+    /// item in the `HStack`, for two reasons. It stays dead centre on the
+    /// screen no matter how wide either button is or whether the tick is
+    /// currently scaled out of sight; and because it starts centred it has no
+    /// sideways journey to make, so the collapse is purely a shrink in place
+    /// with the glass arriving around it. That is what makes it read as the
+    /// page title turning into the bubble, rather than sliding off somewhere.
+    ///
+    /// There is no hairline under this row. The pill appearing is already the
+    /// signal that content has gone underneath, so a rule as well would be
+    /// the same thing said twice, and it cut across the dial card at exactly
+    /// the moment the card slid beneath it.
     private var header: some View {
         ZStack {
-            Text("alarm")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(Theme.ink)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
-                .accessibilityAddTraits(.isHeader)
+            CollapsingTitle(
+                title: "Alarm",
+                collapse: CollapsingTitleMetrics.collapse(forOffset: scrollOffset),
+                overscroll: CollapsingTitleMetrics.overscroll(forOffset: scrollOffset),
+                // Unused for a centred title: it holds the centre line through
+                // the stack's own alignment rather than by measurement.
+                containerWidth: 0,
+                start: .centred,
+                expandedSize: 30
+            )
 
             HStack(spacing: 0) {
                 GlassCircleButton(symbol: "chevron.left", label: "Back") {
@@ -143,21 +152,8 @@ struct AlarmSettingsView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 4)
-        .padding(.bottom, 10)
-        .background(alignment: .bottom) { headerDivider }
-    }
-
-    /// The one piece of motion left at the top of the screen: a hairline that
-    /// fades in exactly as the first card slides under the header, the same
-    /// cue a system inline bar gives once its content has scrolled beneath
-    /// it. Driven straight off the scroll offset, so it tracks the finger 1:1
-    /// and reverses the instant the user scrolls back up.
-    private var headerDivider: some View {
-        Rectangle()
-            .fill(Theme.border)
-            .frame(height: 1)
-            .opacity(min(max(scrollOffset / 20, 0), 1))
+        .padding(.top, 2)
+        .padding(.bottom, 4)
     }
 
     // MARK: - Commit
