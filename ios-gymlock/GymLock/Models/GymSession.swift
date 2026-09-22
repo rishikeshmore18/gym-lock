@@ -173,6 +173,13 @@ struct GymSession: Codable, Hashable, Identifiable {
     /// relaunch or a suspended app resolves to the truth rather than restarting
     /// the five minutes.
     var snoozeExpiresAt: Date?
+    /// Whether the plan offered a snooze when this alarm rang. Captured at
+    /// the ring rather than read live, so flipping the setting mid-morning
+    /// cannot make a button appear or vanish under someone's thumb. Optional
+    /// so sessions saved before the setting existed still decode.
+    var snoozeOffered: Bool?
+    /// The snooze length the plan had when this alarm rang.
+    var snoozeLengthMinutes: Int?
 
     var quickWorkoutMinutes: Int?
     var quickWorkoutStartedAt: Date?
@@ -220,8 +227,8 @@ struct GymSession: Codable, Hashable, Identifiable {
     /// A short grace period after "still going" on an expired window. This is
     /// not a fresh timer.
     static let graceMinutes = 10
-    /// The one snooze, in minutes. Short on purpose: long enough to be worth
-    /// taking, too short to fall back asleep properly.
+    /// The snooze length when the plan has not said otherwise. Short on
+    /// purpose: long enough to be worth taking, too short to fall back asleep.
     static let snoozeMinutes = 5
     /// Fraction of the window at which the "still getting ready?" nudge appears.
     static let nudgeFraction: Double = 0.75
@@ -284,6 +291,12 @@ struct GymSession: Codable, Hashable, Identifiable {
     /// True once the single snooze has been spent, for the rest of this
     /// session. Drives both the missing button and the shorter copy.
     var hasSnoozed: Bool { snoozeUsedAt != nil }
+
+    /// Whether this session's alarm offers a snooze at all.
+    var offersSnooze: Bool { snoozeOffered ?? true }
+
+    /// How long this session's snooze lasts.
+    var snoozeDurationMinutes: Int { snoozeLengthMinutes ?? Self.snoozeMinutes }
 
     /// Seconds left of the snooze, from the wall clock.
     func snoozeRemaining(at now: Date = Date()) -> TimeInterval {

@@ -51,6 +51,9 @@ final class AlarmRinger {
     private var fallbackHaptics: Task<Void, Never>?
     /// Frozen by the first interaction, so the ramp stops where it was.
     private var isEscalationFrozen = false
+    /// The vibration that rides with the track. Set by the coordinator from
+    /// the plan just before ringing; `.synchronized` is the original pulse.
+    var haptic: AlarmHaptic = .synchronized
 
     // MARK: - Ringing
 
@@ -191,6 +194,9 @@ final class AlarmRinger {
     /// Haptics ignore the silent switch entirely, so this is the part that
     /// works on a phone face-down on a nightstand with the ringer off.
     private func startHaptics() {
+        // The user asked for no vibration, so there is none.
+        guard haptic != .none else { return }
+
         guard CHHapticEngine.capabilitiesForHardware().supportsHaptics,
               let engine = try? CHHapticEngine()
         else {
@@ -206,7 +212,7 @@ final class AlarmRinger {
         do {
             try engine.start()
 
-            let pattern = try CHHapticPattern(events: pulseEvents(), parameters: [])
+            let pattern = try CHHapticPattern(events: Self.events(for: haptic), parameters: [])
             let player = try engine.makeAdvancedPlayer(with: pattern)
             player.loopEnabled = true
             try player.start(atTime: CHHapticTimeImmediate)
@@ -221,36 +227,33 @@ final class AlarmRinger {
         }
     }
 
-    /// Two knocks and a gap: the shape of a phone buzzing on wood, rather than
-    /// a continuous rumble that the hand stops noticing within seconds.
-    private func pulseEvents() -> [CHHapticEvent] {
-        func transient(at time: Double, strength: Float) -> CHHapticEvent {
+    /// One cycle of the chosen pattern as Core Haptics events.
+    ///
+    /// A near-silent tap is placed at the end of the cycle so a looping
+    /// player keeps the rest: the pause is what makes the next pulse register
+    /// as a new demand rather than as background noise.
+    static func events(for haptic: AlarmHaptic, includingRest: Bool = true) -> [CHHapticEvent] {
+        var events = haptic.beats.map { beat in
             CHHapticEvent(
-                eventType: .hapticTransient,
+                eventType: beat.isContinuous ? .hapticContinuous : .hapticTransient,
                 parameters: [
-                    CHHapticEventParameter(parameterID: .hapticIntensity, value: strength),
-                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.7),
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: beat.intensity),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: beat.sharpness),
                 ],
-                relativeTime: time
+                relativeTime: beat.time,
+                duration: beat.duration
             )
         }
-
-        return [
-            transient(at: 0, strength: 1),
-            transient(at: 0.16, strength: 0.85),
-            CHHapticEvent(
-                eventType: .hapticContinuous,
-                parameters: [
-                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.7),
-                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.4),
-                ],
-                relativeTime: 0.32,
-                duration: 0.45
-            ),
-            // The silence is deliberate: a pause is what makes the next pulse
-            // register as a new demand rather than as background noise.
-            transient(at: 1.5, strength: 0.01),
-        ]
+        if includingRest, !events.isEmpty {
+            events.append(
+                CHHapticEvent(
+                    eventType: .hapticTransient,
+                    parameters: [CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.01)],
+                    relativeTime: haptic.cycleLength
+                )
+            )
+        }
+        return events
     }
 
     /// Scales the running pattern to match the volume ramp.

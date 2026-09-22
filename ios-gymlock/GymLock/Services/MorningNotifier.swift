@@ -134,7 +134,7 @@ final class MorningNotifier {
     /// suspended within seconds. `timeSensitive` so it still arrives through a
     /// sleep Focus — this is the one message in the whole app that exists
     /// specifically to wake somebody.
-    func scheduleSnoozeRefire(at date: Date) async {
+    func scheduleSnoozeRefire(at date: Date, minutes: Int = GymSession.snoozeMinutes) async {
         await cancel(ID.snooze)
 
         let interval = date.timeIntervalSinceNow
@@ -143,7 +143,9 @@ final class MorningNotifier {
         await deliver(
             id: ID.snooze,
             title: "Time to move",
-            body: "your five minutes are up. your apps are still locked.",
+            body: minutes == 1
+                ? "your minute is up. your apps are still locked."
+                : "your \(minutes) minutes are up. your apps are still locked.",
             after: interval,
             interruption: .timeSensitive
         )

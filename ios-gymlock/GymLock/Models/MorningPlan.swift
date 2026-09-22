@@ -308,6 +308,17 @@ struct MorningPlan: Hashable {
     var hasBeenReviewed: Bool
     /// A one-off change to the next alarm, if the user asked for one.
     var nextAlarmOverride: NextAlarmOverride? = nil
+    /// Whether the morning alarm offers its single snooze at all.
+    var snoozeEnabled: Bool = true
+    /// How long that snooze lasts. Five until the user says otherwise, which
+    /// is what the snooze has always been.
+    var snoozeMinutes: Int = 5
+    /// The vibration that rides with the track while it rings in the app.
+    var alarmHaptic: AlarmHaptic = .synchronized
+
+    /// The snooze lengths on offer. Fifteen is the ceiling: past that it is
+    /// not a snooze, it is going back to sleep.
+    static let snoozeRange: ClosedRange<Int> = 1...15
 
     static let `default` = MorningPlan(
         rhythm: .default,
@@ -434,6 +445,7 @@ struct MorningPlan: Hashable {
 extension MorningPlan: Codable {
     private enum CodingKeys: String, CodingKey {
         case rhythm, nightLock, slots, missionsEnabled, recentMissions, hasBeenReviewed, nextAlarmOverride
+        case snoozeEnabled, snoozeMinutes, alarmHaptic
     }
 
     init(from decoder: Decoder) throws {
@@ -445,6 +457,12 @@ extension MorningPlan: Codable {
         recentMissions = try container.decode([ActivationMissionType].self, forKey: .recentMissions)
         hasBeenReviewed = try container.decode(Bool.self, forKey: .hasBeenReviewed)
         nextAlarmOverride = try container.decodeIfPresent(NextAlarmOverride.self, forKey: .nextAlarmOverride)
+        // Plans saved before these options existed decode to exactly what
+        // the alarm already did: a five minute snooze and the original pulse.
+        snoozeEnabled = try container.decodeIfPresent(Bool.self, forKey: .snoozeEnabled) ?? true
+        let minutes = try container.decodeIfPresent(Int.self, forKey: .snoozeMinutes) ?? 5
+        snoozeMinutes = min(max(minutes, Self.snoozeRange.lowerBound), Self.snoozeRange.upperBound)
+        alarmHaptic = try container.decodeIfPresent(AlarmHaptic.self, forKey: .alarmHaptic) ?? .synchronized
     }
 }
 

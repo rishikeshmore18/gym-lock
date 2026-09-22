@@ -22,14 +22,30 @@ nonisolated struct SessionVoice: Hashable {
     /// True once this session's single snooze has been spent. The copy after a
     /// snooze is shorter and more direct, and the snooze itself is gone.
     let hasSnoozed: Bool
+    /// False when the user switched the snooze off on the Alarm screen.
+    let snoozeEnabled: Bool
+    /// The snooze length the user chose, 1 to 15.
+    let snoozeMinutes: Int
 
-    init(daypart: SessionDaypart, hasSnoozed: Bool = false) {
+    init(
+        daypart: SessionDaypart,
+        hasSnoozed: Bool = false,
+        snoozeEnabled: Bool = true,
+        snoozeMinutes: Int = 5
+    ) {
         self.daypart = daypart
         self.hasSnoozed = hasSnoozed
+        self.snoozeEnabled = snoozeEnabled
+        self.snoozeMinutes = snoozeMinutes
     }
 
     init(session: GymSession) {
-        self.init(daypart: SessionDaypart(session.alarmTime), hasSnoozed: session.hasSnoozed)
+        self.init(
+            daypart: SessionDaypart(session.alarmTime),
+            hasSnoozed: session.hasSnoozed,
+            snoozeEnabled: session.offersSnooze,
+            snoozeMinutes: session.snoozeDurationMinutes
+        )
     }
 
     // MARK: - Vocabulary
@@ -60,7 +76,9 @@ nonisolated struct SessionVoice: Hashable {
     /// Morning only, and only once. Somebody whose alarm rings after work is
     /// already awake; the button would not be buying them five minutes of
     /// sleep, it would be buying them a way out.
-    var allowsSnooze: Bool { daypart == .morning && !hasSnoozed }
+    ///
+    /// And only if the user has not switched it off.
+    var allowsSnooze: Bool { snoozeEnabled && daypart == .morning && !hasSnoozed }
 
     /// The action the user is being asked to take.
     var primaryAction: String {
@@ -90,7 +108,7 @@ nonisolated struct SessionVoice: Hashable {
         }
     }
 
-    /// Shown while the five minutes are running down.
+    /// Shown while the snooze is running down.
     func snoozeHeadline(until time: String) -> String {
         "back at \(time)."
     }
@@ -99,7 +117,7 @@ nonisolated struct SessionVoice: Hashable {
         "your apps stay locked. rest, don't restart."
     }
 
-    var snoozeAction: String { "5 more min" }
+    var snoozeAction: String { "\(snoozeMinutes) more min" }
 
     /// The escape hatch on the alarm screen. It is never hidden.
     var changePlanAction: String {

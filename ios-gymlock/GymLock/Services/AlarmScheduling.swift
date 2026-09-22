@@ -24,6 +24,8 @@ struct GymAlarmRequest: Hashable {
     /// built by the system before the app is running, so the rule has to travel
     /// with the request rather than being asked for at the moment of the tap.
     var allowsSnooze: Bool = false
+    /// How long that snooze lasts, so the system alarm's button can say so.
+    var snoozeMinutes: Int = 5
     /// Set for a one-off alarm: it rings once at this exact moment and never
     /// repeats. `time` and `weekdays` still describe it for backends that
     /// only think in weekly terms.

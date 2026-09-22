@@ -32,7 +32,7 @@ struct StartGymSessionIntent: LiveActivityIntent {
     }
 }
 
-/// Runs when the user taps "5 more min".
+/// Runs when the user taps the snooze button ("5 more min" by default).
 ///
 /// It still starts the session, and the apps still lock. A snooze buys five
 /// minutes of sleep, not five minutes of scrolling, so the only difference from
@@ -40,7 +40,7 @@ struct StartGymSessionIntent: LiveActivityIntent {
 @available(iOS 26.0, *)
 struct SnoozeGymSessionIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "Snooze gym alarm"
-    static var description = IntentDescription("Takes the single five minute snooze.")
+    static var description = IntentDescription("Takes the single snooze.")
     static var supportedModes: IntentModes { .foreground(.immediate) }
 
     @Parameter(title: "Alarm")

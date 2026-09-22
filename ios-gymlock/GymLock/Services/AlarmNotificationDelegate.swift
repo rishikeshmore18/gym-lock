@@ -28,7 +28,13 @@ final class AlarmNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     /// Must run before the first notification can arrive, which in practice
     /// means app `init()`. Registering later works for the next notification
     /// and silently loses the one that launched the app.
-    static func registerCategories() {
+    ///
+    /// Called again from every alarm sync with the plan's snooze length, so
+    /// the button always names the minutes the user actually chose.
+    static func registerCategories(
+        snoozeMinutes: Int = GymSession.snoozeMinutes,
+        snoozeEnabled: Bool = true
+    ) {
         let imUp = UNNotificationAction(
             identifier: Action.imUp,
             title: "I'm up",
@@ -39,13 +45,15 @@ final class AlarmNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         // opposite of what they just asked for.
         let snooze = UNNotificationAction(
             identifier: Action.snooze,
-            title: "5 more min",
+            title: "\(snoozeMinutes) more min",
             options: []
         )
 
         let alarm = UNNotificationCategory(
             identifier: Category.alarm,
-            actions: [imUp, snooze],
+            // Switched off on the Alarm screen means no button, not a button
+            // that quietly does nothing.
+            actions: snoozeEnabled ? [imUp, snooze] : [imUp],
             intentIdentifiers: [],
             options: [.customDismissAction]
         )

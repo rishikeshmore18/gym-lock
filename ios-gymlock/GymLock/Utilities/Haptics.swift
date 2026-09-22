@@ -62,6 +62,38 @@ enum Haptics {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
+    // MARK: - Alarm vibration preview
+
+    private static var alarmPreviewPlayer: CHHapticPatternPlayer?
+
+    /// Plays one cycle of an alarm vibration, so choosing one on the Haptics
+    /// page lets the user feel it, as Apple's list does. A new preview cuts
+    /// the previous one off rather than stacking on top of it.
+    static func preview(_ haptic: AlarmHaptic) {
+        guard haptic != .none else { return }
+        guard let engine = runningEngine() else {
+            medium()
+            return
+        }
+
+        do {
+            let events = AlarmRinger.events(for: haptic, includingRest: false)
+            let pattern = try CHHapticPattern(events: events, parameters: [])
+            let player = try engine.makePlayer(with: pattern)
+            try? alarmPreviewPlayer?.stop(atTime: CHHapticTimeImmediate)
+            alarmPreviewPlayer = player
+            try player.start(atTime: CHHapticTimeImmediate)
+        } catch {
+            medium()
+        }
+    }
+
+    /// Stops a preview that is still playing, when its page goes away.
+    static func stopPreview() {
+        try? alarmPreviewPlayer?.stop(atTime: CHHapticTimeImmediate)
+        alarmPreviewPlayer = nil
+    }
+
     // MARK: - Breaking glass
 
     private static var engine: CHHapticEngine?

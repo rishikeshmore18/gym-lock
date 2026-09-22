@@ -16,10 +16,10 @@ struct MissionToggleCard: View {
             set: { store.plan.missionsEnabled = $0; Haptics.tap() }
         )) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("activation mission")
+                Text("persistent mode")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.ink)
-                Text("one tiny action after you commit.")
+                Text("prove you're up with one quick task.")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.inkSecondary)
             }

@@ -20,7 +20,10 @@ struct AlarmSettingsView: View {
     /// checked against the night lock at the right moment.
     @State private var rhythmOnOpen: MorningRhythm?
     @State private var nightLockPrompt: RhythmChangeProposer.Prompt?
-    @State private var isPickingSound = false
+    /// Whether the snooze length wheel is open inside the options card.
+    @State private var isEditingSnooze = false
+    /// Debounces pushing a new snooze length to the OS while the wheel spins.
+    @State private var snoozeSync: Task<Void, Never>?
     @State private var isEditingWindDown = false
     @State private var alarmAuth: AlarmAuthorization = .notDetermined
     /// What the finger is holding on the dial, so the header and the line
@@ -69,11 +72,10 @@ struct AlarmSettingsView: View {
 
                         dialCard
                         repeatCard
-                        soundCard
+                        alarmOptionsCard
                         windDownCard
                         gymLockCard
                         howItRingsCard
-                        MissionToggleCard(tint: Theme.ink)
 
                         #if DEBUG
                         simulatorRow
@@ -89,6 +91,12 @@ struct AlarmSettingsView: View {
                     scrollOffset = offset
                 }
                 .overlay(alignment: .top) { header }
+            }
+            .navigationDestination(for: AlarmOptionRoute.self) { route in
+                switch route {
+                case .sound: AlarmSoundListView()
+                case .haptics: AlarmHapticsListView()
+                }
             }
             // The header is drawn here rather than put in a toolbar on
             // purpose. A `ToolbarItem` styles its own content on iOS 26, which
@@ -106,9 +114,6 @@ struct AlarmSettingsView: View {
         .onDisappear {
             soundPlayer?.stop()
             resyncAlarms()
-        }
-        .sheet(isPresented: $isPickingSound) {
-            AlarmSoundPickerSheet()
         }
         .sheet(isPresented: $isEditingWindDown) {
             WindDownEditorSheet()
@@ -648,73 +653,149 @@ struct AlarmSettingsView: View {
         resyncAlarms()
     }
 
-    // MARK: - Sound card
+    // MARK: - Alarm options card
 
-    private var canPreviewBundled: Bool {
-        store.profile.alarmSound != .ownSong
-    }
-
-    private var isPreviewing: Bool {
-        soundPlayer?.playing == store.profile.alarmSound
-    }
-
-    private var soundCard: some View {
-        HStack(spacing: 14) {
-            if canPreviewBundled {
-                Button {
-                    Haptics.tap()
-                    soundPlayer?.toggle(store.profile.alarmSound)
-                } label: {
-                    Image(systemName: isPreviewing ? "pause.fill" : "play.fill")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(Theme.inkSecondary)
-                        .frame(width: 42, height: 42)
-                        .background(Theme.surfaceMuted, in: .circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isPreviewing ? "Stop preview" : "Preview sound")
-            } else {
-                Image(systemName: "music.note")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.inkSecondary)
-                    .frame(width: 42, height: 42)
-                    .background(Theme.surfaceMuted, in: .circle)
+    /// Sound, snooze and persistent mode, grouped after Apple's Edit Alarm
+    /// and dressed exactly like the repeat card above it: the same glass,
+    /// radius, padding and hairlines, so the two read as one family.
+    ///
+    /// The snooze length opens *inside* the card, as Apple's does. The card
+    /// grows around the wheel on a critically damped spring rather than
+    /// presenting a sheet, because the choice is small and the context (the
+    /// toggle just above it) should stay in view while it is made.
+    ///
+    /// No coral here: on this screen the single accent belongs to the gym
+    /// arc on the dial, so the open duration reads in ink weight instead.
+    private var alarmOptionsCard: some View {
+        AlarmGroupCard {
+            NavigationLink(value: AlarmOptionRoute.sound) {
+                AlarmValueRow(title: "sound", value: store.profile.alarmSoundLabel)
             }
+            .buttonStyle(AlarmRowButtonStyle())
 
-            Button {
-                Haptics.tap()
-                isPickingSound = true
-            } label: {
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        cardLabel("sound")
-                        Text(store.profile.alarmSoundLabel)
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Theme.ink)
-                            .lineLimit(1)
-                        Text(store.profile.alarmSound.subtitle)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.inkSecondary)
-                            .lineLimit(1)
-                    }
+            AlarmRowDivider()
 
-                    Spacer(minLength: 8)
+            snoozeToggleRow
 
-                    if isPreviewing {
-                        MiniWaveform(level: soundPlayer?.level ?? 0, tint: Theme.inkTertiary)
-                    }
+            if plan.snoozeEnabled {
+                AlarmRowDivider()
+                    .transition(.opacity)
 
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.inkTertiary)
+                snoozeDurationRow
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+
+                if isEditingSnooze {
+                    snoozeWheel
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
                 }
             }
-            .buttonStyle(.plain)
+
+            AlarmRowDivider()
+
+            persistentModeRow
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .warmCard(radius: 18)
+        .animation(Self.cardSpring, value: plan.snoozeEnabled)
+        .animation(Self.cardSpring, value: isEditingSnooze)
+    }
+
+    /// Critically damped: the card grows and settles with no overshoot, and
+    /// a second tap mid-flight retargets from wherever it is.
+    private static let cardSpring: Animation = .spring(response: 0.36, dampingFraction: 1)
+
+    private var snoozeToggleRow: some View {
+        Toggle(isOn: Binding(
+            get: { plan.snoozeEnabled },
+            set: { isOn in
+                Haptics.tap()
+                store.plan.snoozeEnabled = isOn
+                if !isOn { isEditingSnooze = false }
+                resyncAlarms()
+            }
+        )) {
+            Text("snooze")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+        }
+        .tint(Theme.ink)
+        .frame(minHeight: 50)
+    }
+
+    private var snoozeDurationRow: some View {
+        Button {
+            Haptics.tap()
+            isEditingSnooze.toggle()
+        } label: {
+            AlarmValueRow(
+                title: "snooze duration",
+                value: "\(plan.snoozeMinutes) min",
+                showsChevron: false,
+                valueIsActive: isEditingSnooze
+            )
+            .animation(.spring(response: 0.3, dampingFraction: 1), value: plan.snoozeMinutes)
+        }
+        .buttonStyle(AlarmRowButtonStyle())
+        .accessibilityHint(isEditingSnooze ? "Hides the minutes" : "Shows the minutes")
+    }
+
+    /// Apple's own wheel, so the roll, the momentum, the detents and the
+    /// ticks are the system's rather than an imitation of them.
+    private var snoozeWheel: some View {
+        Picker("snooze duration", selection: snoozeMinutesBinding) {
+            ForEach(Array(MorningPlan.snoozeRange), id: \.self) { minutes in
+                Text("\(minutes) min")
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+                    .tag(minutes)
+            }
+        }
+        .pickerStyle(.wheel)
+        .labelsHidden()
+        .frame(height: 180)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .padding(.bottom, 6)
+    }
+
+    private var snoozeMinutesBinding: Binding<Int> {
+        Binding(
+            get: { plan.snoozeMinutes },
+            set: { minutes in
+                store.plan.snoozeMinutes = minutes
+                // The system alarm's snooze button names the minutes, so the
+                // OS needs the new length, but not once per detent of a spin.
+                snoozeSync?.cancel()
+                snoozeSync = Task {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    guard !Task.isCancelled else { return }
+                    await coordinator.syncAlarms()
+                }
+            }
+        )
+    }
+
+    /// Activation missions, renamed for what they feel like from the bed:
+    /// the alarm does not simply let you go. Same switch, same behaviour.
+    private var persistentModeRow: some View {
+        Toggle(isOn: Binding(
+            get: { plan.missionsEnabled },
+            set: { isOn in
+                Haptics.tap()
+                store.plan.missionsEnabled = isOn
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("persistent mode")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                Text("prove you're up with one quick task.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .tint(Theme.ink)
+        .padding(.vertical, 10)
+        .frame(minHeight: 50)
     }
 
     // MARK: - Wind-down card

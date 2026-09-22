@@ -435,7 +435,8 @@ final class GymSessionCoordinator {
                 soundFileName: soundFile,
                 // The alert is built by the system long before the app runs, so
                 // the morning-only snooze rule has to be decided here.
-                allowsSnooze: slot.daypart.usesSleepRhythm
+                allowsSnooze: plan.snoozeEnabled && slot.daypart.usesSleepRhythm,
+                snoozeMinutes: plan.snoozeMinutes
             )
         }
 
@@ -457,11 +458,20 @@ final class GymSessionCoordinator {
                     message: "You planned this.",
                     soundResource: profile.alarmSound.resourceName,
                     soundFileName: soundFile,
-                    allowsSnooze: SessionDaypart(TimeOfDay(from: override.fireDate)).usesSleepRhythm,
+                    allowsSnooze: plan.snoozeEnabled
+                        && SessionDaypart(TimeOfDay(from: override.fireDate)).usesSleepRhythm,
+                    snoozeMinutes: plan.snoozeMinutes,
                     fireDate: override.fireDate
                 )
             )
         }
+
+        // The notification's snooze button carries the chosen length, so its
+        // label is re-registered whenever the plan is pushed to the OS.
+        AlarmNotificationDelegate.registerCategories(
+            snoozeMinutes: plan.snoozeMinutes,
+            snoozeEnabled: plan.snoozeEnabled
+        )
 
         await alarms.replaceAll(with: requests)
     }
@@ -755,6 +765,8 @@ final class GymSessionCoordinator {
             state: .alarmFired
         )
         new.alarmFiredAt = date
+        new.snoozeOffered = plan.snoozeEnabled
+        new.snoozeLengthMinutes = plan.snoozeMinutes
 
         session = new
         store.record(.alarmFired, sessionID: new.id)
@@ -781,6 +793,7 @@ final class GymSessionCoordinator {
     private func startRingingIfFrontmost() {
         guard let store else { return }
         guard UIApplication.shared.applicationState == .active else { return }
+        ringer.haptic = store.plan.alarmHaptic
         ringer.start(for: store.profile)
     }
 
@@ -864,7 +877,7 @@ final class GymSessionCoordinator {
 
         let now = Date()
         current.snoozeUsedAt = now
-        current.snoozeExpiresAt = now.addingTimeInterval(Double(GymSession.snoozeMinutes) * 60)
+        current.snoozeExpiresAt = now.addingTimeInterval(Double(current.snoozeDurationMinutes) * 60)
         current.state = .snoozed
         session = current
 
@@ -877,7 +890,10 @@ final class GymSessionCoordinator {
         // face-down on the nightstand.
         startTicking()
         Task { [notifier] in
-            await notifier.scheduleSnoozeRefire(at: current.snoozeExpiresAt ?? now)
+            await notifier.scheduleSnoozeRefire(
+                at: current.snoozeExpiresAt ?? now,
+                minutes: current.snoozeDurationMinutes
+            )
         }
     }
 

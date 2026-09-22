@@ -92,7 +92,7 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
                 title: LocalizedStringResource(stringLiteral: request.title),
                 stopButton: stopButton,
                 secondaryButton: AlarmButton(
-                    text: "5 more min",
+                    text: LocalizedStringResource(stringLiteral: "\(request.snoozeMinutes) more min"),
                     textColor: .white,
                     systemImageName: "zzz"
                 ),
