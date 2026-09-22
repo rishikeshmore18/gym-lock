@@ -33,6 +33,15 @@ struct AlarmSettingsView: View {
     /// Drives the title's collapse, exactly as on the Progress tab.
     @State private var scrollOffset: CGFloat = 0
 
+    /// Height the header row reserves at the top of the content.
+    ///
+    /// A fixed number, not a measured one, and that is the whole point. The
+    /// header holds the collapsing title, whose size is driven by the scroll
+    /// offset; feeding a measurement of that row back into the scroll view's
+    /// insets is what froze this screen, so the room it needs is stated once
+    /// here instead. 44pt button + 2 top + 4 bottom, rounded up for air.
+    private static let headerBand: CGFloat = 52
+
     #if DEBUG
     @State private var isShowingSimulator = false
     #endif
@@ -52,6 +61,12 @@ struct AlarmSettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 14) {
+                        // The room the fixed header row occupies. The header is
+                        // drawn in an overlay rather than as a safe-area inset
+                        // of this scroll view, so this is what keeps the first
+                        // card clear of it. See `header`.
+                        Color.clear.frame(height: Self.headerBand)
+
                         dialCard
                         repeatCard
                         soundCard
@@ -65,7 +80,6 @@ struct AlarmSettingsView: View {
                         #endif
                     }
                     .padding(.horizontal, 20)
-                    .padding(.top, 12)
                     .padding(.bottom, 32)
                 }
                 .scrollIndicators(.hidden)
@@ -74,7 +88,7 @@ struct AlarmSettingsView: View {
                 } action: { _, offset in
                     scrollOffset = offset
                 }
-                .safeAreaInset(edge: .top) { header }
+                .overlay(alignment: .top) { header }
             }
             // The header is drawn here rather than put in a toolbar on
             // purpose. A `ToolbarItem` styles its own content on iOS 26, which
