@@ -30,12 +30,9 @@ struct AlarmSettingsView: View {
     /// OS until the tick is tapped and the user says which alarm to change.
     @State private var draft: MorningRhythm?
     @State private var isChoosingScope = false
-    /// Drives the title's glide, exactly as on the Progress tab.
+    /// Drives the hairline that fades in under the header once content has
+    /// scrolled beneath it. The title itself no longer moves.
     @State private var scrollOffset: CGFloat = 0
-    @State private var containerWidth: CGFloat = 0
-    /// Measured rather than assumed, so the title lands on the buttons' centre
-    /// line at any Dynamic Type size.
-    @State private var headerHeight: CGFloat = 52
 
     #if DEBUG
     @State private var isShowingSimulator = false
@@ -56,11 +53,6 @@ struct AlarmSettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 14) {
-                        // The room the large title occupies while it is still
-                        // large. It is drawn in the overlay rather than here so
-                        // it can outlive the scroll and become the pill.
-                        Color.clear.frame(height: CollapsingTitleMetrics.bandHeight)
-
                         dialCard
                         repeatCard
                         soundCard
@@ -74,6 +66,7 @@ struct AlarmSettingsView: View {
                         #endif
                     }
                     .padding(.horizontal, 20)
+                    .padding(.top, 12)
                     .padding(.bottom, 32)
                 }
                 .scrollIndicators(.hidden)
@@ -82,11 +75,7 @@ struct AlarmSettingsView: View {
                 } action: { _, offset in
                     scrollOffset = offset
                 }
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
-                    containerWidth = $0
-                }
                 .safeAreaInset(edge: .top) { header }
-                .overlay(alignment: .top) { glidingTitle }
             }
             // The header is drawn here rather than put in a toolbar on
             // purpose. A `ToolbarItem` styles its own content on iOS 26, which
@@ -123,51 +112,52 @@ struct AlarmSettingsView: View {
 
     // MARK: - Header
 
-    /// Back on the left, the tick on the right, the way Apple lays out a
-    /// full-screen editor. Content scrolls underneath, which is what gives the
-    /// glass something to refract.
+    /// Back, title and tick in one fixed row, the way Apple's own Wake Up
+    /// editor lays it out. This screen is landed on to change one thing and
+    /// left again, never browsed the way the Progress tab is — a title with a
+    /// storey of its own only pushed the dial, which is the actual point of
+    /// the screen, a full card-height further down, leaving the bare gap at
+    /// the top the row above the dial used to sit in.
     ///
-    /// The title is not in here. It starts as a large heading over the first
-    /// card and glides into the gap between these two buttons as the page
-    /// scrolls, so this row only owns the buttons and the height they need.
+    /// The title is layered under the button row rather than placed beside
+    /// it, so it stays dead centre on the screen regardless of how wide
+    /// either button is or whether the tick is currently scaled to nothing.
     private var header: some View {
-        HStack(spacing: 0) {
-            GlassCircleButton(symbol: "chevron.left", label: "Back") {
-                // Leaving with an unsaved dial change throws the draft
-                // away, as Apple's X does. The tick is how you keep it.
-                draft = nil
-                dismiss()
+        ZStack {
+            Text("alarm")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .accessibilityAddTraits(.isHeader)
+
+            HStack(spacing: 0) {
+                GlassCircleButton(symbol: "chevron.left", label: "Back") {
+                    // Leaving with an unsaved dial change throws the draft
+                    // away, as Apple's X does. The tick is how you keep it.
+                    draft = nil
+                    dismiss()
+                }
+                Spacer(minLength: 0)
+                commitButton
             }
-            Spacer(minLength: 0)
-            commitButton
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
-        .padding(.bottom, 8)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+        .padding(.bottom, 10)
+        .background(alignment: .bottom) { headerDivider }
     }
 
-    /// The page title, travelling exactly as it does on the Progress tab: a
-    /// large left-aligned heading at rest, gliding up and inward as the page
-    /// scrolls until it settles as a small glass pill centred between the back
-    /// button and the tick.
-    ///
-    /// It is an overlay rather than a row in the scroll view so it can outlive
-    /// the content it started above, and it is driven straight off the scroll
-    /// offset so it tracks the finger and reverses the moment the user
-    /// scrolls back up.
-    private var glidingTitle: some View {
-        CollapsingTitle(
-            title: "alarm",
-            collapse: CollapsingTitleMetrics.collapse(forOffset: scrollOffset),
-            overscroll: CollapsingTitleMetrics.overscroll(forOffset: scrollOffset),
-            containerWidth: containerWidth,
-            // At rest it sits in the band reserved at the top of the content,
-            // just below the buttons.
-            expandedCenterY: headerHeight + CollapsingTitleMetrics.bandHeight / 2,
-            // Collapsed, it lands on the buttons' own centre line.
-            collapsedCenterY: headerHeight / 2
-        )
+    /// The one piece of motion left at the top of the screen: a hairline that
+    /// fades in exactly as the first card slides under the header, the same
+    /// cue a system inline bar gives once its content has scrolled beneath
+    /// it. Driven straight off the scroll offset, so it tracks the finger 1:1
+    /// and reverses the instant the user scrolls back up.
+    private var headerDivider: some View {
+        Rectangle()
+            .fill(Theme.border)
+            .frame(height: 1)
+            .opacity(min(max(scrollOffset / 20, 0), 1))
     }
 
     // MARK: - Commit
