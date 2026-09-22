@@ -180,6 +180,75 @@ struct DayDialTests {
         #expect(rhythm.gapToGymMinutes == rhythm.windowMinutes)
     }
 
+    // MARK: - The alarm and getting up are one decision
+
+    /// Setting the alarm sets wake time, so the user is never asked the same
+    /// question twice. Bedtime holds and the night changes length, which is
+    /// what the wake handle on the dial does too.
+    @Test func settingTheAlarmSetsWakeTime() {
+        var rhythm = MorningRhythm.default
+        let bedBefore = rhythm.bedtime
+
+        rhythm.setWakeTime(TimeOfDay(hour: 5, minute: 30))
+
+        #expect(rhythm.wakeTime == TimeOfDay(hour: 5, minute: 30))
+        #expect(rhythm.bedtime == bedBefore)
+        #expect(rhythm.sleepMinutes == 390)
+    }
+
+    /// A placed gym bar is an independent decision, so moving the alarm by
+    /// hand leaves it exactly where it was put.
+    @Test func settingTheAlarmLeavesThePlacedGymBarAlone() {
+        var rhythm = MorningRhythm.default
+        rhythm.gymTime = TimeOfDay(hour: 9, minute: 0)
+
+        rhythm.setWakeTime(TimeOfDay(hour: 5, minute: 30))
+        #expect(rhythm.gymByTime == TimeOfDay(hour: 9, minute: 0))
+        #expect(rhythm.gapToGymMinutes == 210)
+
+        // Even moving it later, while it still clears the bar.
+        rhythm.setWakeTime(TimeOfDay(hour: 8, minute: 0))
+        #expect(rhythm.gymByTime == TimeOfDay(hour: 9, minute: 0))
+    }
+
+    /// The one exception, and it is a repair rather than towing: an alarm set
+    /// on or past the visit would leave a gap reading as most of a day. The
+    /// visit comes along keeping the gap it had, so the plan stays sane.
+    @Test func anAlarmSetPastTheGymCarriesTheVisitWithIt() {
+        var rhythm = MorningRhythm.default
+        rhythm.wakeTime = TimeOfDay(hour: 6, minute: 30)
+        rhythm.gymTime = TimeOfDay(hour: 7, minute: 30)
+
+        rhythm.setWakeTime(TimeOfDay(hour: 10, minute: 0))
+
+        #expect(rhythm.gapToGymMinutes == 60)
+        #expect(rhythm.gymByTime == TimeOfDay(hour: 11, minute: 0))
+    }
+
+    /// However the alarm is moved, the plan that comes out is always readable:
+    /// the gym is after the alarm, with room to spare, and never the long way
+    /// round the clock.
+    @Test func theGapStaysSaneWhateverTheAlarmIsSetTo() {
+        for hour in 0...23 {
+            var rhythm = MorningRhythm.default
+            rhythm.gymTime = TimeOfDay(hour: 7, minute: 30)
+            rhythm.setWakeTime(TimeOfDay(hour: hour, minute: 0))
+
+            #expect(rhythm.gapToGymMinutes >= MorningRhythm.minimumGymLead)
+            #expect(rhythm.gapToGymMinutes <= MorningRhythm.maximumSaneGapMinutes)
+        }
+    }
+
+    /// A bar that was never placed follows the window on its own, so nothing
+    /// needs pinning and the old behaviour is untouched.
+    @Test func anUnplacedGymBarStillFollowsTheAlarm() {
+        var rhythm = MorningRhythm.default
+        rhythm.setWakeTime(TimeOfDay(hour: 5, minute: 0))
+
+        #expect(rhythm.gymTime == nil)
+        #expect(rhythm.gymByTime == TimeOfDay(hour: 5, minute: 0).offset(byMinutes: rhythm.windowMinutes))
+    }
+
     // MARK: - Sleep across midnight
 
     @Test func sleepAcrossMidnightIsPositive() {

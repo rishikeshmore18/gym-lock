@@ -362,18 +362,36 @@ struct MorningAlarmPlanView: View {
         next?.slot.alarmTime ?? plan.enabledSlots.first?.alarmTime ?? rhythm.wakeTime
     }
 
+    /// The bar the user placed on the dial, not the lock window. The two used
+    /// to be the same number; now that the visit can sit anywhere in the day
+    /// they are not, and this screen is about the plan.
     private var gymByTime: TimeOfDay {
-        wakeTime.offset(byMinutes: rhythm.windowMinutes)
+        wakeTime.offset(byMinutes: rhythm.gapToGymMinutes)
     }
 
     // MARK: - Actions
 
+    /// Saves an edited alarm, and moves wake time with it.
+    ///
+    /// Same rule as the alarm screen: the alarm ringing and getting up are one
+    /// event, so setting either sets both and the two can never disagree.
     private func apply(_ updated: AlarmSlot) {
-        guard let index = store.plan.slots.firstIndex(where: { $0.id == updated.id }) else {
+        if let index = store.plan.slots.firstIndex(where: { $0.id == updated.id }) {
+            store.plan.slots[index] = updated
+        } else {
             store.plan.slots.append(updated)
-            return
         }
-        store.plan.slots[index] = updated
+
+        guard updated.isEnabled,
+              updated.daypart.usesSleepRhythm,
+              updated.id == plan.enabledSlots.first?.id,
+              updated.alarmTime != store.plan.rhythm.wakeTime
+        else { return }
+
+        var rhythm = store.plan.rhythm
+        rhythm.setWakeTime(updated.alarmTime)
+        rhythm.hasBeenSet = true
+        proposeRhythmChange(rhythm)
     }
 
     /// Applies a rhythm change, asking about the night lock only when the answer

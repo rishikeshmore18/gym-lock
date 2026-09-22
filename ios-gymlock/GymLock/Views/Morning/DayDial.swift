@@ -55,8 +55,9 @@ enum DayDialModel {
     static let minimumGapMinutes = 30
     /// The smallest gap the dial allows between the alarm and the gym. Not the
     /// lock window — just enough room that the two icons are not on top of
-    /// each other.
-    static let minimumLeadMinutes = 10
+    /// each other. The same rule applies when the alarm is set by hand, so
+    /// both read it from one place.
+    static let minimumLeadMinutes = MorningRhythm.minimumGymLead
 
     /// Converts a touch point to a minute-of-day, snapped to five minutes.
     static func minutes(at point: CGPoint, centre: CGPoint) -> Int {

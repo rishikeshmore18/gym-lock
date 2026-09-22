@@ -71,6 +71,14 @@ struct MorningRhythm: Hashable {
     /// directly into the trip; beyond two hours it is a calendar, not a lock.
     static let absoluteMaximumWindow = 120
 
+    /// The smallest gap the app keeps between the alarm and the gym, so the
+    /// two never land on top of each other. The dial enforces the same number
+    /// while dragging.
+    static let minimumGymLead = 10
+    /// Past this the gym bar is not "later today" any more, it is before the
+    /// alarm read the long way round, and the plan needs repairing.
+    static let maximumSaneGapMinutes = 12 * 60
+
     static let getReadyRange = 5...60
     /// Wide enough that get-ready plus travel can reach the absolute window
     /// ceiling; the ceiling itself is enforced by `absoluteMaximumWindow`.
@@ -119,6 +127,28 @@ struct MorningRhythm: Hashable {
     /// it is not the same thing as the lock window: the gap can be any length,
     /// while the window that actually blocks apps stays bounded.
     var gapToGymMinutes: Int { wakeTime.minutes(until: gymByTime) }
+
+    // MARK: Editing
+
+    /// Moves the alarm, keeping the gym plan coherent.
+    ///
+    /// Bedtime stays put and the night gets longer or shorter, which is what
+    /// Apple's Clock does and what the wake handle on the dial does.
+    ///
+    /// The placed gym bar normally stays exactly where it is, because the two
+    /// are independent decisions. The one exception is a repair: if the new
+    /// alarm lands on or past the bar, the gap would silently read as most of
+    /// a day, so the visit comes along and keeps the gap it had. A bar that
+    /// was never placed follows the window on its own and needs nothing.
+    mutating func setWakeTime(_ newValue: TimeOfDay) {
+        guard newValue != wakeTime else { return }
+        let previousGap = gapToGymMinutes
+        wakeTime = newValue
+        guard gymTime != nil else { return }
+        let gap = gapToGymMinutes
+        guard gap < Self.minimumGymLead || gap > Self.maximumSaneGapMinutes else { return }
+        gymTime = newValue.offset(byMinutes: previousGap)
+    }
 
     var exceedsAbsoluteMaximum: Bool { windowMinutes > Self.absoluteMaximumWindow }
     var exceedsNormalMaximum: Bool { windowMinutes > Self.normalMaximumWindow }

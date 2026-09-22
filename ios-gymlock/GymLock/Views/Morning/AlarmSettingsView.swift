@@ -260,28 +260,88 @@ struct AlarmSettingsView: View {
         .background(Theme.surfaceMuted, in: .rect(cornerRadius: 12))
     }
 
-    /// Bedtime on the left, wake up on the right, exactly as Apple lays it
-    /// out. The one being dragged lifts to full ink so the eye knows which
-    /// number is moving.
+    /// The two big numbers above the dial, and what they are about.
+    ///
+    /// At rest, and while the night is being dragged, they are bedtime and
+    /// wake up, exactly as Apple lays it out. While the gym bar is held they
+    /// become that bar's own two ends — arrive and done — because those are
+    /// the numbers the finger is actually changing, and a header that kept
+    /// reporting sleep during a gym drag would be showing two numbers that
+    /// never move.
     private var dialHeader: some View {
-        HStack(alignment: .top) {
+        let pair = headerPair
+        return HStack(alignment: .top) {
             headerTime(
+                icon: pair.leading.icon,
+                label: pair.leading.label,
+                time: pair.leading.time,
+                note: pair.leading.note,
+                isLive: pair.leading.isLive,
+                tint: pair.tint
+            )
+            Spacer()
+            headerTime(
+                icon: pair.trailing.icon,
+                label: pair.trailing.label,
+                time: pair.trailing.time,
+                note: pair.trailing.note,
+                isLive: pair.trailing.isLive,
+                tint: pair.tint,
+                alignment: .trailing
+            )
+        }
+        .animation(Theme.stateChange, value: pair.leading.label)
+    }
+
+    private struct HeaderSlot {
+        let icon: String
+        let label: String
+        let time: TimeOfDay
+        let note: String
+        let isLive: Bool
+    }
+
+    /// Which pair of times the header is reporting, and in which colour.
+    /// Coral while the gym bar is held, because on this screen coral is the
+    /// gym and nothing else.
+    private var headerPair: (leading: HeaderSlot, trailing: HeaderSlot, tint: Color) {
+        if dialGrab?.isGym == true {
+            return (
+                HeaderSlot(
+                    icon: "figure.strengthtraining.traditional",
+                    label: "gym",
+                    time: shown.gymByTime,
+                    note: "arrive",
+                    isLive: dialGrab == .gymStart || dialGrab == .gymBody
+                ),
+                HeaderSlot(
+                    icon: "checkmark.circle.fill",
+                    label: "done",
+                    time: shown.gymDoneTime,
+                    note: DayDialModel.durationText(minutes: shown.gymSessionMinutes),
+                    isLive: dialGrab == .gymEnd || dialGrab == .gymBody
+                ),
+                Theme.accent
+            )
+        }
+
+        return (
+            HeaderSlot(
                 icon: "bed.double.fill",
                 label: "bedtime",
                 time: shown.bedtime,
                 note: "tonight",
                 isLive: dialGrab == .bedtime || dialGrab == .sleepBody
-            )
-            Spacer()
-            headerTime(
+            ),
+            HeaderSlot(
                 icon: "alarm.fill",
                 label: "wake up",
                 time: shown.wakeTime,
                 note: "tomorrow",
-                isLive: dialGrab == .wake || dialGrab == .sleepBody,
-                alignment: .trailing
-            )
-        }
+                isLive: dialGrab == .wake || dialGrab == .sleepBody
+            ),
+            Theme.ink
+        )
     }
 
     private func headerTime(
@@ -290,6 +350,7 @@ struct AlarmSettingsView: View {
         time: TimeOfDay,
         note: String,
         isLive: Bool,
+        tint: Color = Theme.ink,
         alignment: HorizontalAlignment = .leading
     ) -> some View {
         VStack(alignment: alignment, spacing: 3) {
@@ -304,7 +365,7 @@ struct AlarmSettingsView: View {
             Text(time.displayString)
                 .font(.system(size: 30, weight: .bold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(Theme.ink)
+                .foregroundStyle(tint)
                 .contentTransition(.numericText())
                 .scaleEffect(isLive ? 1.06 : 1, anchor: alignment == .leading ? .leading : .trailing)
                 .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isLive)
@@ -411,7 +472,8 @@ struct AlarmSettingsView: View {
             var updated = draft
             updated.hasBeenSet = true
             store.plan.rhythm = updated
-            // The wake time and the alarm time are the same thing here.
+            // The alarm going off and getting up are one event, so the dial
+            // writes the alarm too and the user is never asked twice.
             if let index = primaryMorningSlotIndex {
                 store.plan.slots[index].alarmTime = updated.wakeTime
             }
@@ -514,12 +576,38 @@ struct AlarmSettingsView: View {
         }
     }
 
+    /// Saves an edited alarm, and moves wake time with it.
+    ///
+    /// The alarm going off and getting up are the same event, so being asked
+    /// for both was asking the same question twice — and the two could end up
+    /// disagreeing, with the dial drawing one time and the alarm ringing at
+    /// another. Setting either now sets both. Only a morning alarm is coupled;
+    /// an evening session has nothing to do with the sleep rhythm.
     private func apply(_ updated: AlarmSlot) {
         if let index = store.plan.slots.firstIndex(where: { $0.id == updated.id }) {
             store.plan.slots[index] = updated
         } else {
             store.plan.slots.append(updated)
         }
+
+        if updated.isEnabled, updated.daypart.usesSleepRhythm, updated.id == primarySlot?.id {
+            let previous = rhythmOnOpen ?? store.plan.rhythm
+            // An unsaved dial edit is the newer intent, so the new alarm time
+            // is folded into it rather than throwing it away.
+            if draft != nil {
+                draft?.setWakeTime(updated.alarmTime)
+            } else {
+                store.plan.rhythm.setWakeTime(updated.alarmTime)
+                store.plan.rhythm.hasBeenSet = true
+                if let prompt = RhythmChangeProposer.prompt(for: store.plan.rhythm, since: previous, plan: store.plan) {
+                    nightLockPrompt = prompt
+                } else {
+                    store.applyRhythmToNightLock()
+                    rhythmOnOpen = store.plan.rhythm
+                }
+            }
+        }
+
         resyncAlarms()
     }
 
