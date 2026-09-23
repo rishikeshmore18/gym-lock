@@ -9,6 +9,15 @@ import UniformTypeIdentifiers
 /// is worse than no handle at all. So there is exactly one thing to do here,
 /// and it is done with one finger.
 struct SongTrimmerView: View {
+    /// How the page arrived, which decides its corner button: a back chevron
+    /// when pushed from the Sound page, a close X when presented full screen.
+    enum Presentation {
+        case pushed
+        case cover
+    }
+
+    var presentation: Presentation = .cover
+
     @Environment(AppStore.self) private var store
     @Environment(GymSessionCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
@@ -47,25 +56,19 @@ struct SongTrimmerView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.canvas.ignoresSafeArea()
-
-                if sourceURL == nil {
-                    sourcePicker
-                } else {
-                    trimmer
-                }
-            }
-            .navigationTitle("your song")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("cancel") {
-                        stopPreview()
-                        dismiss()
+        Group {
+            switch presentation {
+            case .pushed:
+                page
+                    .toolbar(.hidden, for: .navigationBar)
+                    .background {
+                        InteractivePopEnabler()
+                            .frame(width: 0, height: 0)
+                            .accessibilityHidden(true)
                     }
-                    .foregroundStyle(Theme.inkSecondary)
+            case .cover:
+                NavigationStack {
+                    page.toolbar(.hidden, for: .navigationBar)
                 }
             }
         }
@@ -84,6 +87,60 @@ struct SongTrimmerView: View {
             .ignoresSafeArea()
         }
         .onDisappear { stopPreview() }
+    }
+
+    /// The page itself, under the same glass header as the Alarm screen.
+    ///
+    /// Choosing a track swaps the picker for the trimmer in place: the
+    /// picker settles back and fades while the trimmer rises in, so it reads
+    /// as the next step of one task rather than a new screen.
+    private var page: some View {
+        ZStack(alignment: .top) {
+            Theme.canvas.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                Color.clear.frame(height: AlarmPageHeader.band)
+
+                ZStack(alignment: .top) {
+                    if sourceURL == nil {
+                        sourcePicker
+                            .transition(stepTransition(isForward: false))
+                    } else {
+                        trimmer
+                            .transition(stepTransition(isForward: true))
+                    }
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+            }
+
+            AlarmPageHeader(
+                title: "your song",
+                symbol: presentation == .pushed ? "chevron.left" : "xmark",
+                label: presentation == .pushed ? "Back" : "Close"
+            ) {
+                stopPreview()
+                dismiss()
+            }
+        }
+        .animation(stepAnimation, value: sourceURL == nil)
+        .animation(Theme.stateChange, value: errorMessage)
+    }
+
+    private var stepAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.46, dampingFraction: 0.86)
+    }
+
+    private func stepTransition(isForward: Bool) -> AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return isForward
+            ? .asymmetric(
+                insertion: .offset(y: 28).combined(with: .opacity),
+                removal: .opacity
+            )
+            : .asymmetric(
+                insertion: .scale(scale: 0.97, anchor: .top).combined(with: .opacity),
+                removal: .scale(scale: 0.97, anchor: .top).combined(with: .opacity)
+            )
     }
 
     // MARK: - Picking
@@ -163,11 +220,8 @@ struct SongTrimmerView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.inkTertiary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(MorningCardStyle())
+        .buttonStyle(AlarmGlassCardButtonStyle(verticalPadding: 13))
     }
 
     // MARK: - Trimming
@@ -196,15 +250,17 @@ struct SongTrimmerView: View {
                     HStack(spacing: 8) {
                         Image(systemName: isPreviewing ? "pause.fill" : "play.fill")
                             .font(.system(size: 14, weight: .bold))
+                            .contentTransition(.symbolEffect(.replace))
                         Text(isPreviewing ? "stop" : "hear it")
                             .font(.system(size: 15, weight: .semibold))
+                            .contentTransition(.opacity)
                     }
                     .foregroundStyle(Theme.ink)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(Theme.surfaceMuted, in: .rect(cornerRadius: 14))
+                    .frame(height: 50)
+                    .animation(Theme.stateChange, value: isPreviewing)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(AlarmGlassCapsuleButtonStyle())
 
                 Button {
                     Task { await save() }
@@ -212,11 +268,12 @@ struct SongTrimmerView: View {
                     Text(isExporting ? "saving" : "use this")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
+                        .contentTransition(.opacity)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(Theme.accent, in: .rect(cornerRadius: 14))
+                        .frame(height: 50)
+                        .animation(Theme.stateChange, value: isExporting)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(AlarmGlassCapsuleButtonStyle(role: .prominent))
                 .disabled(isExporting || isLoadingWaveform)
                 .opacity(isExporting || isLoadingWaveform ? 0.5 : 1)
             }

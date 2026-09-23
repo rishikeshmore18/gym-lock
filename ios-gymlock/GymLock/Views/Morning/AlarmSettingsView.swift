@@ -96,6 +96,7 @@ struct AlarmSettingsView: View {
                 switch route {
                 case .sound: AlarmSoundListView()
                 case .haptics: AlarmHapticsListView()
+                case .song: SongTrimmerView(presentation: .pushed)
                 }
             }
             // The header is drawn here rather than put in a toolbar on

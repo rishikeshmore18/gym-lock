@@ -9,75 +9,77 @@ import SwiftUI
 /// Tapping a track chooses it *and* plays it, as Apple's list does, so there
 /// is no separate preview control to find. Tapping the playing track again
 /// stops it.
+///
+/// Motion, and why:
+/// - The checkmark is one mark that glides from the old row to the new one,
+///   rather than one fading out while another fades in. The eye follows the
+///   choice moving, which is what actually happened.
+/// - The playing track's name lifts to full weight and a live level meter
+///   grows in beside it, so which row is sounding is never a guess.
+/// - Single-row cards are Liquid Glass buttons that give under the finger.
 struct AlarmSoundListView: View {
     @Environment(AppStore.self) private var store
     @Environment(AlarmSoundPlayer.self) private var player: AlarmSoundPlayer?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var isTrimming = false
+    @Namespace private var checkSpace
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                AlarmGroupCard {
-                    NavigationLink(value: AlarmOptionRoute.haptics) {
-                        AlarmValueRow(title: "haptics", value: store.plan.alarmHaptic.label)
-                    }
-                    .buttonStyle(AlarmRowButtonStyle())
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    AlarmSectionHeader(text: "tracks")
-
-                    AlarmGroupCard {
-                        ForEach(Array(tracks.enumerated()), id: \.element) { index, sound in
-                            if index > 0 { AlarmRowDivider(inset: Self.checkColumn) }
-                            trackRow(sound)
-                        }
-                    }
-                }
-                .padding(.top, 6)
-
-                AlarmGroupCard {
-                    Button {
-                        Haptics.tap()
-                        player?.stop()
-                        isTrimming = true
-                    } label: {
-                        AlarmValueRow(
-                            title: hasCustomSong ? "choose a different song" : "choose your own song",
-                            value: ""
-                        )
-                    }
-                    .buttonStyle(AlarmRowButtonStyle())
-                }
-                .padding(.top, 6)
-
-                Text("tap a track to hear it. your own song plays 28 seconds of any track you own.")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.inkTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 16)
+        AlarmSubpage(title: "Sound") {
+            NavigationLink(value: AlarmOptionRoute.haptics) {
+                AlarmValueRow(title: "haptics", value: store.plan.alarmHaptic.label)
+                    .animation(Theme.stateChange, value: store.plan.alarmHaptic)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 32)
+            .buttonStyle(AlarmGlassCardButtonStyle())
+            .simultaneousGesture(TapGesture().onEnded { Haptics.press(intensity: 0.4) })
+
+            VStack(alignment: .leading, spacing: 8) {
+                AlarmSectionHeader(text: "tracks")
+
+                AlarmGroupCard {
+                    ForEach(Array(tracks.enumerated()), id: \.element) { index, sound in
+                        if index > 0 { AlarmRowDivider(inset: Self.checkColumn) }
+                        trackRow(sound)
+                    }
+                }
+            }
+            .padding(.top, 6)
+
+            NavigationLink(value: AlarmOptionRoute.song) {
+                AlarmValueRow(
+                    title: hasCustomSong ? "choose a different song" : "choose your own song",
+                    value: ""
+                )
+            }
+            .buttonStyle(AlarmGlassCardButtonStyle())
+            .simultaneousGesture(TapGesture().onEnded {
+                Haptics.press(intensity: 0.4)
+                player?.stop()
+            })
+            .padding(.top, 6)
+
+            Text("tap a track to hear it. your own song plays 28 seconds of any track you own.")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.inkTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16)
         }
-        .scrollIndicators(.hidden)
-        .background(Theme.canvas.ignoresSafeArea())
-        .navigationTitle("Sound")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.visible, for: .navigationBar)
-        .tint(Theme.ink)
+        .onAppear { Haptics.preparePress() }
         .onDisappear { player?.stop() }
-        .fullScreenCover(isPresented: $isTrimming) {
-            SongTrimmerView()
-        }
     }
 
     /// Width of the leading checkmark column, so names line up whether or
     /// not their row is the chosen one, and the dividers start where the
     /// names do, as in Apple's list.
     private static let checkColumn: CGFloat = 30
+
+    /// Quick and settled, with a trace of life at the end so the mark lands
+    /// rather than stops. Critically damped under Reduce Motion.
+    private var glide: Animation {
+        reduceMotion
+            ? .easeInOut(duration: 0.2)
+            : .spring(response: 0.34, dampingFraction: 0.78)
+    }
 
     /// The bundled tracks, then the user's own song if one is really on disk.
     private var tracks: [AlarmSound] {
@@ -93,28 +95,39 @@ struct AlarmSoundListView: View {
     private func trackRow(_ sound: AlarmSound) -> some View {
         let isSelected = store.profile.alarmSound == sound
         let isPlaying = player?.playing == sound
+        let name = sound == .ownSong ? store.profile.alarmSoundLabel : sound.label
 
         return Button {
             select(sound)
         } label: {
             HStack(spacing: 0) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Theme.accent)
-                    .opacity(isSelected ? 1 : 0)
-                    .scaleEffect(isSelected ? 1 : 0.5)
-                    .frame(width: Self.checkColumn, alignment: .leading)
+                ZStack(alignment: .leading) {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Theme.accent)
+                            .matchedGeometryEffect(id: "check", in: checkSpace)
+                            .transition(.scale(scale: 0.4).combined(with: .opacity))
+                    }
+                }
+                .frame(width: Self.checkColumn, alignment: .leading)
 
-                Text(sound == .ownSong ? store.profile.alarmSoundLabel : sound.label)
+                Text(name)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Theme.ink)
                     .lineLimit(1)
+                    .scaleEffect(isPlaying && !reduceMotion ? 1.02 : 1, anchor: .leading)
 
                 Spacer(minLength: 12)
 
                 if isPlaying {
-                    MiniWaveform(level: player?.level ?? 0, tint: Theme.inkTertiary)
-                        .transition(.opacity)
+                    MiniWaveform(level: player?.level ?? 0, tint: Theme.inkSecondary)
+                        .transition(
+                            .asymmetric(
+                                insertion: .scale(scale: 0.3, anchor: .trailing).combined(with: .opacity),
+                                removal: .opacity
+                            )
+                        )
                 } else if sound == .ownSong {
                     Text("your song")
                         .font(.system(size: 15, weight: .medium))
@@ -123,11 +136,11 @@ struct AlarmSoundListView: View {
                 }
             }
             .frame(minHeight: 50)
-            .animation(.spring(response: 0.3, dampingFraction: 0.72), value: isSelected)
-            .animation(Theme.stateChange, value: isPlaying)
+            .animation(glide, value: isPlaying)
         }
         .buttonStyle(AlarmRowButtonStyle())
-        .accessibilityLabel(sound == .ownSong ? store.profile.alarmSoundLabel : sound.label)
+        .accessibilityLabel(name)
+        .accessibilityValue(isPlaying ? "playing" : "")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .accessibilityHint("Plays a preview")
     }
@@ -140,9 +153,11 @@ struct AlarmSoundListView: View {
         }
         if store.profile.alarmSound != sound {
             Haptics.selection()
-            store.profile.alarmSound = sound
+            withAnimation(glide) {
+                store.profile.alarmSound = sound
+            }
         } else {
-            Haptics.tap()
+            Haptics.tap(intensity: 0.6)
         }
         player?.toggle(sound, profile: store.profile)
     }
