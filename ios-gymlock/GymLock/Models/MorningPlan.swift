@@ -315,6 +315,9 @@ struct MorningPlan: Hashable {
     var snoozeMinutes: Int = 5
     /// The vibration that rides with the track while it rings in the app.
     var alarmHaptic: AlarmHaptic = .synchronized
+    /// Which screen the user wakes up to. Stored now, read by the ringing
+    /// screen once the two styles exist.
+    var alarmScreenStyle: AlarmScreenStyle = .sunrise
 
     /// The snooze lengths on offer. Fifteen is the ceiling: past that it is
     /// not a snooze, it is going back to sleep.
@@ -446,6 +449,7 @@ extension MorningPlan: Codable {
     private enum CodingKeys: String, CodingKey {
         case rhythm, nightLock, slots, missionsEnabled, recentMissions, hasBeenReviewed, nextAlarmOverride
         case snoozeEnabled, snoozeMinutes, alarmHaptic
+        case alarmScreenStyle
     }
 
     init(from decoder: Decoder) throws {
@@ -463,6 +467,9 @@ extension MorningPlan: Codable {
         let minutes = try container.decodeIfPresent(Int.self, forKey: .snoozeMinutes) ?? 5
         snoozeMinutes = min(max(minutes, Self.snoozeRange.lowerBound), Self.snoozeRange.upperBound)
         alarmHaptic = try container.decodeIfPresent(AlarmHaptic.self, forKey: .alarmHaptic) ?? .synchronized
+        // Missing on plans saved before the choice existed. `try?` as well,
+        // so a style this build does not know cannot throw away the plan.
+        alarmScreenStyle = (try? container.decodeIfPresent(AlarmScreenStyle.self, forKey: .alarmScreenStyle)) ?? .sunrise
     }
 }
 

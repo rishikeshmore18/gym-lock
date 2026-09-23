@@ -97,6 +97,7 @@ struct AlarmSettingsView: View {
                 case .sound: AlarmSoundListView()
                 case .haptics: AlarmHapticsListView()
                 case .song: SongTrimmerView(presentation: .pushed)
+                case .alarmScreen: AlarmScreenPickerView(stored: store.plan.alarmScreenStyle)
                 }
             }
             // The header is drawn here rather than put in a toolbar on
@@ -694,6 +695,13 @@ struct AlarmSettingsView: View {
             AlarmRowDivider()
 
             persistentModeRow
+
+            AlarmRowDivider()
+
+            NavigationLink(value: AlarmOptionRoute.alarmScreen) {
+                AlarmValueRow(title: "alarm screen", value: plan.alarmScreenStyle.label)
+            }
+            .buttonStyle(AlarmRowButtonStyle())
         }
         .animation(Self.cardSpring, value: plan.snoozeEnabled)
         .animation(Self.cardSpring, value: isEditingSnooze)
