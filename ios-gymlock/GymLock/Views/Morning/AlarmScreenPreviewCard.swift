@@ -173,12 +173,16 @@ struct AlarmScreenPreviewCard: View {
 
             VStack(spacing: 3) {
                 Text(style.label)
-                    .font(.system(size: 17, weight: .bold))
+                    .font(.headline.weight(.bold))
                     .foregroundStyle(Theme.ink)
                 Text(style.mood)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(Theme.inkSecondary)
             }
+            // Chrome scales with Dynamic Type; the preview above is a fixed
+            // canvas and gives up height instead. Capped so two half-width
+            // columns never wrap a single word.
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
             .multilineTextAlignment(.center)
             .lineLimit(2)
             .minimumScaleFactor(0.8)
