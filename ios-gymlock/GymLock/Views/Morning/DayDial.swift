@@ -371,6 +371,22 @@ struct DayDial: View {
     @State private var sleepShowsBothIcons = true
     @State private var gymShowsBothIcons = false
 
+    // MARK: Opening contraction
+
+    /// Minutes the gym bar is drawn longer than it really is, while it
+    /// contracts to its real length as the page opens. Drawing only: never
+    /// written to the rhythm, never used for hit testing or VoiceOver.
+    @State private var introExtraMinutes: Double = 0
+    /// How far it started out stretched.
+    @State private var introAmount: Double = 0
+    /// When the contraction begins. Nil when no intro is running.
+    @State private var introBegins: Date?
+    @State private var introIsContracting = false
+    /// Which half-hour step the far end is on, so each crossing ticks once.
+    @State private var introTickStep: Int = 0
+    /// Once per presentation, not again on coming back from Sound.
+    @State private var introHasPlayed = false
+
     // MARK: Metrics
 
     private var gutterWidth: CGFloat { size * 0.18 }
@@ -419,6 +435,11 @@ struct DayDial: View {
     private var gymByMinutes: Int { rhythm.gymByTime.minutesFromMidnight }
     private var gymDoneMinutes: Int { (gymByMinutes + sessionMinutes) % 1440 }
     private var gapMinutes: Int { DayDialModel.clockwiseSpan(from: wakeMinutes, to: gymByMinutes) }
+    /// The visit as drawn: its real length plus whatever is left of the
+    /// opening contraction.
+    private var displayedSessionMinutes: Int {
+        max(1, sessionMinutes + Int(introExtraMinutes.rounded()))
+    }
 
     private var overshootDegrees: Double {
         Double(DayDialModel.rubberband(overshootMinutes * 0.25, dimension: size))
@@ -473,10 +494,10 @@ struct DayDial: View {
     /// Where a bar's stroke centreline really runs, once its round caps are
     /// pulled inside its span, with rubber-band overshoot on whichever end
     /// is being held past its limit.
-    private func centreline(start: Int, span: Int, startGrab: DayDialModel.Grab, endGrab: DayDialModel.Grab) -> (start: Double, span: Double) {
-        let inset = min(capMinutes, Double(span) / 2)
+    private func centreline(start: Int, span: Double, startGrab: DayDialModel.Grab, endGrab: DayDialModel.Grab) -> (start: Double, span: Double) {
+        let inset = min(capMinutes, span / 2)
         var s = Double(start) + inset
-        var length = max(Double(span) - 2 * inset, 0.05)
+        var length = max(span - 2 * inset, 0.05)
         let extra = overshootDegrees / 360 * 1440
         if grab == startGrab { s += extra; length -= extra }
         if grab == endGrab { length += extra }
@@ -484,11 +505,18 @@ struct DayDial: View {
     }
 
     private var sleepLine: (start: Double, span: Double) {
-        centreline(start: bedtimeMinutes, span: sleepMinutes, startGrab: .bedtime, endGrab: .wake)
+        centreline(start: bedtimeMinutes, span: Double(sleepMinutes), startGrab: .bedtime, endGrab: .wake)
     }
 
     private var gymLine: (start: Double, span: Double) {
-        centreline(start: gymByMinutes, span: sessionMinutes, startGrab: .gymStart, endGrab: .gymEnd)
+        // A Double, so the contraction glides rather than stepping a minute
+        // at a time as it slows.
+        centreline(
+            start: gymByMinutes,
+            span: max(Double(sessionMinutes) + introExtraMinutes, 1),
+            startGrab: .gymStart,
+            endGrab: .gymEnd
+        )
     }
 
     var body: some View {
@@ -512,9 +540,13 @@ struct DayDial: View {
         .frame(width: size, height: size)
         .contentShape(.circle)
         .gesture(drag)
-        .onAppear { refreshIconFit(animated: false) }
+        .background { introDriver }
+        .onAppear {
+            startIntroIfNeeded()
+            refreshIconFit(animated: false)
+        }
         .onChange(of: sleepMinutes) { _, _ in refreshIconFit() }
-        .onChange(of: sessionMinutes) { _, _ in refreshIconFit() }
+        .onChange(of: displayedSessionMinutes) { _, _ in refreshIconFit() }
         .onChange(of: size) { _, _ in refreshIconFit() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("day dial")
@@ -538,7 +570,7 @@ struct DayDial: View {
             wasShowing: sleepShowsBothIcons
         )
         let gymFits = DayDialModel.showsBothIcons(
-            drawnArcLength: DayDialModel.drawnArcLength(spanMinutes: sessionMinutes, radius: gutterRadius, barWidth: barWidth),
+            drawnArcLength: DayDialModel.drawnArcLength(spanMinutes: displayedSessionMinutes, radius: gutterRadius, barWidth: barWidth),
             barWidth: barWidth,
             glyphWidth: iconSize,
             wasShowing: gymShowsBothIcons
@@ -682,7 +714,7 @@ struct DayDial: View {
             )
             hatch(
                 from: gymByMinutes,
-                span: sessionMinutes,
+                span: displayedSessionMinutes,
                 showsBothIcons: gymShowsBothIcons,
                 colour: Theme.surface.opacity(0.42)
             )
@@ -808,6 +840,9 @@ struct DayDial: View {
 
                 if grab == nil {
                     guard let picked = grab(at: value.startLocation, centre: centre) else { return }
+                    // A finger on the dial ends the intro at once, so what
+                    // it picks up is exactly what it can see.
+                    if introBegins != nil { cancelIntro() }
                     grab = picked
                     grabFingerMinutes = DayDialModel.minutes(at: value.startLocation, centre: centre)
                     grabRhythm = rhythm
@@ -1000,6 +1035,103 @@ struct DayDial: View {
         }
 
         onSettle?()
+    }
+
+    // MARK: - Opening contraction
+
+    /// How long the bar holds fully stretched before it moves, so the
+    /// contraction plays on a settled page rather than under the cover's
+    /// zoom-in.
+    private static let introHold: Double = 0.45
+    /// The spring the bar contracts on: quick to start, a hair of undershoot,
+    /// then still. Solved in closed form so every frame knows exactly where
+    /// the end is, which is what the icons, hatching and ticks follow.
+    private static let introResponse: Double = 0.72
+    private static let introDamping: Double = 0.8
+    private static let introDuration: Double = 1.3
+    /// One tick per half hour the end passes, like a ratchet letting go.
+    private static let introTickMinutes: Double = 30
+
+    /// Drives the contraction frame by frame while it runs, and is gone
+    /// otherwise, so an idle dial costs nothing.
+    @ViewBuilder
+    private var introDriver: some View {
+        if introIsContracting, let begins = introBegins {
+            TimelineView(.animation) { context in
+                Color.clear
+                    .onChange(of: context.date) { _, now in
+                        stepIntro(now: now, begins: begins)
+                    }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    /// Shows the gym bar at its longest the moment the page opens, then lets
+    /// it contract to the length the user chose. Once per presentation, and
+    /// not at all with Reduce Motion or VoiceOver's need for a still dial.
+    private func startIntroIfNeeded() {
+        guard !introHasPlayed else { return }
+        introHasPlayed = true
+        guard !reduceMotion else { return }
+
+        // As long as the visit could be drawn right now: the longest session
+        // allowed, stopped short of bedtime so it never covers the night.
+        let longest = DayDialModel.clampedSession(
+            MorningRhythm.sessionRange.upperBound,
+            awakeSpan: awakeSpan,
+            gapMinutes: gapMinutes
+        )
+        let extra = Double(longest - sessionMinutes)
+        // Too little travel reads as a glitch, not a gesture.
+        guard extra >= 30 else { return }
+
+        introAmount = extra
+        introExtraMinutes = extra
+        introTickStep = Int(extra / Self.introTickMinutes)
+        introBegins = Date().addingTimeInterval(Self.introHold)
+        introIsContracting = true
+        Haptics.prepareSelection()
+    }
+
+    private func stepIntro(now: Date, begins: Date) {
+        let t = now.timeIntervalSince(begins)
+        guard t >= 0 else { return }
+
+        guard t < Self.introDuration else {
+            finishIntro()
+            // The bar landing on its real length.
+            Haptics.tap(intensity: 0.6)
+            return
+        }
+
+        // Underdamped spring from 1 to 0.
+        let omega = 2 * Double.pi / Self.introResponse
+        let zeta = Self.introDamping
+        let omegaD = omega * (1 - zeta * zeta).squareRoot()
+        let remaining = exp(-zeta * omega * t)
+            * (cos(omegaD * t) + zeta * omega / omegaD * sin(omegaD * t))
+        introExtraMinutes = introAmount * remaining
+
+        // Ticks only on the way in, never on the tiny undershoot.
+        let step = max(0, Int(introExtraMinutes / Self.introTickMinutes))
+        if step < introTickStep {
+            introTickStep = step
+            Haptics.selection()
+        }
+    }
+
+    private func finishIntro() {
+        introIsContracting = false
+        introBegins = nil
+        introExtraMinutes = 0
+        introAmount = 0
+    }
+
+    /// A finger landed mid-contraction: snap to the real length silently.
+    private func cancelIntro() {
+        finishIntro()
     }
 
     /// VoiceOver: every value is reachable without a drag.
