@@ -29,6 +29,14 @@ struct AlarmSettingsView: View {
     /// What the finger is holding on the dial, so the header and the line
     /// under the dial can speak to that while the drag is live.
     @State private var dialGrab: DayDialModel.Grab?
+    /// Which arc the user last touched. Unlike `dialGrab` this survives the
+    /// finger lifting, so the header, the line under the dial and the day
+    /// card keep talking about the gym after a gym drag. Screen-local only.
+    @State private var dialContext: AlarmDialContext = .initial
+    /// The quiet line under the day circles after a required night is tapped.
+    @State private var requiredNightNote: String?
+    @State private var noteDismissal: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The dial edits this, not the plan. Nothing reaches the schedule or the
     /// OS until the tick is tapped and the user says which alarm to change.
     @State private var draft: MorningRhythm?
@@ -243,7 +251,12 @@ struct AlarmSettingsView: View {
                     rhythm: dialBinding,
                     size: geometry.size.width,
                     onGrabChange: { grab in
-                        withAnimation(Theme.stateChange) { dialGrab = grab }
+                        let context = dialContext.updated(with: grab)
+                        if context != dialContext { clearRequiredNightNote() }
+                        withAnimation(Theme.stateChange) {
+                            dialGrab = grab
+                            dialContext = context
+                        }
                     }
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
@@ -301,12 +314,11 @@ struct AlarmSettingsView: View {
 
     /// The two big numbers above the dial, and what they are about.
     ///
-    /// At rest, and while the night is being dragged, they are bedtime and
-    /// wake up, exactly as Apple lays it out. While the gym bar is held they
-    /// become that bar's own two ends — arrive and done — because those are
-    /// the numbers the finger is actually changing, and a header that kept
-    /// reporting sleep during a gym drag would be showing two numbers that
-    /// never move.
+    /// In the sleep context they are bedtime and wake up, exactly as Apple
+    /// lays it out. Once the gym bar has been touched they become that bar's
+    /// own two ends, arrive and done, and stay that way after the finger
+    /// lifts until the night is touched again. Which pair shows follows
+    /// `dialContext`; which number is live follows `dialGrab`.
     private var dialHeader: some View {
         let pair = headerPair
         return HStack(alignment: .top) {
@@ -341,10 +353,10 @@ struct AlarmSettingsView: View {
     }
 
     /// Which pair of times the header is reporting, and in which colour.
-    /// Coral while the gym bar is held, because on this screen coral is the
-    /// gym and nothing else.
+    /// Coral in the gym context, because on this screen coral is the gym and
+    /// nothing else.
     private var headerPair: (leading: HeaderSlot, trailing: HeaderSlot, tint: Color) {
-        if dialGrab?.isGym == true {
+        if dialContext == .gym {
             return (
                 HeaderSlot(
                     icon: "figure.strengthtraining.traditional",
@@ -417,15 +429,16 @@ struct AlarmSettingsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The result, in one line, changing with the finger. Holding the gym end
-    /// talks about the gym; anything else talks about the night.
+    /// The result, in one line, changing with the finger. While a drag is
+    /// live it speaks to exactly what is held; at rest it summarises the
+    /// context the user last touched.
     private var dialFooter: some View {
         VStack(spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(footerHeadline)
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(dialGrab?.isGym == true ? Theme.accent : Theme.ink)
+                    .foregroundStyle(dialContext == .gym ? Theme.accent : Theme.ink)
                     .contentTransition(.numericText())
             }
             .animation(.spring(response: 0.3, dampingFraction: 1), value: footerHeadline)
@@ -448,8 +461,15 @@ struct AlarmSettingsView: View {
             return "\(DayDialModel.durationText(minutes: shown.gapToGymMinutes)) to the gym"
         case .gymEnd:
             return "\(DayDialModel.durationText(minutes: shown.gymSessionMinutes)) at the gym"
-        default:
+        case .bedtime, .wake, .sleepBody:
             return "\(DayDialModel.durationText(minutes: shown.sleepMinutes)) of sleep"
+        case nil:
+            switch dialContext {
+            case .gym:
+                return "\(DayDialModel.durationText(minutes: shown.gymSessionMinutes)) at the gym"
+            case .sleep:
+                return "\(DayDialModel.durationText(minutes: shown.sleepMinutes)) of sleep"
+            }
         }
     }
 
@@ -462,6 +482,8 @@ struct AlarmSettingsView: View {
             return "gym by \(shown.gymByTime.displayString). apps lock when the alarm rings."
         case .gymEnd:
             return "done by \(shown.gymDoneTime.displayString)."
+        case nil where dialContext == .gym:
+            return "gym at \(shown.gymByTime.displayString) · done by \(shown.gymDoneTime.displayString)"
         default:
             let sleep = shown.sleepMinutes
             if sleep < 6 * 60 { return "that's a short night. the alarm won't care." }
@@ -557,21 +579,31 @@ struct AlarmSettingsView: View {
     /// There is no "never" option: an alarm repeating on nothing is not a
     /// value to choose, it is an alarm that will not ring, and the card says
     /// exactly that when it happens instead of offering it as a setting.
+    ///
+    /// One card, two meanings. It follows `dialContext`: gym days after the
+    /// gym bar was touched, the sleep schedule after the night was. Only the
+    /// title, the summary and the filled circles change; the card itself
+    /// stays exactly where and what it is, so it reads as the same row
+    /// changing meaning under the dial rather than a new thing arriving.
     private var repeatCard: some View {
         VStack(spacing: 14) {
             HStack {
-                Text("repeat")
+                Text(dialContext.dayCardTitle)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Theme.ink)
+                    .contentTransition(.opacity)
 
                 Spacer(minLength: 8)
 
-                Text(repeatSummary)
+                Text(dayCardSummary)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(hasRepeatDays ? Theme.inkSecondary : Theme.accent)
+                    .foregroundStyle(Theme.inkSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .contentTransition(.opacity)
-                    .animation(Theme.stateChange, value: repeatSummary)
             }
+            .animation(Theme.stateChange, value: dialContext)
+            .animation(Theme.stateChange, value: dayCardSummary)
 
             Rectangle()
                 .fill(Theme.border)
@@ -582,35 +614,61 @@ struct AlarmSettingsView: View {
                     dayCircle(day)
                 }
             }
+
+            if let requiredNightNote {
+                Text(requiredNightNote)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentTransition(.opacity)
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .offset(y: -4))
+                    )
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(radius: 22)
+        .animation(.easeOut(duration: 0.18), value: requiredNightNote)
         .accessibilityElement(children: .contain)
+        .onDisappear { noteDismissal?.cancel() }
     }
 
-    private var repeatDays: Set<Weekday> { primarySlot?.days ?? [] }
+    /// Nights the gym days require, measured against what the dial is
+    /// showing. An unsaved draft that stops crossing midnight frees them at
+    /// once, and cancelling the draft brings them back, with nothing stored.
+    private var requiredNights: Set<Weekday> {
+        plan.requiredSleepNights(for: shown)
+    }
 
-    private var hasRepeatDays: Bool { !repeatDays.isEmpty }
-
-    /// The truth about what this alarm does, not a value to pick. Listing the
-    /// days here would only repeat the circles underneath, so the slot says
-    /// the one thing the circles cannot say on their own.
-    private var repeatSummary: String {
-        switch repeatDays.count {
-        case 0: "nothing will ring"
-        case 7: "every day"
-        case 1: "1 day a week"
-        default: "\(repeatDays.count) days a week"
+    /// The circles that read as filled in the current context.
+    private var dayCardDays: Set<Weekday> {
+        switch dialContext {
+        case .gym: plan.gymDays
+        case .sleep: plan.effectiveSleepDays(for: shown)
         }
     }
 
+    /// The truth about what this schedule does, not a value to pick. Listing
+    /// the days here would only repeat the circles underneath, so the slot
+    /// says the one thing the circles cannot say on their own.
+    private var dayCardSummary: String {
+        dialContext.daySummary(count: dayCardDays.count)
+    }
+
     private func dayCircle(_ day: Weekday) -> some View {
-        let isOn = repeatDays.contains(day)
+        let isOn = dayCardDays.contains(day)
+        let isRequired = dialContext == .sleep && requiredNights.contains(day)
 
         return Button {
-            toggle(day)
+            switch dialContext {
+            case .gym: toggleGymDay(day)
+            case .sleep: toggleSleepNight(day)
+            }
         } label: {
             Text(String(day.shortLabel.prefix(1)))
                 .font(.system(size: 15, weight: .bold))
@@ -622,37 +680,57 @@ struct AlarmSettingsView: View {
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isOn)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(day.shortLabel)
+        .accessibilityLabel(dialContext == .sleep ? "\(day.spokenName) night" : day.shortLabel)
+        .accessibilityHint(isRequired ? "needed before \(day.next.spokenName)'s gym day" : "")
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
-    /// Turns a training day on or off.
-    ///
-    /// Picking a day on an alarm that was switched off turns it back on, since
-    /// choosing a day to train is not an ambiguous act. An alarm left with no
-    /// days is kept rather than deleted, so its sound and its place in the plan
-    /// survive to be used again.
-    private func toggle(_ day: Weekday) {
+    /// Turns a training day on or off on the one alarm. The rules live on
+    /// the plan; the view only pushes what they say changed.
+    private func toggleGymDay(_ day: Weekday) {
         Haptics.selection()
+        let effects = store.plan.toggleGymDay(day, newAlarmTime: shown.wakeTime)
+        apply(effects)
+    }
 
-        guard let slot = primarySlot,
-              let index = store.plan.slots.firstIndex(where: { $0.id == slot.id })
-        else {
-            // No alarm exists yet, so the first tap creates one at the time
-            // already showing on the dial.
-            store.plan.slots.append(AlarmSlot(days: [day], alarmTime: shown.wakeTime))
-            resyncAlarms()
-            return
+    /// Turns a sleep night on or off, or says quietly why it cannot.
+    private func toggleSleepNight(_ night: Weekday) {
+        let result = store.plan.toggleSleepNight(night, rhythm: shown)
+        switch result.outcome {
+        case .updated:
+            Haptics.selection()
+            clearRequiredNightNote()
+        case let .required(night, gymDay):
+            // A tap that explains rather than selects.
+            Haptics.soft()
+            showRequiredNightNote(SleepSchedule.requiredMessage(night: night, gymDay: gymDay))
         }
+        apply(result.effects)
+    }
 
-        if store.plan.slots[index].days.contains(day) {
-            store.plan.slots[index].days.remove(day)
-        } else {
-            store.plan.slots[index].days.insert(day)
-            store.plan.slots[index].isEnabled = true
+    /// Gym days rebuild the OS alarms; sleep nights only touch wind-down.
+    private func apply(_ effects: MorningPlan.DayEditEffects) {
+        if effects.contains(.resyncGymAlarms) { resyncAlarms() }
+        if effects.contains(.reconcileWindDown) { coordinator.reconcileWindDown() }
+    }
+
+    /// Shows the note for a couple of seconds, restarting the clock if
+    /// another required night is tapped meanwhile, and reads it aloud.
+    private func showRequiredNightNote(_ message: String) {
+        requiredNightNote = message
+        AccessibilityNotification.Announcement(message).post()
+        noteDismissal?.cancel()
+        noteDismissal = Task {
+            try? await Task.sleep(for: .seconds(2.6))
+            guard !Task.isCancelled else { return }
+            requiredNightNote = nil
         }
+    }
 
-        resyncAlarms()
+    private func clearRequiredNightNote() {
+        noteDismissal?.cancel()
+        noteDismissal = nil
+        requiredNightNote = nil
     }
 
     // MARK: - Alarm options card

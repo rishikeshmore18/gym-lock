@@ -253,7 +253,13 @@ final class GymSessionCoordinator {
             return
         }
 
-        let start = plan.nightLock.start(in: plan.rhythm).nextDate(after: Date())
+        // Only a night the sleep schedule is in force on, keyed by the day
+        // the window starts. `nextDate(on:)` reads an empty set as "any
+        // day", so no nights at all is handled here as no notification.
+        let nights = plan.effectiveSleepDays()
+        let start = nights.isEmpty
+            ? nil
+            : plan.nightLock.start(in: plan.rhythm).nextDate(after: Date(), on: nights)
         Task {
             if let start {
                 await notifier.scheduleWindDownStart(at: start)

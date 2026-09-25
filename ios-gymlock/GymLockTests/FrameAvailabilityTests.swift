@@ -155,7 +155,7 @@ struct FrameAvailabilityTests {
         #expect(ShareFrameAvailability.lockedFrames(availability).count == 6)
 
         let rail = ShareFrameAvailability.frames(for: context) + locked.map(\.frame)
-        let firstLocked = rail.firstIndex { availability.first { entry in entry.frame == $0 }?.state.isLocked == true } ?? rail.count
+        let firstLocked = rail.firstIndex { frame in availability.first { $0.frame == frame }?.state.isLocked == true } ?? rail.count
         let lastAvailable = rail.lastIndex { ShareFrameAvailability.frames(for: context).contains($0) } ?? -1
         #expect(lastAvailable < firstLocked)
     }

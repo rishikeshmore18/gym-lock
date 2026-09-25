@@ -56,6 +56,28 @@ enum WindDownLock {
         return nil
     }
 
+    /// The window containing `now`, but only if the night it belongs to is
+    /// switched on.
+    ///
+    /// A night belongs to the calendar day it **starts** on, so 02:00 on a
+    /// Tuesday inside a 23:00 → 07:00 window is Monday's night and is
+    /// checked against Monday. `nil` nights means every night, which is how
+    /// the lock behaved before the sleep schedule had days.
+    static func window(
+        start: TimeOfDay,
+        end: TimeOfDay,
+        at now: Date,
+        calendar: Calendar,
+        nights: Set<Weekday>?
+    ) -> (start: Date, end: Date)? {
+        guard let found = window(start: start, end: end, at: now, calendar: calendar) else { return nil }
+        guard let nights else { return found }
+        guard let startDay = Weekday(rawValue: calendar.component(.weekday, from: found.start)),
+              nights.contains(startDay)
+        else { return nil }
+        return found
+    }
+
     /// True when a window with these bounds is holding right now.
     static func isActive(
         start: TimeOfDay,
@@ -75,17 +97,22 @@ extension NightLockWindow {
     /// A disabled lock is never active, whatever the window says. A window
     /// that follows the rhythm reads its bounds from the sleep rhythm at the
     /// moment of the question, so a bedtime change moves the lock with it.
+    ///
+    /// `nights` limits it to the sleep schedule's days, keyed by the day the
+    /// night starts on. `nil` means every night.
     func isActive(
         at now: Date = Date(),
         calendar: Calendar = .current,
-        rhythm: MorningRhythm
+        rhythm: MorningRhythm,
+        nights: Set<Weekday>? = nil
     ) -> Bool {
         guard isEnabled else { return false }
-        return WindDownLock.isActive(
+        return WindDownLock.window(
             start: start(in: rhythm),
             end: end(in: rhythm),
             at: now,
-            calendar: calendar
-        )
+            calendar: calendar,
+            nights: nights
+        ) != nil
     }
 }

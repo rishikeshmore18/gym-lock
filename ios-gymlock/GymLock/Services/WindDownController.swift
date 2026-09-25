@@ -43,7 +43,10 @@ final class WindDownController {
     /// no longer `.windDown` and stops claiming it.
     func reconcile(now: Date = Date(), plan: MorningPlan, shield: any AppShielding) {
         let lock = plan.nightLock
-        let shouldHold = lock.isActive(at: now, rhythm: plan.rhythm)
+        // Only on nights the sleep schedule is in force, required ones
+        // included. The day checked is the one the window started on.
+        let nights = plan.effectiveSleepDays()
+        let shouldHold = lock.isActive(at: now, rhythm: plan.rhythm, nights: nights)
         isActive = shouldHold
 
         // A shield belonging to the morning is the morning's business.
@@ -55,7 +58,8 @@ final class WindDownController {
                 start: lock.start(in: plan.rhythm),
                 end: lock.end(in: plan.rhythm),
                 at: now,
-                calendar: .current
+                calendar: .current,
+                nights: nights
             ) else { return }
 
             // The deadline is the window's own end, so the failsafe lifts the

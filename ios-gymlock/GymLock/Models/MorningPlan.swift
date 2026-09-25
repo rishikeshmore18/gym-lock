@@ -318,6 +318,10 @@ struct MorningPlan: Hashable {
     /// Which screen the user wakes up to. Stored now, read by the ringing
     /// screen once the two styles exist.
     var alarmScreenStyle: AlarmScreenStyle = .sunrise
+    /// The nights the user chose for the sleep schedule, keyed by the day the
+    /// night starts on. Only the user's own choice: nights a gym morning
+    /// requires are derived, never written here. See `SleepSchedule`.
+    var sleepScheduleDays: Set<Weekday> = Set(Weekday.allCases)
 
     /// The snooze lengths on offer. Fifteen is the ceiling: past that it is
     /// not a snooze, it is going back to sleep.
@@ -450,6 +454,7 @@ extension MorningPlan: Codable {
         case rhythm, nightLock, slots, missionsEnabled, recentMissions, hasBeenReviewed, nextAlarmOverride
         case snoozeEnabled, snoozeMinutes, alarmHaptic
         case alarmScreenStyle
+        case sleepScheduleDays
     }
 
     init(from decoder: Decoder) throws {
@@ -470,6 +475,10 @@ extension MorningPlan: Codable {
         // Missing on plans saved before the choice existed. `try?` as well,
         // so a style this build does not know cannot throw away the plan.
         alarmScreenStyle = (try? container.decodeIfPresent(AlarmScreenStyle.self, forKey: .alarmScreenStyle)) ?? .sunrise
+        // Before the sleep schedule had days it ran every night, so a plan
+        // without the key keeps doing exactly that.
+        sleepScheduleDays = (try? container.decodeIfPresent(Set<Weekday>.self, forKey: .sleepScheduleDays))
+            ?? Set(Weekday.allCases)
     }
 }
 
