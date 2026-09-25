@@ -29,6 +29,10 @@ struct ProgressPhotoStack: View {
     var onShare: ((ProgressPhoto) -> Void)?
     /// The zoom transition's source, so the card grows into the editor.
     var transitionNamespace: Namespace.ID?
+    /// Asks the deck to glide on its own from the card in front to the
+    /// newest, as if swiped once. Raised by the card when it is fully on
+    /// screen; the deck reports the landing through `onFocus`.
+    var isRevealRequested: Bool = false
 
     /// Continuous position while a finger is down. `nil` means settled, and
     /// the focused card is the source of truth again.
@@ -41,6 +45,29 @@ struct ProgressPhotoStack: View {
     @State private var isScrollingVertically = false
     /// Which photograph last came to the front mid-drag, for the tick.
     @State private var tickedSlot: Int?
+
+    /// Continuous position while the deck glides on its own. `nil` when no
+    /// reveal is running. A finger always takes over from wherever it is.
+    @State private var revealPosition: CGFloat?
+    /// Where the reveal set off from.
+    @State private var revealFrom: CGFloat = 0
+    /// When the reveal set off. Nil when no glide is running.
+    @State private var revealBegan: Date?
+    /// The Reduce Motion reveal: a short dip in opacity instead of a glide.
+    @State private var revealFade: Double = 1
+    @State private var revealFadeTask: Task<Void, Never>?
+    /// Set when the current gesture cut a reveal short.
+    @State private var didInterruptReveal = false
+    /// The short beat between the card settling on screen and the glide.
+    @State private var revealPendingTask: Task<Void, Never>?
+    /// Once a finger has tapped or swiped the deck, the reveal never starts:
+    /// the user has already taken control. A page scroll that merely begins
+    /// on the deck does not count.
+    @State private var hasBeenTouched = false
+
+    /// A breath between the card coming fully into view and the deck moving,
+    /// so the user sees where they started before it travels.
+    private static let revealBeat: Duration = .milliseconds(180)
 
     /// How much of the throw's projected travel counts towards the landing
     /// slot. A full projection sends a firm flick clean past the whole
@@ -75,9 +102,14 @@ struct ProgressPhotoStack: View {
         max(cardWidth * 0.5, 1)
     }
 
-    /// Where the deck is right now, settled or mid-drag.
+    /// Where the deck is right now: under a finger, gliding on its own, or
+    /// settled. The finger always wins.
     private var position: CGFloat {
-        dragPosition ?? CGFloat(focusedSlot)
+        dragPosition ?? revealPosition ?? CGFloat(focusedSlot)
+    }
+
+    private var isRevealActive: Bool {
+        revealBegan != nil || revealFadeTask != nil || revealPendingTask != nil
     }
 
     private var lastSlot: CGFloat {
@@ -90,6 +122,7 @@ struct ProgressPhotoStack: View {
                 card(slide, at: index)
             }
         }
+        .opacity(revealFade)
         .frame(
             width: regionWidth,
             height: ProgressPhotoMetrics.regionHeight(for: cardWidth),
@@ -101,6 +134,19 @@ struct ProgressPhotoStack: View {
         // a non-zero distance is exactly what made the deck wait before it
         // started moving.
         .simultaneousGesture(dragGesture)
+        .background { revealDriver }
+        .onChange(of: isRevealRequested) { _, requested in
+            if requested { startReveal() } else { haltReveal() }
+        }
+        .onDisappear {
+            // Leaving mid-glide lands on the newest; leaving before it began
+            // leaves the deck as it was.
+            if revealBegan != nil || revealFadeTask != nil {
+                finishReveal()
+            } else {
+                haltReveal()
+            }
+        }
         .accessibilityElement(children: .contain)
     }
 
@@ -160,12 +206,143 @@ struct ProgressPhotoStack: View {
     /// its own weight.
     private func glide(slots: CGFloat) -> Animation {
         guard !reduceMotion else { return .easeInOut(duration: 0.18) }
+        let spring = Self.glideSpring(slots: slots)
+        return .spring(response: spring.response, dampingFraction: spring.damping)
+    }
+
+    /// The glide's shape for a given distance, shared by a release and the
+    /// reveal so the two can never drift apart.
+    private static func glideSpring(slots: CGFloat) -> (response: Double, damping: Double) {
         let response = min(0.36 + Double(slots) * 0.09, 0.7)
         // Slightly less damped the further it has to travel, so a long glide
         // arrives carrying a trace of momentum rather than stopping dead on
         // the slot the way a snapped index would.
         let damping = max(0.86 - Double(slots) * 0.03, 0.76)
-        return .spring(response: response, dampingFraction: damping)
+        return (response, damping)
+    }
+
+    // MARK: Reveal
+
+    /// Drives the reveal frame by frame while it runs, and is gone otherwise.
+    @ViewBuilder
+    private var revealDriver: some View {
+        if let began = revealBegan {
+            TimelineView(.animation) { context in
+                Color.clear
+                    .onChange(of: context.date) { _, now in
+                        stepReveal(now: now, began: began)
+                    }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    /// Sets the deck gliding from the card in front to the newest.
+    ///
+    /// The glide writes the one continuous `position`, so every card, gap,
+    /// scale and z-order moves through exactly the arrangement a finger
+    /// would drag it through. Silent: the ticks mean a hand moved the deck.
+    private func startReveal() {
+        guard !isRevealActive, !hasBeenTouched else { return }
+        guard slides.count > 1, CGFloat(focusedSlot) < lastSlot else { return }
+
+        revealPendingTask = Task { @MainActor in
+            try? await Task.sleep(for: Self.revealBeat)
+            guard !Task.isCancelled else { return }
+            revealPendingTask = nil
+            beginReveal()
+        }
+    }
+
+    private func beginReveal() {
+        guard !hasBeenTouched else { return }
+        let from = CGFloat(focusedSlot)
+        guard slides.count > 1, from < lastSlot else { return }
+
+        // Reduce Motion: the same outcome through a short dip in opacity
+        // rather than a journey across the whole deck.
+        if reduceMotion {
+            revealFadeTask = Task { @MainActor in
+                withAnimation(.easeOut(duration: 0.1)) { revealFade = 0 }
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+                finishReveal()
+                withAnimation(.easeIn(duration: 0.1)) { revealFade = 1 }
+            }
+            return
+        }
+
+        revealFrom = from
+        revealPosition = from
+        revealBegan = Date()
+    }
+
+    /// The release spring, solved in closed form so each frame knows exactly
+    /// where the deck is and a finger can take it over from there.
+    private func stepReveal(now: Date, began: Date) {
+        let t = max(now.timeIntervalSince(began), 0)
+        let distance = Double(lastSlot - revealFrom)
+        let spring = Self.glideSpring(slots: CGFloat(distance))
+        let omega = 2 * Double.pi / spring.response
+        let zeta = spring.damping
+        let decay = zeta * omega
+
+        // Settled once what is left is far below anything visible.
+        let settleTime = log(max(distance, 0.001) / 0.001) / decay
+        guard t < settleTime else {
+            finishReveal()
+            return
+        }
+
+        let omegaD = omega * (1 - zeta * zeta).squareRoot()
+        let remaining = exp(-decay * t) * (cos(omegaD * t) + decay / omegaD * sin(omegaD * t))
+        revealPosition = lastSlot - CGFloat(distance * remaining)
+    }
+
+    /// Lands on the newest card. The position already sits on its slot, so
+    /// handing back to the settled focus draws no change.
+    private func finishReveal() {
+        revealPendingTask?.cancel()
+        revealPendingTask = nil
+        revealFadeTask?.cancel()
+        revealFadeTask = nil
+        revealBegan = nil
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if let last = slides.last { onFocus(last) }
+            revealPosition = nil
+        }
+    }
+
+    /// Stops the reveal where it is and returns the position it reached.
+    @discardableResult
+    private func haltReveal() -> CGFloat? {
+        revealPendingTask?.cancel()
+        revealPendingTask = nil
+        revealFadeTask?.cancel()
+        revealFadeTask = nil
+        revealFade = 1
+        let reached = revealPosition
+        revealBegan = nil
+        revealPosition = nil
+        return reached
+    }
+
+    /// A finger landed mid-reveal. The deck freezes under it exactly where
+    /// it was drawn, and the nearest card becomes the focus so a tap or a
+    /// drag carries on from what the user can actually see.
+    private func interruptReveal() {
+        let reached = haltReveal()
+        let nearest = Int((reached ?? CGFloat(focusedSlot)).rounded().clamped(to: 0...lastSlot))
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            dragPosition = reached
+            if let slide = slides[safe: nearest] { onFocus(slide) }
+        }
+        didInterruptReveal = true
     }
 
     // MARK: Drag
@@ -181,6 +358,9 @@ struct ProgressPhotoStack: View {
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                // The user's touch always wins over the automatic reveal.
+                if isRevealActive { interruptReveal() }
+
                 // The card sits inside a vertical ScrollView, so the axis is
                 // decided once, as soon as there is enough movement to tell,
                 // and honoured for the rest of the gesture. Without this a
@@ -193,9 +373,12 @@ struct ProgressPhotoStack: View {
                     isScrollingVertically = dy > dx
                     guard !isScrollingVertically else { return }
 
-                    dragStart = CGFloat(focusedSlot)
+                    // Carries on from a reveal the touch froze; otherwise
+                    // the settled focus, as always.
+                    dragStart = dragPosition ?? CGFloat(focusedSlot)
                     tickedSlot = focusedSlot
                     isDragging = true
+                    hasBeenTouched = true
                 }
                 guard isDragging, !isScrollingVertically else { return }
 
@@ -218,20 +401,36 @@ struct ProgressPhotoStack: View {
             .onEnded { value in
                 let wasDragging = isDragging
                 let wasVertical = isScrollingVertically
+                let wasInterrupting = didInterruptReveal
                 isDragging = false
                 isScrollingVertically = false
                 tickedSlot = nil
+                didInterruptReveal = false
 
                 guard !wasVertical else {
-                    dragPosition = nil
+                    if wasInterrupting {
+                        // A frozen reveal settles onto the nearest card.
+                        withAnimation(glide(slots: abs(position - CGFloat(focusedSlot)))) {
+                            dragPosition = nil
+                        }
+                    } else {
+                        dragPosition = nil
+                    }
                     return
                 }
 
                 // Never moved far enough to be a drag, so it was a tap on
                 // whichever card sits under the finger.
                 guard wasDragging else {
-                    dragPosition = nil
-                    handleTap(at: value.startLocation)
+                    hasBeenTouched = true
+                    if wasInterrupting {
+                        // Hit-test the deck as it was frozen, then settle.
+                        handleTap(at: value.startLocation)
+                        withAnimation(settle) { dragPosition = nil }
+                    } else {
+                        dragPosition = nil
+                        handleTap(at: value.startLocation)
+                    }
                     return
                 }
 

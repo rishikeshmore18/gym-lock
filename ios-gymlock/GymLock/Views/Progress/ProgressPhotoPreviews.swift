@@ -105,6 +105,83 @@ private struct StackStage: View {
     }
 }
 
+/// Hosts a stack resting on its oldest card, with a button that fires the
+/// progress reveal. Grab the deck mid-glide to check the hand wins.
+private struct RevealStage: View {
+    var reduceMotion = false
+
+    @State private var focused = "demo-0"
+    @State private var isRevealRequested = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            GeometryReader { proxy in
+                ProgressPhotoStack(
+                    slides: ProgressPhotoSlide.demoSlides,
+                    focusedID: focused,
+                    regionWidth: proxy.size.width,
+                    reduceMotion: reduceMotion,
+                    onFocus: { focused = $0.id },
+                    isRevealRequested: isRevealRequested
+                )
+            }
+            .frame(height: 210)
+
+            HStack(spacing: 20) {
+                Button("Play reveal") { isRevealRequested = true }
+                Button("Reset") {
+                    isRevealRequested = false
+                    focused = "demo-0"
+                }
+            }
+            .font(.system(size: 15, weight: .semibold))
+        }
+        .padding(18)
+        .background(Theme.surface, in: .rect(cornerRadius: ProgressCardMetrics.cornerRadius))
+        .padding(20)
+        .background(Theme.canvas)
+    }
+}
+
+// MARK: - Progress reveal
+
+#Preview("Reveal · demo stack, oldest to Latest") {
+    RevealStage()
+}
+
+/// Tap Play, then drag or tap the deck while it is still moving.
+#Preview("Reveal · drag during the glide") {
+    RevealStage()
+}
+
+#Preview("Reveal · reduce motion (short fade, no glide)") {
+    RevealStage(reduceMotion: true)
+}
+
+/// Scroll down: the card rests on Day 0 and the deck travels once it is
+/// fully on screen. Scrolling away and back does not replay it.
+#Preview("Reveal · card below the fold, no photos") {
+    ScrollView {
+        VStack(spacing: 20) {
+            Color.clear.frame(height: 900)
+            ProgressPhotosCard(store: PhotoFixture.emptyStore(), appearanceDelay: 0)
+        }
+        .padding(20)
+    }
+    .background(Theme.canvas)
+}
+
+#Preview("Reveal · card below the fold, four real photos") {
+    ScrollView {
+        VStack(spacing: 20) {
+            Color.clear.frame(height: 900)
+            ProgressPhotosCard(store: PhotoFixture.store(count: 4), appearanceDelay: 0)
+        }
+        .padding(20)
+    }
+    .background(Theme.canvas)
+}
+
 // MARK: - Photo counts
 
 #Preview("Stack · 1 photo") {
@@ -170,6 +247,22 @@ private struct StackStage: View {
 #Preview("Card · three real photos") {
     ScrollView {
         ProgressPhotosCard(store: PhotoFixture.store(count: 3), appearanceDelay: 0)
+            .padding(20)
+    }
+    .background(Theme.canvas)
+}
+
+#Preview("Card · four real photos (reveals)") {
+    ScrollView {
+        ProgressPhotosCard(store: PhotoFixture.store(count: 4), appearanceDelay: 0)
+            .padding(20)
+    }
+    .background(Theme.canvas)
+}
+
+#Preview("Card · five real photos (no reveal)") {
+    ScrollView {
+        ProgressPhotosCard(store: PhotoFixture.store(count: 5), appearanceDelay: 0)
             .padding(20)
     }
     .background(Theme.canvas)

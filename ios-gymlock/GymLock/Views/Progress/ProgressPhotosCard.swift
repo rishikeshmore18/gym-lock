@@ -23,8 +23,9 @@ struct ProgressPhotosCard: View {
     /// The photo currently in front, by identity rather than index, so it
     /// survives a new import shifting every position along.
     @State private var focusedPhotoID: UUID?
-    /// Front card while the demonstration stack is showing.
-    @State private var demoFocus = ProgressPhotoDemoArtwork.frameCount - 1
+    /// Front card while the demonstration stack is showing. Nil until one is
+    /// chosen, so the default can follow the progress reveal.
+    @State private var demoFocus: Int?
     /// Raised by the Add Photo menu, consumed by the importer.
     @State private var pendingSource: ProgressPhotoSourceChoice?
     @State private var contentWidth: CGFloat = 0
@@ -32,8 +33,31 @@ struct ProgressPhotosCard: View {
     /// A photo the user has asked to delete, awaiting confirmation.
     @State private var photoPendingDeletion: ProgressPhoto?
 
+    // MARK: Progress reveal (presentation only, never persisted)
+
+    /// Set once the oldest-to-newest reveal has played, been taken over by
+    /// the user, or been ruled out by a change to the photos.
+    @State private var hasRunReveal = false
+    /// Whether the whole card is inside the scroll view's viewport.
+    @State private var isCardFullyVisible = false
+    /// Whether the card's own entrance has finished, so the deck never moves
+    /// while the card itself is still arriving.
+    @State private var isEntranceSettled = false
+    /// Handed to the stack; it glides once this turns true.
+    @State private var isRevealRequested = false
+
     private var photos: [ProgressPhoto] { store.photos }
     private var isDemo: Bool { photos.isEmpty }
+
+    /// The reveal plays only over the four demonstration photos or exactly
+    /// four real ones: the states where the deck is a clean start-to-now line.
+    private var isRevealShape: Bool { photos.isEmpty || photos.count == 4 }
+    /// Until the reveal has played, the oldest photo rests in front.
+    private var isAwaitingReveal: Bool { isRevealShape && !hasRunReveal }
+
+    private var currentDemoFocus: Int {
+        demoFocus ?? (isAwaitingReveal ? 0 : ProgressPhotoDemoArtwork.frameCount - 1)
+    }
 
     /// Position of the focused photo in the user's full history.
     private var focusedIndex: Int {
@@ -42,8 +66,9 @@ struct ProgressPhotosCard: View {
             return found
         }
         // No explicit choice yet: the newest photo leads, because that is the
-        // one the user just added and the one they want to see.
-        return photos.count - 1
+        // one the user just added and the one they want to see. Before the
+        // progress reveal, the oldest rests in front so the deck can travel.
+        return isAwaitingReveal ? 0 : photos.count - 1
     }
 
     private var slides: [ProgressPhotoSlide] {
@@ -55,7 +80,7 @@ struct ProgressPhotosCard: View {
     }
 
     private var focusedID: String {
-        isDemo ? "demo-\(demoFocus)" : photos[focusedIndex].id.uuidString
+        isDemo ? "demo-\(currentDemoFocus)" : photos[focusedIndex].id.uuidString
     }
 
     /// Large accessibility text needs the full width, so the copy moves below
@@ -92,6 +117,12 @@ struct ProgressPhotosCard: View {
         } action: { width in
             contentWidth = width
         }
+        // Measured before the entrance offset, so the card counts as visible
+        // by where it actually sits in the page.
+        .onScrollVisibilityChange(threshold: 0.97) { isVisible in
+            isCardFullyVisible = isVisible
+            requestRevealIfReady()
+        }
         .opacity(hasAppeared ? 1 : 0)
         .offset(y: hasAppeared ? 0 : 16)
         .task {
@@ -100,12 +131,20 @@ struct ProgressPhotosCard: View {
                 hasAppeared = true
             } else {
                 withAnimation(Theme.settle.delay(appearanceDelay)) { hasAppeared = true }
+                // The entrance is a delay plus Theme.settle's 0.55 s.
+                try? await Task.sleep(for: .seconds(appearanceDelay + 0.55))
+                guard !Task.isCancelled else { return }
             }
+            isEntranceSettled = true
+            requestRevealIfReady()
         }
         // Keyed on the photos themselves, not just the count: a replacement
         // swaps one photo for another and leaves the count unchanged, and the
         // card still has to bring the new photograph to the front.
         .onChange(of: photos) { _, _ in
+            // A change to the photos is never a reason to replay the reveal.
+            hasRunReveal = true
+            isRevealRequested = false
             // A newly added photo takes the front. Clearing the explicit
             // choice is enough — focus falls back to the newest.
             withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
@@ -179,7 +218,8 @@ struct ProgressPhotosCard: View {
                 // demonstration stack has nothing behind it.
                 onDelete: isDemo ? nil : { photoPendingDeletion = $0 },
                 onShare: isDemo || onShare == nil ? nil : { onShare?(.progressPhoto($0)) },
-                transitionNamespace: transitionNamespace
+                transitionNamespace: transitionNamespace,
+                isRevealRequested: isRevealRequested
             )
         } else {
             // First layout pass, before the width is known. Reserves nothing
@@ -227,13 +267,35 @@ struct ProgressPhotosCard: View {
     /// front, both under the finger and on a tap, and ticking again when the
     /// same change is committed would double up on every gesture.
     private func focus(_ slide: ProgressPhotoSlide) {
+        // Any focus change, from the reveal landing or from the user, ends
+        // the reveal for this visit. The oldest-first default is pinned
+        // first so nothing jumps as it goes away.
+        if isAwaitingReveal {
+            if isDemo {
+                demoFocus = currentDemoFocus
+            } else if focusedPhotoID == nil {
+                focusedPhotoID = photos.first?.id
+            }
+            hasRunReveal = true
+        }
+
         switch slide.content {
         case let .demo(index):
-            guard index != demoFocus else { return }
+            guard index != currentDemoFocus else { return }
             demoFocus = index
         case let .photo(photo):
             guard photo.id != photos[focusedIndex].id else { return }
             focusedPhotoID = photo.id
         }
+    }
+
+    /// Asks the deck to travel once, when an eligible card has finished
+    /// arriving and sits wholly on screen. Never re-armed, so scrolling the
+    /// card away and back does not replay it.
+    private func requestRevealIfReady() {
+        guard isAwaitingReveal, !isRevealRequested,
+              isCardFullyVisible, isEntranceSettled
+        else { return }
+        isRevealRequested = true
     }
 }
