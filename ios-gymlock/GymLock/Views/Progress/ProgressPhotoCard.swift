@@ -38,6 +38,24 @@ struct ProgressPhotoCard: View {
 
     @State private var image: UIImage?
 
+    init(slide: ProgressPhotoSlide, dimming: Double, showsMarker: Bool, width: CGFloat) {
+        self.slide = slide
+        self.dimming = dimming
+        self.showsMarker = showsMarker
+        self.width = width
+        // Seeded from the cache so a card that is rebuilt (the zoom source
+        // moving to a new front card does this) draws its photograph on its
+        // first frame instead of flashing the grey placeholder for one.
+        _image = State(initialValue: Self.cachedImage(for: slide))
+    }
+
+    private static func cachedImage(for slide: ProgressPhotoSlide) -> UIImage? {
+        switch slide.content {
+        case let .demo(index): ProgressPhotoDemoArtwork.frame(index)
+        case let .photo(photo): ProgressPhotoImageLoader.shared.cached(photo.thumbnailName)
+        }
+    }
+
     private var height: CGFloat { width / ProgressPhotoMetrics.aspectRatio }
 
     var body: some View {

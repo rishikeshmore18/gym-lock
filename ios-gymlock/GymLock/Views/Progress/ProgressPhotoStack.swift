@@ -58,6 +58,9 @@ struct ProgressPhotoStack: View {
     @State private var revealFadeTask: Task<Void, Never>?
     /// Set when the current gesture cut a reveal short.
     @State private var didInterruptReveal = false
+    /// Which photograph last reached the front during the reveal, for the
+    /// tick. Kept apart from the drag's own tick state.
+    @State private var revealTickedSlot: Int = 0
     /// The short beat between the card settling on screen and the glide.
     @State private var revealPendingTask: Task<Void, Never>?
     /// Once a finger has tapped or swiped the deck, the reveal never starts:
@@ -242,7 +245,8 @@ struct ProgressPhotoStack: View {
     ///
     /// The glide writes the one continuous `position`, so every card, gap,
     /// scale and z-order moves through exactly the arrangement a finger
-    /// would drag it through. Silent: the ticks mean a hand moved the deck.
+    /// would drag it through. It ticks as each photograph reaches the front,
+    /// the same notch a swipe gives.
     private func startReveal() {
         guard !isRevealActive, !hasBeenTouched else { return }
         guard slides.count > 1, CGFloat(focusedSlot) < lastSlot else { return }
@@ -263,10 +267,13 @@ struct ProgressPhotoStack: View {
         // Reduce Motion: the same outcome through a short dip in opacity
         // rather than a journey across the whole deck.
         if reduceMotion {
+            Haptics.prepareSelection()
             revealFadeTask = Task { @MainActor in
                 withAnimation(.easeOut(duration: 0.1)) { revealFade = 0 }
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { return }
+                // One notch for the one change the user sees.
+                Haptics.selection()
                 finishReveal()
                 withAnimation(.easeIn(duration: 0.1)) { revealFade = 1 }
             }
@@ -275,7 +282,9 @@ struct ProgressPhotoStack: View {
 
         revealFrom = from
         revealPosition = from
+        revealTickedSlot = focusedSlot
         revealBegan = Date()
+        Haptics.prepareSelection()
     }
 
     /// The release spring, solved in closed form so each frame knows exactly
@@ -297,7 +306,17 @@ struct ProgressPhotoStack: View {
 
         let omegaD = omega * (1 - zeta * zeta).squareRoot()
         let remaining = exp(-decay * t) * (cos(omegaD * t) + decay / omegaD * sin(omegaD * t))
-        revealPosition = lastSlot - CGFloat(distance * remaining)
+        let next = lastSlot - CGFloat(distance * remaining)
+        revealPosition = next
+
+        // A tick as each photograph reaches the front, exactly as under a
+        // finger. Clamped, so the spring's hair of overshoot past the newest
+        // card never adds a stray one.
+        let nearest = Int(next.rounded().clamped(to: 0...lastSlot))
+        if nearest != revealTickedSlot {
+            revealTickedSlot = nearest
+            Haptics.selection()
+        }
     }
 
     /// Lands on the newest card. The position already sits on its slot, so
