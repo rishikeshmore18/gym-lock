@@ -1043,18 +1043,15 @@ struct DayDial: View {
     /// the pulse begins, so it moves on a settled page rather than under the
     /// cover's zoom-in.
     private static let introRestHold: Double = 0.4
-    /// The stretch out: critically damped, so it rises to full length without
-    /// overshoot and hands over to the release with no visible seam.
-    private static let introOutResponse: Double = 0.4
-    private static let introOutDuration: Double = 0.55
+    /// One leg of the pulse, out or back: a critically damped spring, so it
+    /// moves without overshoot. The return plays the same curve in reverse,
+    /// so both directions feel identical. Solved in closed form so every
+    /// frame knows exactly where the end is, which is what the icons,
+    /// hatching and ticks follow.
+    private static let introLegResponse: Double = 0.4
+    private static let introLegDuration: Double = 0.55
     /// A beat at full stretch before the bar lets go.
     private static let introTopHold: Double = 0.18
-    /// The spring the bar contracts on: quick to start, a hair of undershoot,
-    /// then still. Solved in closed form so every frame knows exactly where
-    /// the end is, which is what the icons, hatching and ticks follow.
-    private static let introResponse: Double = 0.72
-    private static let introDamping: Double = 0.8
-    private static let introDuration: Double = 1.3
     /// One tick per half hour the end crosses, on the way out or back.
     private static let introTickMinutes: Double = 30
 
@@ -1113,39 +1110,41 @@ struct DayDial: View {
 
         let pulse = t - Self.introRestHold
 
-        // Stretching out: critically damped rise, no overshoot.
-        if pulse < Self.introOutDuration {
-            let omega = 2 * Double.pi / Self.introOutResponse
-            let progress = 1 - (1 + omega * pulse) * exp(-omega * pulse)
-            setIntroExtra(introAmount * progress)
+        // Stretching out.
+        if pulse < Self.introLegDuration {
+            setIntroExtra(introAmount * Self.legProgress(pulse))
             return
         }
 
-        // A beat at full stretch, then the release.
-        let release = pulse - Self.introTopHold
-        guard release >= 0 else {
+        // A beat at full stretch.
+        let topEnds = Self.introLegDuration + Self.introTopHold
+        if pulse < topEnds {
             setIntroExtra(introAmount)
             return
         }
-        guard release < Self.introDuration else {
+
+        // Coming back: the stretch, mirrored.
+        let back = pulse - topEnds
+        guard back < Self.introLegDuration else {
             finishIntro()
             // The bar landing on its real length.
             Haptics.tap(intensity: 0.6)
             return
         }
+        setIntroExtra(introAmount * (1 - Self.legProgress(back)))
+    }
 
-        // Underdamped spring from 1 to 0.
-        let omega = 2 * Double.pi / Self.introResponse
-        let zeta = Self.introDamping
-        let omegaD = omega * (1 - zeta * zeta).squareRoot()
-        let remaining = exp(-zeta * omega * release)
-            * (cos(omegaD * release) + zeta * omega / omegaD * sin(omegaD * release))
-        setIntroExtra(introAmount * remaining)
+    /// Critically damped rise from 0 to 1 over one leg, rescaled so it lands
+    /// on exactly 1 at the end of the leg. Starts and ends at rest, so the
+    /// hand-offs to the hold and to the real length have no visible seam.
+    private static func legProgress(_ t: Double) -> Double {
+        let omega = 2 * Double.pi / introLegResponse
+        func raw(_ x: Double) -> Double { 1 - (1 + omega * x) * exp(-omega * x) }
+        return min(1, max(0, raw(t) / raw(introLegDuration)))
     }
 
     /// Writes the drawn length and ticks once per half hour the end crosses,
-    /// out or back, like a ratchet. The floor at zero keeps the spring's tiny
-    /// undershoot from ticking.
+    /// out or back, like a ratchet.
     private func setIntroExtra(_ extra: Double) {
         introExtraMinutes = extra
         let step = max(0, Int(extra / Self.introTickMinutes))
