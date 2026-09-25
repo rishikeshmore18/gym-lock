@@ -588,10 +588,15 @@ struct AlarmSettingsView: View {
     private var repeatCard: some View {
         VStack(spacing: 14) {
             HStack {
-                Text(dialContext.dayCardTitle)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.ink)
-                    .contentTransition(.opacity)
+                Button(action: switchDialContext) {
+                    Text(dialContext.dayCardTitle)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .contentTransition(.opacity)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(dialContext == .sleep ? "shows gym days" : "shows sleep schedule")
 
                 Spacer(minLength: 8)
 
@@ -636,6 +641,16 @@ struct AlarmSettingsView: View {
         .animation(.easeOut(duration: 0.18), value: requiredNightNote)
         .accessibilityElement(children: .contain)
         .onDisappear { noteDismissal?.cancel() }
+    }
+
+    /// Tapping the card title flips the screen to the other arc, exactly as
+    /// touching that arc on the dial would.
+    private func switchDialContext() {
+        clearRequiredNightNote()
+        Haptics.selection()
+        withAnimation(Theme.stateChange) {
+            dialContext = dialContext == .sleep ? .gym : .sleep
+        }
     }
 
     /// Nights the gym days require, measured against what the dial is
