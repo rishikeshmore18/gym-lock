@@ -371,17 +371,17 @@ struct DayDial: View {
     @State private var sleepShowsBothIcons = true
     @State private var gymShowsBothIcons = false
 
-    // MARK: Opening contraction
+    // MARK: Opening pulse
 
-    /// Minutes the gym bar is drawn longer than it really is, while it
-    /// contracts to its real length as the page opens. Drawing only: never
-    /// written to the rhythm, never used for hit testing or VoiceOver.
+    /// Minutes the gym bar is drawn longer than it really is, while the
+    /// opening pulse stretches it out and lets it settle back. Drawing only:
+    /// never written to the rhythm, never used for hit testing or VoiceOver.
     @State private var introExtraMinutes: Double = 0
-    /// How far it started out stretched.
+    /// How far the pulse stretches it at the top.
     @State private var introAmount: Double = 0
-    /// When the contraction begins. Nil when no intro is running.
+    /// When the pulse begins. Nil when no intro is running.
     @State private var introBegins: Date?
-    @State private var introIsContracting = false
+    @State private var introIsRunning = false
     /// Which half-hour step the far end is on, so each crossing ticks once.
     @State private var introTickStep: Int = 0
     /// Once per presentation, not again on coming back from Sound.
@@ -435,8 +435,8 @@ struct DayDial: View {
     private var gymByMinutes: Int { rhythm.gymByTime.minutesFromMidnight }
     private var gymDoneMinutes: Int { (gymByMinutes + sessionMinutes) % 1440 }
     private var gapMinutes: Int { DayDialModel.clockwiseSpan(from: wakeMinutes, to: gymByMinutes) }
-    /// The visit as drawn: its real length plus whatever is left of the
-    /// opening contraction.
+    /// The visit as drawn: its real length plus whatever the opening pulse
+    /// currently adds.
     private var displayedSessionMinutes: Int {
         max(1, sessionMinutes + Int(introExtraMinutes.rounded()))
     }
@@ -1037,26 +1037,32 @@ struct DayDial: View {
         onSettle?()
     }
 
-    // MARK: - Opening contraction
+    // MARK: - Opening pulse
 
-    /// How long the bar holds fully stretched before it moves, so the
-    /// contraction plays on a settled page rather than under the cover's
-    /// zoom-in.
-    private static let introHold: Double = 0.45
+    /// How long the bar rests at its real length when the page opens, before
+    /// the pulse begins, so it moves on a settled page rather than under the
+    /// cover's zoom-in.
+    private static let introRestHold: Double = 0.4
+    /// The stretch out: critically damped, so it rises to full length without
+    /// overshoot and hands over to the release with no visible seam.
+    private static let introOutResponse: Double = 0.4
+    private static let introOutDuration: Double = 0.55
+    /// A beat at full stretch before the bar lets go.
+    private static let introTopHold: Double = 0.18
     /// The spring the bar contracts on: quick to start, a hair of undershoot,
     /// then still. Solved in closed form so every frame knows exactly where
     /// the end is, which is what the icons, hatching and ticks follow.
     private static let introResponse: Double = 0.72
     private static let introDamping: Double = 0.8
     private static let introDuration: Double = 1.3
-    /// One tick per half hour the end passes, like a ratchet letting go.
+    /// One tick per half hour the end crosses, on the way out or back.
     private static let introTickMinutes: Double = 30
 
-    /// Drives the contraction frame by frame while it runs, and is gone
-    /// otherwise, so an idle dial costs nothing.
+    /// Drives the pulse frame by frame while it runs, and is gone otherwise,
+    /// so an idle dial costs nothing.
     @ViewBuilder
     private var introDriver: some View {
-        if introIsContracting, let begins = introBegins {
+        if introIsRunning, let begins = introBegins {
             TimelineView(.animation) { context in
                 Color.clear
                     .onChange(of: context.date) { _, now in
@@ -1068,9 +1074,9 @@ struct DayDial: View {
         }
     }
 
-    /// Shows the gym bar at its longest the moment the page opens, then lets
-    /// it contract to the length the user chose. Once per presentation, and
-    /// not at all with Reduce Motion or VoiceOver's need for a still dial.
+    /// Opens with the gym bar at the length the user chose, stretches it to
+    /// its longest, then lets it settle back. Once per presentation, and not
+    /// at all with Reduce Motion or VoiceOver's need for a still dial.
     private func startIntroIfNeeded() {
         guard !introHasPlayed else { return }
         introHasPlayed = true
@@ -1088,10 +1094,10 @@ struct DayDial: View {
         guard extra >= 30 else { return }
 
         introAmount = extra
-        introExtraMinutes = extra
-        introTickStep = Int(extra / Self.introTickMinutes)
-        introBegins = Date().addingTimeInterval(Self.introHold)
-        introIsContracting = true
+        introExtraMinutes = 0
+        introTickStep = 0
+        introBegins = Date()
+        introIsRunning = true
         Haptics.prepareSelection()
     }
 
@@ -1099,7 +1105,29 @@ struct DayDial: View {
         let t = now.timeIntervalSince(begins)
         guard t >= 0 else { return }
 
-        guard t < Self.introDuration else {
+        // Resting at its real length while the page settles.
+        guard t >= Self.introRestHold else {
+            introExtraMinutes = 0
+            return
+        }
+
+        let pulse = t - Self.introRestHold
+
+        // Stretching out: critically damped rise, no overshoot.
+        if pulse < Self.introOutDuration {
+            let omega = 2 * Double.pi / Self.introOutResponse
+            let progress = 1 - (1 + omega * pulse) * exp(-omega * pulse)
+            setIntroExtra(introAmount * progress)
+            return
+        }
+
+        // A beat at full stretch, then the release.
+        let release = pulse - Self.introTopHold
+        guard release >= 0 else {
+            setIntroExtra(introAmount)
+            return
+        }
+        guard release < Self.introDuration else {
             finishIntro()
             // The bar landing on its real length.
             Haptics.tap(intensity: 0.6)
@@ -1110,26 +1138,31 @@ struct DayDial: View {
         let omega = 2 * Double.pi / Self.introResponse
         let zeta = Self.introDamping
         let omegaD = omega * (1 - zeta * zeta).squareRoot()
-        let remaining = exp(-zeta * omega * t)
-            * (cos(omegaD * t) + zeta * omega / omegaD * sin(omegaD * t))
-        introExtraMinutes = introAmount * remaining
+        let remaining = exp(-zeta * omega * release)
+            * (cos(omegaD * release) + zeta * omega / omegaD * sin(omegaD * release))
+        setIntroExtra(introAmount * remaining)
+    }
 
-        // Ticks only on the way in, never on the tiny undershoot.
-        let step = max(0, Int(introExtraMinutes / Self.introTickMinutes))
-        if step < introTickStep {
+    /// Writes the drawn length and ticks once per half hour the end crosses,
+    /// out or back, like a ratchet. The floor at zero keeps the spring's tiny
+    /// undershoot from ticking.
+    private func setIntroExtra(_ extra: Double) {
+        introExtraMinutes = extra
+        let step = max(0, Int(extra / Self.introTickMinutes))
+        if step != introTickStep {
             introTickStep = step
             Haptics.selection()
         }
     }
 
     private func finishIntro() {
-        introIsContracting = false
+        introIsRunning = false
         introBegins = nil
         introExtraMinutes = 0
         introAmount = 0
     }
 
-    /// A finger landed mid-contraction: snap to the real length silently.
+    /// A finger landed mid-pulse: snap to the real length silently.
     private func cancelIntro() {
         finishIntro()
     }
