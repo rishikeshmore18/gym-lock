@@ -31,6 +31,20 @@ nonisolated enum SessionResume {
         var source: Source
     }
 
+    /// What to do with the pending handoff, alongside whether to start.
+    ///
+    /// Split out because a handoff can now be thrown away without anything
+    /// starting: a note for a slot already settled that day, or a second note
+    /// for the morning that is already running.
+    struct Resolution: Equatable {
+        var decision: Decision?
+        /// The caller clears the handoff when this is true.
+        var clearsHandoff: Bool
+
+        static let nothing = Resolution(decision: nil, clearsHandoff: false)
+        static let discardHandoff = Resolution(decision: nil, clearsHandoff: true)
+    }
+
     /// `"<slotID>|<yyyy-MM-dd>"`, built from components rather than a
     /// `DateFormatter` so a non-Gregorian locale cannot change the key.
     static func resolvedKey(slotID: UUID?, day: Date, calendar: Calendar = .current) -> String {
@@ -47,41 +61,101 @@ nonisolated enum SessionResume {
         )
     }
 
-    /// The whole rule, in one place.
-    ///
-    /// - Parameters:
-    ///   - isSessionLive: A live morning is never restarted or overwritten.
-    ///   - handoff: Peeked, not taken. Consuming is the caller's job, and only
-    ///     on the path that actually acts on it.
-    ///   - resolvedKeys: Slots already finished today. Without this, someone who
-    ///     says "can't today" at 6:35 and reopens the app at 6:50 gets their
-    ///     apps locked again.
+    /// Whether to start, without the handoff bookkeeping. Kept for callers
+    /// and tests that only care about the decision.
     static func decide(
         now: Date,
         isSessionLive: Bool,
+        liveSlotID: UUID? = nil,
+        liveSessionDay: Date? = nil,
         handoff: AlarmHandoff.Pending?,
         slots: [AlarmSlot],
         windowMinutes: Int,
         resolvedKeys: Set<String>,
+        alarmSlotIDs: [UUID: UUID] = [:],
         calendar: Calendar = .current
     ) -> Decision? {
-        // A live session wins over everything, and the note is deliberately
-        // left where it is. It may belong to a later slot that becomes
-        // actionable once this morning resolves, and `staleAfter` already
-        // bounds how long it can sit there.
-        guard !isSessionLive else { return nil }
+        resolve(
+            now: now,
+            isSessionLive: isSessionLive,
+            liveSlotID: liveSlotID,
+            liveSessionDay: liveSessionDay,
+            handoff: handoff,
+            slots: slots,
+            windowMinutes: windowMinutes,
+            resolvedKeys: resolvedKeys,
+            alarmSlotIDs: alarmSlotIDs,
+            calendar: calendar
+        ).decision
+    }
+
+    /// The whole rule, in one place.
+    ///
+    /// - Parameters:
+    ///   - isSessionLive: A live morning is never restarted or overwritten.
+    ///   - liveSlotID: The live session's slot, so a second note for the same
+    ///     morning can be told apart from a note for a different slot.
+    ///   - liveSessionDay: The live session's day. A note that fired on a
+    ///     different day is not the same morning, so it waits instead.
+    ///   - handoff: Peeked, not taken. Clearing is the caller's job, and only
+    ///     when `clearsHandoff` says so.
+    ///   - resolvedKeys: Slots already finished today. Without this, someone who
+    ///     says "can't today" at 6:35 and reopens the app at 6:50 gets their
+    ///     apps locked again.
+    ///   - alarmSlotIDs: One-off alarm ids mapped to the slot they stand for.
+    ///     A "change next alarm only" alarm carries its own id, but the day it
+    ///     settles is recorded under the slot's id.
+    static func resolve(
+        now: Date,
+        isSessionLive: Bool,
+        liveSlotID: UUID? = nil,
+        liveSessionDay: Date? = nil,
+        handoff: AlarmHandoff.Pending?,
+        slots: [AlarmSlot],
+        windowMinutes: Int,
+        resolvedKeys: Set<String>,
+        alarmSlotIDs: [UUID: UUID] = [:],
+        calendar: Calendar = .current
+    ) -> Resolution {
+        let handoffSlotID = handoff?.slotID.map { alarmSlotIDs[$0] ?? $0 }
+
+        // A live session wins over everything.
+        if isSessionLive {
+            guard let handoff else { return .nothing }
+            // The same morning again: the AlarmKit intent and observer racing,
+            // or a no-slot note. Thrown away now rather than left to start a
+            // second session the moment this one ends.
+            let isSameDay = liveSessionDay.map {
+                calendar.isDate(handoff.firedAt, inSameDayAs: $0)
+            } ?? true
+            if isSameDay, handoff.slotID == nil || handoffSlotID == liveSlotID {
+                return .discardHandoff
+            }
+            // A different slot waits: it may become actionable once this
+            // morning resolves, and `staleAfter` bounds how long it can sit.
+            return .nothing
+        }
 
         if let handoff {
-            return Decision(
-                slotID: handoff.slotID,
-                startAt: handoff.firedAt,
-                wantsSnooze: handoff.wantsSnooze,
-                source: .handoff
+            // A slot already settled for the day the note fired never starts
+            // again. Keyed by `firedAt`, not `now`, so a note from before
+            // midnight is judged against its own day.
+            let key = resolvedKey(slotID: handoffSlotID, day: handoff.firedAt, calendar: calendar)
+            guard !resolvedKeys.contains(key) else { return .discardHandoff }
+
+            return Resolution(
+                decision: Decision(
+                    slotID: handoff.slotID,
+                    startAt: handoff.firedAt,
+                    wantsSnooze: handoff.wantsSnooze,
+                    source: .handoff
+                ),
+                clearsHandoff: true
             )
         }
 
         guard let today = Weekday(rawValue: calendar.component(.weekday, from: now)) else {
-            return nil
+            return .nothing
         }
 
         let open = slots
@@ -109,13 +183,16 @@ nonisolated enum SessionResume {
 
         // The most recent open window, so a day with a morning and an evening
         // slot resumes the one the user is actually in.
-        guard let chosen = open.max(by: { $0.firedAt < $1.firedAt }) else { return nil }
+        guard let chosen = open.max(by: { $0.firedAt < $1.firedAt }) else { return .nothing }
 
-        return Decision(
-            slotID: chosen.slot.id,
-            startAt: chosen.firedAt,
-            wantsSnooze: false,
-            source: .clock
+        return Resolution(
+            decision: Decision(
+                slotID: chosen.slot.id,
+                startAt: chosen.firedAt,
+                wantsSnooze: false,
+                source: .clock
+            ),
+            clearsHandoff: false
         )
     }
 }

@@ -241,6 +241,21 @@ final class AppStore {
     /// Whether the passive arrival system is fully configured.
     var isAutomaticArrivalReady: Bool { primaryGym != nil }
 
+    // MARK: - Notification taps
+
+    /// The last non-alarm notification the app was opened from, if any.
+    ///
+    /// Nothing reads it yet. The workout-done notification will use it to
+    /// open Progress. Alarm taps never appear here.
+    var pendingNotificationRoute: PendingNotificationRoute.Entry? {
+        PendingNotificationRoute.peek(defaults: defaults)
+    }
+
+    /// Reads and clears it, so one tap is acted on once.
+    func takePendingNotificationRoute() -> PendingNotificationRoute.Entry? {
+        PendingNotificationRoute.take(defaults: defaults)
+    }
+
     // MARK: - Morning plan
 
     /// Builds the plan out of the onboarding answers the first time it is

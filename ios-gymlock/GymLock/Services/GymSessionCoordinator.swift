@@ -201,20 +201,27 @@ final class GymSessionCoordinator {
     func resumeSessionIfDue(at now: Date = Date()) {
         guard let store else { return }
 
-        guard let decision = SessionResume.decide(
+        let isLive = session?.state.isLive ?? false
+        let resolution = SessionResume.resolve(
             now: now,
-            isSessionLive: session?.state.isLive ?? false,
+            isSessionLive: isLive,
+            liveSlotID: isLive ? session?.slotID : nil,
+            liveSessionDay: isLive ? session?.day : nil,
             handoff: AlarmHandoff.peek(now: now),
             slots: store.plan.slots,
             windowMinutes: store.plan.windowMinutes,
-            resolvedKeys: resolvedSlotKeys
-        ) else { return }
+            resolvedKeys: resolvedSlotKeys,
+            alarmSlotIDs: store.plan.nextAlarmOverride.map { [$0.id: $0.slotID] } ?? [:]
+        )
 
-        // Only consumed once the decision is actually being acted on, so a note
-        // arriving during a live session is not silently thrown away.
-        if decision.source == .handoff {
+        // Cleared when acted on, and when it is a note for a day already
+        // settled or for the morning already running. A note for a different
+        // slot during a live session is left to wait.
+        if resolution.clearsHandoff {
             AlarmHandoff.clear()
         }
+
+        guard let decision = resolution.decision else { return }
 
         // A one-off alarm carries its own id; the plan maps it back to its slot.
         let slot = store.plan.slot(forAlarmID: decision.slotID)

@@ -8,14 +8,15 @@ import UserNotifications
 /// category that does not exist — and tapping the banner simply opens GymLock
 /// to whatever screen it was last on.
 ///
-/// Every route ends in the same place: a note in `AlarmHandoff`. The delegate
-/// does not touch the coordinator, because on a cold launch from an alarm tap
-/// there is no coordinator yet.
+/// Only an alarm tap writes a note in `AlarmHandoff` (`docs/FLOW.md`, Flow 3).
+/// Every other notification just opens the app, and its route is kept in
+/// `PendingNotificationRoute`. The delegate does not touch the coordinator,
+/// because on a cold launch from an alarm tap there is no coordinator yet.
 final class AlarmNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     enum Category {
         static let alarm = NotificationAlarmScheduler.categoryIdentifier
         /// The re-fire `MorningNotifier` sends when the single snooze runs out.
-        static let snoozeRefire = "gymlock.session.snooze"
+        static let snoozeRefire = NotificationRoute.ID.snooze
     }
 
     enum Action {
@@ -83,32 +84,40 @@ final class AlarmNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        let identifier = response.notification.request.identifier
-        let slotID = GymAlarmRequest.slotID(fromNotificationIdentifier: identifier)
-
-        switch response.actionIdentifier {
-        case Action.snooze:
-            write(slotID: slotID, wantsSnooze: true)
-
-        case Action.imUp, UNNotificationDefaultActionIdentifier:
-            // Opening the app during your own alarm is getting up.
-            write(slotID: slotID, wantsSnooze: false)
-
-        case UNNotificationDismissActionIdentifier:
-            // Swiping an alarm away is not permission to skip the gym. The
-            // session still has to exist, so the lock goes on the moment the
-            // app next runs and the user has to resolve the day deliberately.
-            write(slotID: slotID, wantsSnooze: false)
-
-        default:
-            break
-        }
+        let request = response.notification.request
+        Self.handle(
+            identifier: request.identifier,
+            categoryIdentifier: request.content.categoryIdentifier,
+            actionIdentifier: response.actionIdentifier
+        )
     }
 
-    // MARK: - Private
+    // MARK: - Routing
 
-    private func write(slotID: UUID?, wantsSnooze: Bool) {
-        AlarmHandoff.write(.init(slotID: slotID, firedAt: Date(), wantsSnooze: wantsSnooze))
-        NotificationCenter.default.post(name: .gymLockAlarmHandoffAvailable, object: nil)
+    /// The whole tap rule, shared by the delegate and the debug simulator so
+    /// the simulator runs the real path.
+    ///
+    /// An alarm tap writes the handoff exactly as before: snooze starts and
+    /// snoozes; "I'm up", a body tap and a swipe-away start the session.
+    /// Anything else only opens the app and never writes a handoff.
+    @discardableResult
+    static func handle(
+        identifier: String,
+        categoryIdentifier: String,
+        actionIdentifier: String,
+        now: Date = Date()
+    ) -> NotificationRoute {
+        let route = NotificationRoute(identifier: identifier, categoryIdentifier: categoryIdentifier)
+
+        if let handoff = route.handoff(forAction: actionIdentifier, at: now) {
+            AlarmHandoff.write(handoff)
+            NotificationCenter.default.post(name: .gymLockAlarmHandoffAvailable, object: nil)
+        } else if !route.isAlarm, actionIdentifier != UNNotificationDismissActionIdentifier {
+            // Swiping a non-alarm away does not open the app, so it is not
+            // a route anyone asked for.
+            PendingNotificationRoute.write(route, at: now)
+        }
+
+        return route
     }
 }

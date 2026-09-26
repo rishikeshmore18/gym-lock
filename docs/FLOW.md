@@ -295,7 +295,7 @@ GYM DAY
 - **Change:** today any Health workout counts, even 1 minute or typed in by hand. Set a 20-minute minimum and ignore hand-typed ones.
 - **Change:** today the app stops watching the gym area once arrival is confirmed. It can't tell how long you stayed or when you left. Track both.
 - **Change:** today the only gym notification is "you're here. 🔥 apps unlocked. go train." The workout-done notification and the spotlight are new.
-- **Change, bug:** today tapping ANY GymLock notification counts as "I'm up" on an alarm. After a gym visit, that can lock the apps again for up to 2 hours. Only alarm notifications may start a session. The gym notification opens Progress.
+- **Built (`2026-09-26`), bug:** today tapping ANY GymLock notification counts as "I'm up" on an alarm. After a gym visit, that can lock the apps again for up to 2 hours. Only alarm notifications may start a session. The gym notification opens Progress.
 - **Change:** today "verified" in the share stickers means a GPS visit. It now means the workout was done. GPS arrivals alone become "gym visits."
 
 ### Edge cases
@@ -542,7 +542,7 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 
 10. The day counts when the workout is done, not on arrival: an Apple Health workout of 20+ min (not typed by hand, started at the gym), or 20 min at the gym. Keep checking Apple Health for 5 hours. Track time at the gym and when they leave.
 11. On arrival: "20 minutes and today counts." When the workout is done, a notification at 30 min or on leaving, built from their real numbers, which opens the Progress spotlight.
-12. Fix the bug: only alarm notifications may start a session.
+12. Fix the bug: only alarm notifications may start a session. **(Built: `2026-09-26`)**
 13. The "verified" sticker means the workout was done. GPS arrivals alone become "gym visits."
 14. "I'm here" (GPS failed): the day counts with Apple Health or a progress photo.
 

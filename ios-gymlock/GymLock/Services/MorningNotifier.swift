@@ -15,18 +15,20 @@ import UserNotifications
 final class MorningNotifier {
     private let center = UNUserNotificationCenter.current()
 
+    /// Defined on `NotificationRoute` so the tap router reads the same ids
+    /// this sends. None of these may start a session when tapped.
     private enum ID {
-        static let departure = "gymlock.session.departure"
-        static let deadline = "gymlock.session.deadline"
-        static let comeback = "gymlock.session.comeback"
-        static let moved = "gymlock.session.moved"
-        static let arrival = "gymlock.session.arrival"
-        static let snooze = "gymlock.session.snooze"
+        static let departure = NotificationRoute.ID.departure
+        static let deadline = NotificationRoute.ID.deadline
+        static let comeback = NotificationRoute.ID.comeback
+        static let moved = NotificationRoute.ID.moved
+        static let arrival = NotificationRoute.ID.arrival
+        static let snooze = NotificationRoute.ID.snooze
         /// Not session-scoped, so deliberately not in `all`: ending a morning
         /// must not cancel tonight's heads-up.
-        static let windDown = "gymlock.session.windDown"
+        static let windDown = NotificationRoute.ID.windDown
 
-        static let all = [departure, deadline, comeback, moved, arrival, snooze]
+        static let all = NotificationRoute.ID.sessionScoped
     }
 
     @discardableResult

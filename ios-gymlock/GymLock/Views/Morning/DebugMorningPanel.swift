@@ -16,6 +16,8 @@ struct DebugMorningPanel: View {
     /// exactly the ones where something changed while it was closed.
     @State private var handoffSummary = "none"
     @State private var resolvedSummary = "none"
+    @State private var tapRouteSummary = "none"
+    @State private var tapResultSummary = "none"
 
     var body: some View {
         NavigationStack {
@@ -66,6 +68,8 @@ struct DebugMorningPanel: View {
             row("next alarm", nextAlarmLabel)
             row("handoff pending", handoffSummary)
             row("resolved today", resolvedSummary)
+            row("last tap route", tapRouteSummary)
+            row("tap result", tapResultSummary)
             row("shield backend", coordinator.shieldCapability.headline)
             row("shield permission", coordinator.shield.authorization.rawValue)
             row("shield active", coordinator.shield.isShielded ? "yes" : "no")
@@ -104,6 +108,9 @@ struct DebugMorningPanel: View {
 
         let keys = coordinator.debugResolvedSlotKeys
         resolvedSummary = keys.isEmpty ? "none" : "\(keys.count) slot(s)"
+
+        tapRouteSummary = store.pendingNotificationRoute.map { String(describing: $0.route) } ?? "none"
+        tapResultSummary = GymSessionCoordinator.debugNotificationTapResult
     }
 
     private var ringerLabel: String {
@@ -192,6 +199,9 @@ struct DebugMorningPanel: View {
             .healthDenied, .noHealthWorkout, .driveBy,
             .foregroundAfterWindow, .foregroundAfterResolved,
             .windDownLockStart, .windDownLockEnd, .windDownWhileSessionLive,
+            // The three "must not start a session" taps are judged by the
+            // tap result reading, so the panel stays put.
+            .tapArrivalAfterGym, .tapDepartureMidSession, .tapWindDownAtNight,
             // Every sound step is judged by the readings above, not by a
             // screen change, so the panel stays put.
             .ringerStart, .ringerEscalated, .ringerStop, .ringerCeiling,

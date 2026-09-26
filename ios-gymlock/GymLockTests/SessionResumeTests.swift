@@ -152,12 +152,137 @@ struct SessionResumeTests {
         #expect(decide(at: time(6, 31), handoff: handoff)?.wantsSnooze == true)
     }
 
-    @Test func aResolvedDayDoesNotBlockADeliberateHandoff() {
-        // Tapping "I'm up" is an explicit act. If the user resolved the day and
-        // then deliberately started again, that is their call to make.
+    // MARK: - Handoff guards (docs/FLOW.md, item 12)
+
+    private func resolve(
+        at now: Date,
+        isSessionLive: Bool = false,
+        liveSlotID: UUID? = nil,
+        liveSessionDay: Date? = nil,
+        handoff: AlarmHandoff.Pending?,
+        resolvedKeys: Set<String> = [],
+        alarmSlotIDs: [UUID: UUID] = [:]
+    ) -> SessionResume.Resolution {
+        SessionResume.resolve(
+            now: now,
+            isSessionLive: isSessionLive,
+            liveSlotID: liveSlotID,
+            liveSessionDay: liveSessionDay,
+            handoff: handoff,
+            slots: [morningSlot],
+            windowMinutes: window,
+            resolvedKeys: resolvedKeys,
+            alarmSlotIDs: alarmSlotIDs,
+            calendar: calendar
+        )
+    }
+
+    @Test func aHandoffForASlotResolvedThatDayIsDiscarded() {
+        // Replaces the old "deliberate handoff beats a resolved day" rule:
+        // after a gym visit, no note for that slot may lock the apps again.
         let key = SessionResume.resolvedKey(slotID: slotID, day: monday, calendar: calendar)
         let handoff = AlarmHandoff.Pending(slotID: slotID, firedAt: time(6, 30), wantsSnooze: false)
-        #expect(decide(at: time(6, 50), handoff: handoff, resolvedKeys: [key]) != nil)
+        let result = resolve(at: time(6, 50), handoff: handoff, resolvedKeys: [key])
+
+        #expect(result.decision == nil)
+        #expect(result.clearsHandoff)
+    }
+
+    @Test func aResolvedDayIsJudgedByWhenTheHandoffFired() {
+        // Fired 23:50 Monday, read 00:05 Tuesday: Monday's key still applies.
+        let key = SessionResume.resolvedKey(slotID: slotID, day: monday, calendar: calendar)
+        let handoff = AlarmHandoff.Pending(slotID: slotID, firedAt: time(23, 50), wantsSnooze: false)
+        let result = resolve(at: time(0, 5, dayOffset: 1), handoff: handoff, resolvedKeys: [key])
+
+        #expect(result.decision == nil)
+        #expect(result.clearsHandoff)
+    }
+
+    @Test func yesterdaysResolvedKeyDoesNotBlockTodaysAlarm() {
+        let mondayKey = SessionResume.resolvedKey(slotID: slotID, day: monday, calendar: calendar)
+        let handoff = AlarmHandoff.Pending(
+            slotID: slotID,
+            firedAt: time(6, 30, dayOffset: 2),
+            wantsSnooze: false
+        )
+        let result = resolve(at: time(6, 31, dayOffset: 2), handoff: handoff, resolvedKeys: [mondayKey])
+
+        #expect(result.decision?.source == .handoff)
+    }
+
+    @Test func aOneOffAlarmIsCheckedAgainstItsSlotsResolvedKey() {
+        // "Change next alarm only" rings under its own id, but the day is
+        // settled under the slot's id.
+        let oneOffID = UUID()
+        let key = SessionResume.resolvedKey(slotID: slotID, day: monday, calendar: calendar)
+        let handoff = AlarmHandoff.Pending(slotID: oneOffID, firedAt: time(6, 30), wantsSnooze: false)
+        let result = resolve(
+            at: time(6, 50),
+            handoff: handoff,
+            resolvedKeys: [key],
+            alarmSlotIDs: [oneOffID: slotID]
+        )
+
+        #expect(result.decision == nil)
+        #expect(result.clearsHandoff)
+    }
+
+    @Test func aLiveSessionDiscardsASameSlotHandoff() {
+        let handoff = AlarmHandoff.Pending(slotID: slotID, firedAt: time(6, 40), wantsSnooze: false)
+        let result = resolve(
+            at: time(6, 41),
+            isSessionLive: true,
+            liveSlotID: slotID,
+            liveSessionDay: monday,
+            handoff: handoff
+        )
+
+        #expect(result.decision == nil)
+        #expect(result.clearsHandoff)
+    }
+
+    @Test func aLiveSessionDiscardsANoSlotHandoff() {
+        let handoff = AlarmHandoff.Pending(slotID: nil, firedAt: time(6, 40), wantsSnooze: false)
+        let result = resolve(
+            at: time(6, 41),
+            isSessionLive: true,
+            liveSlotID: slotID,
+            liveSessionDay: monday,
+            handoff: handoff
+        )
+
+        #expect(result.decision == nil)
+        #expect(result.clearsHandoff)
+    }
+
+    @Test func aLiveSessionKeepsADifferentSlotHandoffWaiting() {
+        let handoff = AlarmHandoff.Pending(slotID: UUID(), firedAt: time(6, 40), wantsSnooze: false)
+        let result = resolve(
+            at: time(6, 41),
+            isSessionLive: true,
+            liveSlotID: slotID,
+            liveSessionDay: monday,
+            handoff: handoff
+        )
+
+        #expect(result.decision == nil)
+        #expect(!result.clearsHandoff)
+    }
+
+    @Test func aNormalAlarmHandoffStillStartsTheSession() {
+        let handoff = AlarmHandoff.Pending(slotID: slotID, firedAt: time(6, 30), wantsSnooze: false)
+        let result = resolve(at: time(6, 31), handoff: handoff)
+
+        #expect(result.decision?.source == .handoff)
+        #expect(result.decision?.slotID == slotID)
+        #expect(result.decision?.startAt == time(6, 30))
+        #expect(result.clearsHandoff)
+    }
+
+    @Test func theClockPathNeverClearsAHandoff() {
+        let result = resolve(at: time(6, 50), handoff: nil)
+        #expect(result.decision?.source == .clock)
+        #expect(!result.clearsHandoff)
     }
 
     // MARK: - Two slots in one day

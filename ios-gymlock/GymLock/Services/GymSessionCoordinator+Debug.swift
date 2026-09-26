@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import UserNotifications
 
 /// Jumps the morning to any state without waiting for a real 6:30 AM, a real
 /// gym, or a real Apple Watch.
@@ -65,6 +66,12 @@ extension GymSessionCoordinator {
         case windDownHandoverToGym
         case windDownWhileSessionLive
 
+        // Notification taps: only alarms may start a session (FLOW item 12).
+        case tapArrivalAfterGym
+        case tapDepartureMidSession
+        case tapWindDownAtNight
+        case tapAlarmNotification
+
         // Sound: the ringer and the fallback chain.
         case ringerStart
         case ringerEscalated
@@ -101,6 +108,9 @@ extension GymSessionCoordinator {
             case .windDownLockStart, .windDownLockEnd,
                  .windDownHandoverToGym, .windDownWhileSessionLive:
                 "locks"
+            case .tapArrivalAfterGym, .tapDepartureMidSession,
+                 .tapWindDownAtNight, .tapAlarmNotification:
+                "notification taps"
             case .ringerStart, .ringerEscalated, .ringerStop,
                  .ringerCeiling, .customSongMissing, .customSongProtected:
                 "sound"
@@ -150,6 +160,10 @@ extension GymSessionCoordinator {
             case .windDownLockEnd: "wind-down: window ends"
             case .windDownHandoverToGym: "wind-down: handover to gym"
             case .windDownWhileSessionLive: "wind-down while session live"
+            case .tapArrivalAfterGym: "tap arrival notification after the gym"
+            case .tapDepartureMidSession: "tap departure notification mid-session, then finish the session"
+            case .tapWindDownAtNight: "tap wind-down notification at night"
+            case .tapAlarmNotification: "tap alarm notification"
             case .ringerStart: "ringer: start"
             case .ringerEscalated: "ringer: jump to full volume"
             case .ringerStop: "ringer: stop"
@@ -160,7 +174,7 @@ extension GymSessionCoordinator {
         }
 
         static var sections: [String] {
-            ["doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
+            ["notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
         }
     }
 
@@ -438,6 +452,55 @@ extension GymSessionCoordinator {
                     : "owner changed while session live: \(ownerBefore?.rawValue ?? "none") to \(shield.owner?.rawValue ?? "none")"
             )
 
+        // MARK: Notification taps
+        //
+        // Each tap goes through the delegate's real routing, then the same
+        // resume check a foreground runs. The result line in the panel says
+        // whether a handoff was written and what the session is doing.
+
+        case .tapArrivalAfterGym:
+            // At the gym, apps unlocked. Tap "you're here" while the arrival
+            // is still on screen, then again after the morning is closed.
+            simulate(.gymDwellConfirmed)
+            let wroteWhileLive = debugTap(NotificationRoute.ID.arrival)
+            resumeSessionIfDue()
+            endSession()
+            let wroteAfter = debugTap(NotificationRoute.ID.arrival)
+            resumeSessionIfDue()
+            debugReportTap("arrival", wroteHandoff: wroteWhileLive || wroteAfter)
+
+        case .tapDepartureMidSession:
+            simulate(.departed)
+            let wrote = debugTap(NotificationRoute.ID.departure)
+            resumeSessionIfDue()
+            // Finish the morning: arrive and close it. The old bug started a
+            // second session right here.
+            confirmArrival()
+            endSession()
+            resumeSessionIfDue()
+            debugReportTap("departure", wroteHandoff: wrote)
+
+        case .tapWindDownAtNight:
+            endSession()
+            AlarmHandoff.clear()
+            let wrote = debugTap(NotificationRoute.ID.windDown)
+            resumeSessionIfDue()
+            debugReportTap("wind-down", wroteHandoff: wrote)
+
+        case .tapAlarmNotification:
+            endSession()
+            debugStore?.debugSeedGym()
+            debugClearResolvedSlots()
+            AlarmHandoff.clear()
+            let slotID = debugStore?.plan.enabledSlots.first?.id ?? UUID()
+            let weekday = Calendar.current.component(.weekday, from: Date())
+            let wrote = debugTap(
+                "\(GymAlarmRequest.identifierPrefix)\(slotID.uuidString).\(weekday)",
+                category: NotificationAlarmScheduler.categoryIdentifier
+            )
+            resumeSessionIfDue()
+            debugReportTap("alarm", wroteHandoff: wrote)
+
         // MARK: Sound
 
         case .ringerStart:
@@ -497,6 +560,30 @@ extension GymSessionCoordinator {
                 detail: "protected track: rang \(ringer.playingSound?.label ?? "nothing")"
             )
         }
+    }
+
+    // MARK: - Notification tap helpers
+
+    /// The last notification-tap result, shown in the panel.
+    static var debugNotificationTapResult = "none"
+
+    /// Taps the body of a notification through the delegate's real routing.
+    /// Returns whether a handoff was written.
+    private func debugTap(_ identifier: String, category: String = "") -> Bool {
+        AlarmHandoff.clear()
+        AlarmNotificationDelegate.handle(
+            identifier: identifier,
+            categoryIdentifier: category,
+            actionIdentifier: UNNotificationDefaultActionIdentifier
+        )
+        return AlarmHandoff.peek() != nil
+    }
+
+    private func debugReportTap(_ name: String, wroteHandoff: Bool) {
+        let state = session?.state.rawValue ?? "none"
+        let locked = shield.isShielded ? "locked" : "unlocked"
+        Self.debugNotificationTapResult =
+            "\(name): handoff \(wroteHandoff ? "written" : "none") · session \(state) · apps \(locked)"
     }
 
     // MARK: - Lock helpers
