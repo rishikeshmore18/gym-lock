@@ -34,8 +34,8 @@ struct MorningSetupFlowView: View {
             case .rhythm:
                 SleepWakeRhythmView(
                     onUse: { rhythm in
-                        store.plan.rhythm = rhythm
-                        store.applyRhythmToNightLock()
+                        // The first bedtime, set during setup, applies at once.
+                        store.commitRhythm(rhythm, immediately: true)
                         advance(from: .rhythm)
                     },
                     onSkip: { advance(from: .rhythm) }

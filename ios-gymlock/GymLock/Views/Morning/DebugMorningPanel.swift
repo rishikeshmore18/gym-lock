@@ -19,6 +19,7 @@ struct DebugMorningPanel: View {
     @State private var tapRouteSummary = "none"
     @State private var tapResultSummary = "none"
     @State private var weekRulesSummary = "none"
+    @State private var sleepSummary = "none"
 
     var body: some View {
         NavigationStack {
@@ -69,6 +70,10 @@ struct DebugMorningPanel: View {
             row("next alarm", nextAlarmLabel)
             row("handoff pending", handoffSummary)
             row("resolved today", resolvedSummary)
+            row("sleep", "\(store.plan.rhythm.bedtime.clockString) to \(store.plan.rhythm.wakeTime.clockString)")
+            row("pending bedtime", store.plan.pendingBedtime?.bedtime.clockString ?? "none")
+            row("ask wake time", store.plan.needsWakeTimeAnswer ? "yes" : "no")
+            row("sleep result", sleepSummary)
             row("gym days", "\(store.plan.gymDays.count)")
             row("this week's goal", "\(store.streak.weeklyGoal)")
             row("3-day rule from", store.streakVault.threeDayRuleStart?.formatted(date: .abbreviated, time: .omitted) ?? "not set")
@@ -117,6 +122,7 @@ struct DebugMorningPanel: View {
         tapRouteSummary = store.pendingNotificationRoute.map { String(describing: $0.route) } ?? "none"
         tapResultSummary = GymSessionCoordinator.debugNotificationTapResult
         weekRulesSummary = GymSessionCoordinator.debugWeekRulesResult
+        sleepSummary = GymSessionCoordinator.debugSleepResult
     }
 
     private var ringerLabel: String {
@@ -211,6 +217,9 @@ struct DebugMorningPanel: View {
             // Week rules are judged by the result reading.
             .legacyUserTwoGymDays, .changePlanMidWeek,
             .sundayLateAlarmVisitAfterMidnight, .tryRemoveGymDayAtThree,
+            // Sleep rules are judged by the sleep result reading.
+            .legacyEveningUser, .changeBedtimeTonight,
+            .bedtimeAfterMidnightGymMonday, .oldPlanNightLockOff,
             // Every sound step is judged by the readings above, not by a
             // screen change, so the panel stays put.
             .ringerStart, .ringerEscalated, .ringerStop, .ringerCeiling,

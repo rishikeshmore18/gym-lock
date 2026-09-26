@@ -52,7 +52,7 @@ struct SleepWakeRhythmView: View {
             MorningPrimaryButton(
                 title: "use this rhythm",
                 systemImage: "checkmark",
-                isEnabled: rhythm.isWithinGuardrails
+                isEnabled: rhythm.isWithinGuardrails && rhythm.meetsSleepMinimum
             ) {
                 commit()
             }
@@ -60,7 +60,7 @@ struct SleepWakeRhythmView: View {
         .task {
             guard !hasLoaded else { return }
             hasLoaded = true
-            rhythm = store.plan.rhythm
+            rhythm = store.plan.scheduledRhythm
         }
         .sheet(item: $editing) { field in
             TimePickerSheet(
@@ -281,7 +281,12 @@ struct SleepWakeRhythmView: View {
     /// GymLock works, not claims about sleep science.
     @ViewBuilder
     private var guardrailNotice: some View {
-        if rhythm.exceedsAbsoluteMaximum {
+        if !rhythm.meetsSleepMinimum {
+            notice(
+                title: MorningRhythm.sleepMinimumMessage,
+                detail: "move bedtime or wake up so there are 5 hours between them."
+            )
+        } else if rhythm.exceedsAbsoluteMaximum {
             notice(
                 title: "GymLock works best when your alarm leads directly into your gym trip.",
                 detail: "Choose a window within 2 hours."
@@ -326,6 +331,7 @@ struct SleepWakeRhythmView: View {
         )
         .transition(.opacity.combined(with: .move(edge: .top)))
         .animation(Theme.settle, value: rhythm.windowMinutes)
+        .animation(Theme.settle, value: rhythm.meetsSleepMinimum)
     }
 
     // MARK: - Actions

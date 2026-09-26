@@ -17,6 +17,7 @@ struct RootTabView: View {
     @State private var intro = StreakIntroController()
     @State private var isRunningSetup = false
     @State private var isAskingToAddGymDay = false
+    @State private var isAskingForWakeTime = false
 
     var body: some View {
         ZStack {
@@ -54,6 +55,7 @@ struct RootTabView: View {
                 // A week may have ended while the app was away; rule on it
                 // before the streak is read anywhere on this screen.
                 store.refreshStreak()
+                askForWakeTimeIfNeeded()
                 askToAddGymDayIfNeeded()
                 intro.sceneBecameActive(
                     streak: store.streak.weeks,
@@ -74,6 +76,11 @@ struct RootTabView: View {
                 },
                 onDismiss: { isAskingToAddGymDay = false }
             )
+        }
+        .sheet(isPresented: $isAskingForWakeTime) {
+            WakeTimeSheet(onAnswered: {
+                coordinator.reconcileWindDown()
+            })
         }
         .fullScreenCover(isPresented: $isRunningSetup) {
             MorningSetupFlowView {
@@ -96,6 +103,7 @@ struct RootTabView: View {
             // home is the screen the user lands on.
             store.seedPlanIfNeeded()
             guard !store.plan.hasBeenReviewed else {
+                askForWakeTimeIfNeeded()
                 askToAddGymDayIfNeeded()
                 return
             }
@@ -107,8 +115,20 @@ struct RootTabView: View {
     /// Existing users with 1 or 2 gym days are asked on every open until
     /// they have 3. Never on top of the setup flow or a live morning.
     private func askToAddGymDayIfNeeded() {
-        guard store.shouldAskToAddGymDay, !isRunningSetup, !coordinator.isSessionLive else { return }
+        guard store.shouldAskToAddGymDay, !isRunningSetup, !coordinator.isSessionLive,
+              !isAskingForWakeTime
+        else { return }
         isAskingToAddGymDay = true
+    }
+
+    /// Existing users whose wake time was really their gym alarm are asked
+    /// "when do you wake up?" on every open until they answer. Asked before
+    /// the add-a-day sheet, so only one sheet is ever up.
+    private func askForWakeTimeIfNeeded() {
+        guard store.shouldAskForWakeTime, !isRunningSetup, !coordinator.isSessionLive,
+              !isAskingToAddGymDay
+        else { return }
+        isAskingForWakeTime = true
     }
 
     /// One destination, permanently mounted and hidden when it is not current.

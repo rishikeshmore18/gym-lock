@@ -246,27 +246,22 @@ final class GymSessionCoordinator {
     /// standing inside it should see the lock go on without a relaunch.
     func reconcileWindDown(now: Date = Date()) {
         guard let store else { return }
+        // A bedtime changed yesterday takes over once last night is done.
+        store.applyDuePendingBedtime(now: now)
         windDown.reconcile(now: now, plan: store.plan, shield: shield)
-        syncWindDownNotification(plan: store.plan)
+        syncWindDownNotification(plan: store.plan, now: now)
     }
 
     /// One heads-up at the window's start, cancelled the moment the lock is
     /// off. It exists because the lock engages on the next run of the app, and
     /// the notification is what gives the evening a next run.
-    private func syncWindDownNotification(plan: MorningPlan) {
+    private func syncWindDownNotification(plan: MorningPlan, now: Date) {
         let notifier = self.notifier
-        guard plan.nightLock.isEnabled else {
-            Task { await notifier.cancelWindDownStart() }
-            return
-        }
 
         // Only a night the sleep schedule is in force on, keyed by the day
-        // the window starts. `nextDate(on:)` reads an empty set as "any
-        // day", so no nights at all is handled here as no notification.
-        let nights = plan.effectiveSleepDays()
-        let start = nights.isEmpty
-            ? nil
-            : plan.nightLock.start(in: plan.rhythm).nextDate(after: Date(), on: nights)
+        // the night starts. Tonight keeps its bedtime even when a new one is
+        // pending, so the heads-up fires when tonight's lock really starts.
+        let start = plan.nextNightLockStart(after: now, calendar: .current)
         Task {
             if let start {
                 await notifier.scheduleWindDownStart(at: start)

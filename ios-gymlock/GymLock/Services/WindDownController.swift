@@ -41,27 +41,27 @@ final class WindDownController {
     /// takes the shield without an intervening release, so a handover can
     /// happen mid-window, and the wind-down controller then sees the owner is
     /// no longer `.windDown` and stops claiming it.
-    func reconcile(now: Date = Date(), plan: MorningPlan, shield: any AppShielding) {
-        let lock = plan.nightLock
-        // Only on nights the sleep schedule is in force, required ones
-        // included. The day checked is the one the window started on.
-        let nights = plan.effectiveSleepDays()
-        let shouldHold = lock.isActive(at: now, rhythm: plan.rhythm, nights: nights)
-        isActive = shouldHold
+    ///
+    /// Always on: the lock runs from bedtime to wake time on the sleep
+    /// schedule's nights, required ones included, with no switch (FLOW, "The
+    /// Night Lock"). A pending bedtime never moves tonight's window.
+    func reconcile(
+        now: Date = Date(),
+        plan: MorningPlan,
+        shield: any AppShielding,
+        calendar: Calendar = .current
+    ) {
+        let window = plan.nightLockWindow(at: now, calendar: calendar)
+        isActive = window != nil
 
         // A shield belonging to the morning is the morning's business.
         guard shield.owner == .windDown || shield.owner == nil else { return }
+        // Only the apps the user chose are ever blocked, so with none chosen
+        // there is nothing to lock. Calls, messages, maps and alarms are never
+        // in that selection.
         guard shield.hasSelection else { return }
 
-        if shouldHold {
-            guard let window = WindDownLock.window(
-                start: lock.start(in: plan.rhythm),
-                end: lock.end(in: plan.rhythm),
-                at: now,
-                calendar: .current,
-                nights: nights
-            ) else { return }
-
+        if let window {
             // The deadline is the window's own end, so the failsafe lifts the
             // lock by the clock even if no foreground ever runs again.
             shield.apply(until: window.end, sessionID: nil, owner: .windDown)

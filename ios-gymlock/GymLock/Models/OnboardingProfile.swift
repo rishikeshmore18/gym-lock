@@ -268,6 +268,12 @@ struct OnboardingProfile: Codable, Hashable {
     var comebackModeEnabled: Bool
     /// Set once the user activates the system on the final screen.
     var hasActivated: Bool
+    /// When they wake up, asked in onboarding. Nil on profiles saved before
+    /// the question existed.
+    var wakeTime: TimeOfDay? = nil
+
+    /// Where the wake-time wheel starts, and what a missing answer means.
+    static let defaultWakeTime = TimeOfDay(hour: 7, minute: 0)
 
     static let `default` = OnboardingProfile(
         day0Media: nil,
@@ -356,9 +362,9 @@ struct OnboardingProfile: Codable, Hashable {
         failureTime.offset(byMinutes: -15)
     }
 
-    /// Whether the user asked for a night lock.
-    var wantsNightLock: Bool {
-        nightScrollingFrequency?.wantsBedtime ?? false
+    /// The wake time they gave, or 07:00 if they were never asked.
+    var answeredWakeTime: TimeOfDay {
+        wakeTime ?? Self.defaultWakeTime
     }
 
     /// What to call the chosen alarm track anywhere it is summarised.

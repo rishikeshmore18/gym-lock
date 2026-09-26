@@ -104,47 +104,35 @@ struct WindDownWindowTests {
 
     // MARK: - Following the rhythm
 
-    @Test func aFollowingWindowTracksABedtimeChange() {
+    private func isLocked(_ rhythm: MorningRhythm, at now: Date) -> Bool {
+        SleepRules.lockWindow(
+            at: now, rhythm: rhythm, pending: nil,
+            nights: Set(Weekday.allCases), calendar: calendar
+        ) != nil
+    }
+
+    @Test func theLockAlwaysRunsFromBedtimeToWakeTime() {
         var rhythm = MorningRhythm.default
         rhythm.bedtime = TimeOfDay(hour: 22, minute: 0)
         rhythm.wakeTime = TimeOfDay(hour: 6, minute: 0)
 
-        var lock = NightLockWindow.default
-        lock.isEnabled = true
-        lock.followsRhythm = true
+        #expect(isLocked(rhythm, at: date(22, 30)))
+        #expect(isLocked(rhythm, at: date(2, 0)))
+        #expect(!isLocked(rhythm, at: date(6, 0)))
 
-        let halfPastTen = date(22, 30)
-        #expect(lock.isActive(at: halfPastTen, calendar: calendar, rhythm: rhythm))
-
-        // Pushing bedtime later moves the window with it: 22:30 is now free.
+        // Bedtime itself moves the window: 22:30 is free at a 23:30 bedtime.
         rhythm.bedtime = TimeOfDay(hour: 23, minute: 30)
-        #expect(!lock.isActive(at: halfPastTen, calendar: calendar, rhythm: rhythm))
+        #expect(!isLocked(rhythm, at: date(22, 30)))
     }
 
-    @Test func aCustomWindowIgnoresTheRhythm() {
+    /// Night workers: the lock follows their own hours, whatever they are.
+    @Test func aDaytimeSleepScheduleLocksDuringTheDay() {
         var rhythm = MorningRhythm.default
-        rhythm.bedtime = TimeOfDay(hour: 20, minute: 0)
-        rhythm.wakeTime = TimeOfDay(hour: 6, minute: 0)
+        rhythm.bedtime = TimeOfDay(hour: 9, minute: 0)
+        rhythm.wakeTime = TimeOfDay(hour: 16, minute: 0)
 
-        var lock = NightLockWindow.default
-        lock.isEnabled = true
-        lock.followsRhythm = false
-        lock.customStart = TimeOfDay(hour: 23, minute: 0)
-        lock.customEnd = TimeOfDay(hour: 6, minute: 30)
-
-        // The rhythm says 20:00, but the hand-tuned window says 23:00.
-        #expect(!lock.isActive(at: date(20, 30), calendar: calendar, rhythm: rhythm))
-        #expect(lock.isActive(at: date(23, 30), calendar: calendar, rhythm: rhythm))
-    }
-
-    @Test func aDisabledLockIsNeverActive() {
-        var lock = NightLockWindow.default
-        lock.isEnabled = false
-        lock.followsRhythm = false
-        lock.customStart = TimeOfDay(hour: 1, minute: 0)
-        lock.customEnd = TimeOfDay(hour: 5, minute: 0)
-
-        #expect(!lock.isActive(at: date(3, 0), calendar: calendar, rhythm: .default))
+        #expect(isLocked(rhythm, at: date(12, 0)))
+        #expect(!isLocked(rhythm, at: date(23, 0)))
     }
 
     // MARK: - The handover
@@ -157,12 +145,11 @@ struct WindDownWindowTests {
         return DemoShieldService(defaults: UserDefaults(suiteName: suite)!)
     }
 
+    /// Sleep 01:00 → 06:00, every night.
     private func planWithCustomWindow() -> MorningPlan {
         var plan = MorningPlan.default
-        plan.nightLock.isEnabled = true
-        plan.nightLock.followsRhythm = false
-        plan.nightLock.customStart = TimeOfDay(hour: 1, minute: 0)
-        plan.nightLock.customEnd = TimeOfDay(hour: 5, minute: 0)
+        plan.rhythm.bedtime = TimeOfDay(hour: 1, minute: 0)
+        plan.rhythm.wakeTime = TimeOfDay(hour: 5, minute: 0)
         return plan
     }
 
@@ -177,7 +164,7 @@ struct WindDownWindowTests {
         let controller = WindDownController()
         let insideWindow = date(3, 0)
 
-        controller.reconcile(now: insideWindow, plan: plan, shield: shield)
+        controller.reconcile(now: insideWindow, plan: plan, shield: shield, calendar: calendar)
 
         #expect(shield.owner == .windDown)
         #expect(shield.isShielded)
@@ -191,7 +178,7 @@ struct WindDownWindowTests {
 
         // The night controller sees an owner that is no longer .windDown and
         // stops claiming, even though the window is still open.
-        controller.reconcile(now: insideWindow.addingTimeInterval(600), plan: plan, shield: shield)
+        controller.reconcile(now: insideWindow.addingTimeInterval(600), plan: plan, shield: shield, calendar: calendar)
 
         #expect(shield.owner == .gymSession)
         #expect(shield.isShielded)
@@ -205,10 +192,10 @@ struct WindDownWindowTests {
         let plan = planWithCustomWindow()
         let controller = WindDownController()
 
-        controller.reconcile(now: date(3, 0), plan: plan, shield: shield)
+        controller.reconcile(now: date(3, 0), plan: plan, shield: shield, calendar: calendar)
         #expect(shield.isShielded)
 
-        controller.reconcile(now: date(5, 30), plan: plan, shield: shield)
+        controller.reconcile(now: date(5, 30), plan: plan, shield: shield, calendar: calendar)
 
         #expect(!shield.isShielded)
         #expect(shield.owner == nil)

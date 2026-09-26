@@ -189,6 +189,18 @@ final class AppStore {
         lastDepartureMessageIndex = defaults.object(forKey: Key.departureMessage) as? Int
 
         refreshStreak()
+        migrateLegacyWakeTimeIfNeeded()
+    }
+
+    /// One-time repair for plans whose wake time was really their gym alarm.
+    /// Alarm times are left alone. Written explicitly, because a property set
+    /// inside `init` does not run its `didSet`.
+    func migrateLegacyWakeTimeIfNeeded() {
+        var migrated = plan
+        SleepRules.migrateLegacyWakeTime(&migrated, failureWindow: profile.failureWindow)
+        guard migrated != plan else { return }
+        plan = migrated
+        persist(plan, forKey: Key.plan)
     }
 
     // MARK: - Streak
@@ -290,13 +302,38 @@ final class AppStore {
         plan.recentMissions = recent
     }
 
-    /// Folds a changed rhythm back into the night lock, but only when the user
-    /// has not customised it themselves.
-    func applyRhythmToNightLock() {
-        guard plan.nightLock.followsRhythm else { return }
-        plan.nightLock.customStart = plan.rhythm.bedtime
-        plan.nightLock.customEnd = plan.rhythm.wakeTime
-        schedule.bedtime = plan.rhythm.bedtime
+    // MARK: - Sleep schedule
+
+    /// Saves a new sleep schedule. A new bedtime starts from tomorrow night;
+    /// `immediately` is only for the first bedtime, set during setup.
+    func commitRhythm(_ updated: MorningRhythm, now: Date = Date(), immediately: Bool = false) {
+        var next = plan
+        next.applyRhythmChange(updated, now: now, calendar: .current, immediately: immediately)
+        plan = next
+        schedule.bedtime = plan.scheduledRhythm.bedtime
+    }
+
+    /// Folds in a pending bedtime once last night is over.
+    func applyDuePendingBedtime(now: Date = Date()) {
+        var next = plan
+        guard next.applyDuePendingBedtime(now: now) else { return }
+        plan = next
+    }
+
+    /// Whether to ask an existing user "when do you wake up?".
+    var shouldAskForWakeTime: Bool {
+        stage == .home && plan.needsWakeTimeAnswer
+    }
+
+    /// Stores their answer. Wake time applies at once; alarm times are not
+    /// touched here.
+    func answerWakeTime(_ wake: TimeOfDay) {
+        var next = plan
+        next.rhythm.wakeTime = wake
+        next.rhythm.hasBeenSet = true
+        next.needsWakeTimeAnswer = false
+        plan = next
+        profile.wakeTime = wake
     }
 
     /// Trimmed display name, falling back to a neutral greeting target.
@@ -343,9 +380,7 @@ final class AppStore {
     /// first N weekdays and is still fully editable later.
     func applyProfileToSchedule() {
         schedule.gymTime = profile.failureTime
-        if profile.wantsNightLock {
-            schedule.bedtime = profile.bedtime
-        }
+        schedule.bedtime = profile.bedtime
         schedule.trainingDays = Self.spreadTrainingDays(count: profile.targetWorkoutsPerWeek)
     }
 

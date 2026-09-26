@@ -106,7 +106,7 @@ So the design is **strict in the moment** (apps lock), **forgiving across the we
 This is already built, except:
 
 - **Built (`2026-09-26`):** today the gym days card can go down to 0 days. Minimum 3, with a note: "3 gym days is the minimum."
-- **Change:** today nothing is protected when bedtime is after midnight (e.g. 00:30). The night that ends on a gym morning must always stay on.
+- **Built (`2026-09-26`):** today nothing is protected when bedtime is after midnight (e.g. 00:30). The night that ends on a gym morning must always stay on.
 
 ### Gym and sleep never overlap (on the dial)
 
@@ -122,7 +122,7 @@ This is already built, except:
  drag the night INTO the gym ──► it stops at the gym (as today)
 ```
 
-**Change:** today the gym bar stops 30 min before bedtime. It never pushes the night.
+**Built (`2026-09-26`):** today the gym bar stops 30 min before bedtime. It never pushes the night.
 
 ### Goes to the gym in sleep hours anyway
 
@@ -526,9 +526,9 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 **Sleep and the night lock**
 
 1. The night lock is always on for the sleep schedule's nights. Remove the on/off switch and the custom window. Ask everyone for a bedtime and wake time. Add the background Screen Time extension. A new bedtime starts tomorrow night. Sleep must be at least 5 hours.
-2. Gym and sleep never overlap on the dial. Dragging the gym into the night slides the night later, keeping its length, with travel time (≥30 min) in between, plus a short note.
+2. Gym and sleep never overlap on the dial. Dragging the gym into the night slides the night later, keeping its length, with travel time (≥30 min) in between, plus a short note. **(Built: `2026-09-26`)**
 3. A gym visit during sleep hours: the night lock stays on, the visit counts, and a "cost you sleep" notification is sent.
-4. Day card: 3 gym days minimum. The night that ends on a gym morning is protected even when bedtime is after midnight.
+4. Day card: 3 gym days minimum. The night that ends on a gym morning is protected even when bedtime is after midnight. **(Built: `2026-09-26`)**
 
 **Alarms**
 

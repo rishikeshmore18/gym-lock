@@ -60,6 +60,11 @@ struct TimeOfDay: Codable, Hashable {
     var displayString: String {
         asDateToday.formatted(date: .omitted, time: .shortened)
     }
+
+    /// Fixed 24-hour "00:30", as FLOW writes times in quoted copy.
+    var clockString: String {
+        String(format: "%02d:%02d", hour, minute)
+    }
 }
 
 /// The user's two locks: when they train and when they sleep.

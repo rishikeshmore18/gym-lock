@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// System screen 9 — the night half of the loop.
+/// System screen 9, the night half of the loop.
 ///
-/// The bedtime question only appears once the user has admitted the scroll
-/// follows them to bed. Asking everyone for a bedtime would be a form; asking
-/// only the people who just said yes makes the follow-up feel like listening.
+/// The scrolling question stays, but everyone is asked for a bedtime and a
+/// wake time: the night lock runs for everyone (FLOW, "The Night Lock").
 struct NightLoopPage: View {
     let isActive: Bool
     let onContinue: () -> Void
@@ -14,12 +13,22 @@ struct NightLoopPage: View {
     @State private var contentShown = false
 
     private var answer: NightScrollingFrequency? { store.profile.nightScrollingFrequency }
-    private var wantsBedtime: Bool { answer?.wantsBedtime ?? false }
+
+    private var meetsSleepMinimum: Bool {
+        MorningRhythm.meetsSleepMinimum(
+            bedtime: store.profile.bedtime,
+            wake: store.profile.answeredWakeTime
+        )
+    }
+
+    private var caption: String? {
+        if answer == nil { return "pick whichever is closest." }
+        if !meetsSleepMinimum { return MorningRhythm.sleepMinimumMessage }
+        return nil
+    }
 
     var body: some View {
-        @Bindable var store = store
-
-        SystemScene(topAnchor: 0.09, contentSpacing: 18) {
+        SystemScene(topAnchor: 0.06, contentSpacing: 14) {
             SceneHeading(
                 title: "does the scroll follow you to bed too?",
                 highlighted: ["to bed too?"],
@@ -27,7 +36,7 @@ struct NightLoopPage: View {
             )
             .staggered(0, isShown: contentShown)
         } content: {
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(NightScrollingFrequency.allCases.enumerated()), id: \.element.id) { index, option in
                     ChoiceRow(
                         label: option.label,
@@ -37,21 +46,13 @@ struct NightLoopPage: View {
                     .staggered(index + 1, isShown: contentShown)
                 }
 
-                if wantsBedtime {
-                    bedtimeSection
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity.combined(with: .move(edge: .top)),
-                                removal: .opacity
-                            )
-                        )
-                }
+                sleepTimes
+                    .staggered(4, isShown: contentShown)
             }
-            .animation(Theme.settle, value: wantsBedtime)
         } footer: {
             SceneContinueButton(
-                caption: answer == nil ? "pick whichever is closest." : nil,
-                isEnabled: answer != nil,
+                caption: caption,
+                isEnabled: answer != nil && meetsSleepMinimum,
                 action: onContinue
             )
             .staggered(5, isShown: contentShown)
@@ -59,33 +60,56 @@ struct NightLoopPage: View {
         .task(id: isActive) { await reveal(isActive: isActive, into: $contentShown) }
     }
 
+    // PLACEHOLDER UI: designed in Step 3
     @ViewBuilder
-    private var bedtimeSection: some View {
+    private var sleepTimes: some View {
         @Bindable var store = store
 
-        VStack(alignment: .leading, spacing: 8) {
-            Text("when do you want the phone to stop winning?")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.ink)
-                .padding(.top, 8)
+        VStack(alignment: .leading, spacing: 4) {
+            wheelRow(
+                icon: "moon.fill",
+                label: "bedtime",
+                time: $store.profile.bedtime,
+                accessibilityTitle: "Bedtime"
+            )
+            wheelRow(
+                icon: "sun.max.fill",
+                label: "wake up",
+                time: Binding(
+                    get: { store.profile.answeredWakeTime },
+                    set: { store.profile.wakeTime = $0 }
+                ),
+                accessibilityTitle: "Wake time"
+            )
+        }
+        .padding(.top, 4)
+    }
 
-            HStack(spacing: 14) {
-                Image(systemName: "moon.fill")
-                    .font(.system(size: 15, weight: .semibold))
+    private func wheelRow(
+        icon: String,
+        label: String,
+        time: Binding<TimeOfDay>,
+        accessibilityTitle: String
+    ) -> some View {
+        HStack(spacing: 12) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.accent)
-                    .frame(width: 36, height: 36)
-                    .background(Theme.accent.opacity(0.11), in: .circle)
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.inkSecondary)
+            }
+            .frame(width: 64)
 
-                TimeWheel(time: $store.profile.bedtime, accessibilityTitle: "Bedtime")
-                    .frame(height: 132)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Theme.surface, in: .rect(cornerRadius: Theme.controlRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: Theme.controlRadius)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            }
+            TimeWheel(time: time, accessibilityTitle: accessibilityTitle)
+                .frame(height: 92)
+        }
+        .padding(.horizontal, 12)
+        .background(Theme.surface, in: .rect(cornerRadius: Theme.controlRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.controlRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
         }
     }
 

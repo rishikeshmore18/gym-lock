@@ -56,9 +56,7 @@ struct BuildingSystemPage: View {
             Step(
                 id: 4,
                 label: "night lock",
-                value: profile.wantsNightLock
-                    ? profile.bedtime.displayString.lowercased()
-                    : "off"
+                value: profile.bedtime.displayString.lowercased()
             ),
             Step(
                 id: 5,

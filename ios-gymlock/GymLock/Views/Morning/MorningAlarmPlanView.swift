@@ -17,13 +17,10 @@ struct MorningAlarmPlanView: View {
     @State private var editingSlot: AlarmSlot?
     @State private var isPickingSound = false
     @State private var isEditingRhythm = false
-    @State private var nightLockPrompt: RhythmChangeProposer.Prompt?
-    /// The rhythm as it was when this screen opened, so a change can be
-    /// detected and the night lock question asked at the right moment.
-    @State private var rhythmOnOpen: MorningRhythm?
 
     private var plan: MorningPlan { store.plan }
-    private var rhythm: MorningRhythm { plan.rhythm }
+    /// The sleep schedule as set, including a bedtime that starts tomorrow night.
+    private var rhythm: MorningRhythm { plan.scheduledRhythm }
 
     /// The alarm that will actually ring next.
     private var next: (slot: AlarmSlot, fireDate: Date)? {
@@ -42,7 +39,7 @@ struct MorningAlarmPlanView: View {
                 alarmSoundRow
                 alarmModeRow
                 scheduleSection
-                if plan.nightLock.isEnabled { nightLockRow }
+                nightLockRow
                 MissionToggleCard()
             }
         } footer: {
@@ -53,7 +50,6 @@ struct MorningAlarmPlanView: View {
         }
         .task {
             store.seedPlanIfNeeded()
-            if rhythmOnOpen == nil { rhythmOnOpen = store.plan.rhythm }
         }
         .sheet(item: $editingSlot) { slot in
             AlarmSlotEditor(slot: slot) { updated in
@@ -68,12 +64,9 @@ struct MorningAlarmPlanView: View {
         .sheet(isPresented: $isEditingRhythm) {
             SleepWakeRhythmView { updated in
                 isEditingRhythm = false
-                proposeRhythmChange(updated)
+                commitRhythm(updated)
             }
             .environment(store)
-        }
-        .nightLockPromptAlert($nightLockPrompt, store: store) {
-            rhythmOnOpen = store.plan.rhythm
         }
     }
 
@@ -333,22 +326,13 @@ struct MorningAlarmPlanView: View {
                 Text("Night Lock")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.ink)
-                Text(plan.nightLock.summary(in: rhythm))
+                Text("\(rhythm.bedtime.displayString) → \(rhythm.wakeTime.displayString)")
                     .font(.system(size: 13, weight: .medium))
                     .monospacedDigit()
                     .foregroundStyle(Theme.inkSecondary)
             }
 
             Spacer(minLength: 8)
-
-            if !plan.nightLock.followsRhythm {
-                Text("custom")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Theme.inkTertiary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Theme.surfaceMuted, in: .capsule)
-            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -388,22 +372,16 @@ struct MorningAlarmPlanView: View {
               updated.alarmTime != store.plan.rhythm.wakeTime
         else { return }
 
-        var rhythm = store.plan.rhythm
+        var rhythm = store.plan.scheduledRhythm
         rhythm.setWakeTime(updated.alarmTime)
         rhythm.hasBeenSet = true
-        proposeRhythmChange(rhythm)
+        commitRhythm(rhythm)
     }
 
-    /// Applies a rhythm change, asking about the night lock only when the answer
-    /// is not obvious.
-    private func proposeRhythmChange(_ updated: MorningRhythm) {
-        let previous = rhythmOnOpen ?? store.plan.rhythm
-
-        if let prompt = RhythmChangeProposer.prompt(for: updated, since: previous, plan: store.plan) {
-            nightLockPrompt = prompt
-        } else {
-            RhythmChangeProposer.apply(updated, store: store)
-            rhythmOnOpen = updated
-        }
+    /// Saves a sleep schedule change. While the plan is still being set up
+    /// for the first time the bedtime applies at once; after that a new
+    /// bedtime starts tomorrow night.
+    private func commitRhythm(_ updated: MorningRhythm) {
+        store.commitRhythm(updated, immediately: !store.plan.hasBeenReviewed)
     }
 }

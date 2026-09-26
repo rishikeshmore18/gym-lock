@@ -160,7 +160,8 @@ struct DayDialTests {
         #expect(later == gap - DayDialModel.minimumLeadMinutes)
 
         let tail = awake - gap - session
-        let earlier = DayDialModel.clampedNightShift(-600, awakeSpan: awake, gapMinutes: gap, sessionMinutes: session)
+        // Asked for further than the limit (-840 here), so the clamp shows.
+        let earlier = DayDialModel.clampedNightShift(-900, awakeSpan: awake, gapMinutes: gap, sessionMinutes: session)
         #expect(earlier == DayDialModel.minimumGapMinutes - tail)
 
         // Whatever is asked for, the night never laps the visit.
@@ -492,11 +493,11 @@ struct DayDialTests {
     /// The two bars share one gutter, so the night can never be dragged over
     /// the gym window, and never shorter than the icons need.
     @Test func sleepIsClampedSoTheBarsNeverLap() {
-        #expect(DayDialModel.clampedSleep(20, windowMinutes: 45, sessionMinutes: 60) == DayDialModel.minimumSleepMinutes)
-        let longest = DayDialModel.maximumSleepMinutes(windowMinutes: 45, sessionMinutes: 60)
-        #expect(DayDialModel.clampedSleep(1400, windowMinutes: 45, sessionMinutes: 60) == longest)
+        #expect(DayDialModel.clampedSleep(20, gapMinutes: 45, sessionMinutes: 60) == DayDialModel.minimumSleepMinutes)
+        let longest = DayDialModel.maximumSleepMinutes(gapMinutes: 45, sessionMinutes: 60)
+        #expect(DayDialModel.clampedSleep(1400, gapMinutes: 45, sessionMinutes: 60) == longest)
         #expect(longest + 45 + 60 + DayDialModel.minimumGapMinutes == 1440)
-        #expect(DayDialModel.clampedSleep(450, windowMinutes: 45, sessionMinutes: 60) == 450)
+        #expect(DayDialModel.clampedSleep(450, gapMinutes: 45, sessionMinutes: 60) == 450)
     }
 
     // MARK: - Next alarm only

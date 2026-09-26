@@ -71,6 +71,12 @@ struct MorningRhythm: Hashable {
     /// directly into the trip; beyond two hours it is a calendar, not a lock.
     static let absoluteMaximumWindow = 120
 
+    /// The shortest sleep schedule anyone can set (FLOW, the night lock edge
+    /// cases). Every place sleep can be set checks this one number.
+    static let minimumSleepMinutes = 5 * 60
+    /// Shown wherever a sleep schedule under the minimum is refused.
+    static let sleepMinimumMessage = "the sleep schedule must be at least 5 hours."
+
     /// The smallest gap the app keeps between the alarm and the gym, so the
     /// two never land on top of each other. The dial enforces the same number
     /// while dragging.
@@ -153,6 +159,13 @@ struct MorningRhythm: Hashable {
     var exceedsAbsoluteMaximum: Bool { windowMinutes > Self.absoluteMaximumWindow }
     var exceedsNormalMaximum: Bool { windowMinutes > Self.normalMaximumWindow }
     var isBelowMinimum: Bool { windowMinutes < Self.minimumWindow }
+    /// Whether the night is at least 5 hours.
+    var meetsSleepMinimum: Bool { sleepMinutes >= Self.minimumSleepMinutes }
+
+    /// The same check for two loose times, for the onboarding wheels.
+    static func meetsSleepMinimum(bedtime: TimeOfDay, wake: TimeOfDay) -> Bool {
+        bedtime.minutes(until: wake) >= minimumSleepMinutes
+    }
 
     /// True when the window is usable as-is.
     var isWithinGuardrails: Bool { !exceedsAbsoluteMaximum && !isBelowMinimum }
@@ -213,36 +226,40 @@ struct NextAlarmOverride: Codable, Hashable, Identifiable {
     }
 }
 
-// MARK: - Night lock
+// MARK: - Night lock (legacy settings)
 
-/// The optional evening lock, kept deliberately separate from the rhythm so that
-/// a user who has tuned it by hand does not silently lose that when they change
-/// their bedtime.
+/// What older builds stored for the night lock: an on/off switch and a custom
+/// window.
+///
+/// Read so old plans still decode, then ignored. The night lock is always on
+/// and always runs from bedtime to wake time on the sleep schedule's nights
+/// (FLOW, "The Night Lock"). Nothing in the app reads these fields.
 struct NightLockWindow: Codable, Hashable {
     var isEnabled: Bool
-    /// When true the window simply mirrors bedtime → wake time.
     var followsRhythm: Bool
     var customStart: TimeOfDay
     var customEnd: TimeOfDay
 
     static let `default` = NightLockWindow(
-        isEnabled: false,
+        isEnabled: true,
         followsRhythm: true,
         customStart: TimeOfDay(hour: 23, minute: 0),
         customEnd: TimeOfDay(hour: 6, minute: 30)
     )
+}
 
-    func start(in rhythm: MorningRhythm) -> TimeOfDay {
-        followsRhythm ? rhythm.bedtime : customStart
-    }
+// MARK: - Pending bedtime
 
-    func end(in rhythm: MorningRhythm) -> TimeOfDay {
-        followsRhythm ? rhythm.wakeTime : customEnd
-    }
-
-    func summary(in rhythm: MorningRhythm) -> String {
-        "\(start(in: rhythm).displayString) → \(end(in: rhythm).displayString)"
-    }
+/// A bedtime change waiting for its first night.
+///
+/// A new bedtime starts from tomorrow night, so moving it at 22:55 can't dodge
+/// tonight's lock (FLOW, the night lock edge cases).
+struct PendingBedtime: Codable, Hashable {
+    var bedtime: TimeOfDay
+    /// When tonight ends: the wake time after the night in progress, or the
+    /// next one if none is. A night that starts before this keeps the old
+    /// bedtime; a night that starts at or after it uses the new one.
+    var startsAt: Date
 }
 
 // MARK: - Alarm slots
@@ -322,6 +339,14 @@ struct MorningPlan: Hashable {
     /// night starts on. Only the user's own choice: nights a gym morning
     /// requires are derived, never written here. See `SleepSchedule`.
     var sleepScheduleDays: Set<Weekday> = Set(Weekday.allCases)
+    /// A bedtime change that starts on a later night. See `SleepRules`.
+    var pendingBedtime: PendingBedtime? = nil
+    /// Set for an existing user whose wake time was really their gym alarm,
+    /// until they answer "when do you wake up?".
+    var needsWakeTimeAnswer: Bool = false
+    /// Whether the wake-time check for existing users has run. True for any
+    /// plan built by this version; false on plans saved before it.
+    var hasCheckedWakeTime: Bool = true
 
     /// The snooze lengths on offer. Fifteen is the ceiling: past that it is
     /// not a snooze, it is going back to sleep.
@@ -381,6 +406,15 @@ struct MorningPlan: Hashable {
 
     var windowMinutes: Int { rhythm.windowMinutes }
 
+    /// The sleep schedule the user has set: the rhythm with any pending
+    /// bedtime already in place. What the Alarm screen shows and edits.
+    /// Tonight's lock still runs on `rhythm` until the pending one is due.
+    var scheduledRhythm: MorningRhythm {
+        var scheduled = rhythm
+        if let pendingBedtime { scheduled.bedtime = pendingBedtime.bedtime }
+        return scheduled
+    }
+
     /// The slot that will ring next, and the date it will ring on.
     ///
     /// A one-off override stands in for its slot's ring on that day: the slot
@@ -437,13 +471,12 @@ struct MorningPlan: Hashable {
 
         plan.slots = [AlarmSlot(days: days, alarmTime: profile.alarmTime)]
 
-        plan.nightLock.isEnabled = profile.wantsNightLock
-        plan.nightLock.followsRhythm = true
-
-        // The bedtime the user already gave us is a real answer; the wake time
-        // is only a starting position derived from when they train.
+        // Both sleep times are real answers from onboarding. The gym time is
+        // when they said their plan falls apart, which is when they train.
+        // Wake time is never derived from the gym time.
         plan.rhythm.bedtime = profile.bedtime
-        plan.rhythm.wakeTime = profile.alarmTime
+        plan.rhythm.wakeTime = profile.answeredWakeTime
+        plan.rhythm.gymTime = profile.failureTime
 
         return plan
     }
@@ -455,6 +488,7 @@ extension MorningPlan: Codable {
         case snoozeEnabled, snoozeMinutes, alarmHaptic
         case alarmScreenStyle
         case sleepScheduleDays
+        case pendingBedtime, needsWakeTimeAnswer, hasCheckedWakeTime
     }
 
     init(from decoder: Decoder) throws {
@@ -479,6 +513,10 @@ extension MorningPlan: Codable {
         // without the key keeps doing exactly that.
         sleepScheduleDays = (try? container.decodeIfPresent(Set<Weekday>.self, forKey: .sleepScheduleDays))
             ?? Set(Weekday.allCases)
+        pendingBedtime = try? container.decodeIfPresent(PendingBedtime.self, forKey: .pendingBedtime)
+        needsWakeTimeAnswer = (try? container.decodeIfPresent(Bool.self, forKey: .needsWakeTimeAnswer)) ?? false
+        // Missing means the plan predates the check, so it still has to run.
+        hasCheckedWakeTime = (try? container.decodeIfPresent(Bool.self, forKey: .hasCheckedWakeTime)) ?? false
     }
 }
 

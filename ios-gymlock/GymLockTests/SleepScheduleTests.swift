@@ -104,9 +104,11 @@ struct SleepScheduleTests {
         #expect(required == [.sunday, .tuesday, .thursday])
     }
 
-    @Test func aSameDayNightForcesNothing() {
+    /// A night that starts after midnight starts on the gym day itself, so
+    /// that day's own night is the one protected.
+    @Test func aSameDayNightProtectsTheGymDaysOwnNight() {
         let required = SleepSchedule.requiredNights(gymDays: [.tuesday], bedtime: one, wake: eight)
-        #expect(required.isEmpty)
+        #expect(required == [.tuesday])
     }
 
     @Test func requiredNightsCountInTheEffectiveSchedule() {
@@ -163,13 +165,14 @@ struct SleepScheduleTests {
         #expect(result.outcome == .updated([]))
     }
 
-    @Test func aDraftThatStopsCrossingMidnightFreesTheNightWithoutStoringAnything() {
+    @Test func aDraftThatStopsCrossingMidnightMovesTheRequirementWithoutStoringAnything() {
         var plan = plan(gymDays: [.tuesday], bedtime: eleven, wake: seven, sleep: [])
         var draft = plan.rhythm
         draft.bedtime = one
         draft.wakeTime = eight
 
-        #expect(plan.requiredSleepNights(for: draft).isEmpty)
+        // Monday night is no longer the one that ends on Tuesday's morning.
+        #expect(plan.requiredSleepNights(for: draft) == [.tuesday])
         #expect(plan.requiredSleepNights() == [.monday])
 
         let result = plan.toggleSleepNight(.monday, rhythm: draft)
@@ -254,13 +257,6 @@ struct SleepScheduleTests {
         calendar.date(from: DateComponents(year: 2026, month: 3, day: day, hour: hour, minute: minute))!
     }
 
-    private var lock: NightLockWindow {
-        var lock = NightLockWindow.default
-        lock.isEnabled = true
-        lock.followsRhythm = true
-        return lock
-    }
-
     private var overnight: MorningRhythm {
         var rhythm = MorningRhythm.default
         rhythm.bedtime = eleven
@@ -268,28 +264,31 @@ struct SleepScheduleTests {
         return rhythm
     }
 
+    private func isLocked(_ rhythm: MorningRhythm, at now: Date, nights: Set<Weekday>) -> Bool {
+        SleepRules.lockWindow(at: now, rhythm: rhythm, pending: nil, nights: nights, calendar: calendar) != nil
+    }
+
     @Test func aSelectedMondayHoldsFromMondayNightIntoTuesdayMorning() {
         let nights: Set<Weekday> = [.monday]
-        #expect(lock.isActive(at: date(day: 9, 23, 30), calendar: calendar, rhythm: overnight, nights: nights))
+        #expect(isLocked(overnight, at: date(day: 9, 23, 30), nights: nights))
         // 02:00 Tuesday still belongs to Monday's night.
-        #expect(lock.isActive(at: date(day: 10, 2), calendar: calendar, rhythm: overnight, nights: nights))
+        #expect(isLocked(overnight, at: date(day: 10, 2), nights: nights))
     }
 
     @Test func anUnselectedMondayDoesNotActivate() {
         let nights: Set<Weekday> = [.tuesday]
-        #expect(!lock.isActive(at: date(day: 9, 23, 30), calendar: calendar, rhythm: overnight, nights: nights))
-        #expect(!lock.isActive(at: date(day: 10, 2), calendar: calendar, rhythm: overnight, nights: nights))
+        #expect(!isLocked(overnight, at: date(day: 9, 23, 30), nights: nights))
+        #expect(!isLocked(overnight, at: date(day: 10, 2), nights: nights))
         // Tuesday's own night still does.
-        #expect(lock.isActive(at: date(day: 10, 23, 30), calendar: calendar, rhythm: overnight, nights: nights))
+        #expect(isLocked(overnight, at: date(day: 10, 23, 30), nights: nights))
     }
 
-    @Test func noNightsFilterKeepsTheOldEveryNightBehaviour() {
-        #expect(lock.isActive(at: date(day: 10, 2), calendar: calendar, rhythm: overnight))
+    @Test func everyNightLocksWhenEveryNightIsOn() {
+        #expect(isLocked(overnight, at: date(day: 10, 2), nights: Set(Weekday.allCases)))
     }
 
     @Test func aRequiredNightCountsForWindDown() {
         let plan = plan(gymDays: [.tuesday], bedtime: eleven, wake: seven, sleep: [])
-        let nights = plan.effectiveSleepDays()
-        #expect(lock.isActive(at: date(day: 10, 2), calendar: calendar, rhythm: plan.rhythm, nights: nights))
+        #expect(plan.nightLockWindow(at: date(day: 10, 2), calendar: calendar) != nil)
     }
 }

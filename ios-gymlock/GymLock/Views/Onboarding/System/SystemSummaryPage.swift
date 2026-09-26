@@ -77,9 +77,7 @@ struct SystemSummaryPage: View {
                 id: 5,
                 icon: "moon.fill",
                 title: "night lock",
-                value: profile.wantsNightLock
-                    ? profile.bedtime.displayString.lowercased()
-                    : "not needed"
+                value: profile.bedtime.displayString.lowercased()
             )
         )
 

@@ -16,15 +16,13 @@ struct AlarmSettingsView: View {
     @Environment(AlarmSoundPlayer.self) private var soundPlayer: AlarmSoundPlayer?
     @Environment(\.dismiss) private var dismiss
 
-    /// The rhythm as it was when this screen opened, so a dial change can be
-    /// checked against the night lock at the right moment.
-    @State private var rhythmOnOpen: MorningRhythm?
-    @State private var nightLockPrompt: RhythmChangeProposer.Prompt?
     /// Whether the snooze length wheel is open inside the options card.
     @State private var isEditingSnooze = false
     /// Debounces pushing a new snooze length to the OS while the wheel spins.
     @State private var snoozeSync: Task<Void, Never>?
-    @State private var isEditingWindDown = false
+    /// The note after the gym bar pushed the night, shown once the finger lifts.
+    @State private var pushNote: String?
+    @State private var pushNoteDismissal: Task<Void, Never>?
     @State private var alarmAuth: AlarmAuthorization = .notDetermined
     /// What the finger is holding on the dial, so the header and the line
     /// under the dial can speak to that while the drag is live.
@@ -58,7 +56,9 @@ struct AlarmSettingsView: View {
     #endif
 
     private var plan: MorningPlan { store.plan }
-    private var rhythm: MorningRhythm { plan.rhythm }
+    /// The sleep schedule as set, including a bedtime that starts tomorrow
+    /// night. What the dial shows and edits.
+    private var rhythm: MorningRhythm { plan.scheduledRhythm }
 
     /// The one alarm that will actually ring.
     private var primarySlot: AlarmSlot? {
@@ -117,7 +117,7 @@ struct AlarmSettingsView: View {
         .tint(Theme.accent)
         .task {
             store.seedPlanIfNeeded()
-            if rhythmOnOpen == nil { rhythmOnOpen = store.plan.rhythm }
+            store.applyDuePendingBedtime()
             coordinator.expireNextAlarmOverrideIfNeeded()
             alarmAuth = await coordinator.alarmAuthorization()
         }
@@ -125,17 +125,12 @@ struct AlarmSettingsView: View {
             soundPlayer?.stop()
             resyncAlarms()
         }
-        .sheet(isPresented: $isEditingWindDown) {
-            WindDownEditorSheet()
-        }
         #if DEBUG
         .sheet(isPresented: $isShowingSimulator) {
             DebugMorningPanel()
         }
         #endif
-        .nightLockPromptAlert($nightLockPrompt, store: store) {
-            rhythmOnOpen = store.plan.rhythm
-        }
+        .onDisappear { pushNoteDismissal?.cancel() }
     }
 
     // MARK: - Header
@@ -232,7 +227,7 @@ struct AlarmSettingsView: View {
 
     private var dialBinding: Binding<MorningRhythm> {
         Binding(
-            get: { draft ?? store.plan.rhythm },
+            get: { draft ?? store.plan.scheduledRhythm },
             set: { draft = $0 }
         )
     }
@@ -257,6 +252,9 @@ struct AlarmSettingsView: View {
                             dialGrab = grab
                             dialContext = context
                         }
+                    },
+                    onNightPushed: { pushed in
+                        showPushNote(DayDialModel.pushMessage(bedtime: pushed.bedtime, wake: pushed.wakeTime))
                     }
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
@@ -267,7 +265,19 @@ struct AlarmSettingsView: View {
 
             dialFooter
                 .padding(.horizontal, 18)
-                .padding(.bottom, overrideLine == nil ? 24 : 14)
+                .padding(.bottom, overrideLine == nil && dialNoteLine == nil ? 24 : 14)
+
+            // PLACEHOLDER UI: designed in Step 3
+            if let dialNoteLine {
+                Text(dialNoteLine)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, overrideLine == nil ? 20 : 10)
+            }
 
             if let overrideLine {
                 overrideRow(overrideLine)
@@ -279,6 +289,26 @@ struct AlarmSettingsView: View {
         .frame(maxWidth: .infinity)
         .warmCard(radius: Theme.cardRadius)
         .animation(Theme.stateChange, value: overrideLine)
+        .animation(Theme.stateChange, value: dialNoteLine)
+    }
+
+    /// The quiet line under the dial: the push note right after a push, else
+    /// "starts tomorrow night." while a bedtime change is waiting.
+    private var dialNoteLine: String? {
+        if let pushNote { return pushNote }
+        let bedtimeDiffers = shown.bedtime != plan.rhythm.bedtime
+        return bedtimeDiffers ? "starts tomorrow night." : nil
+    }
+
+    private func showPushNote(_ message: String) {
+        pushNote = message
+        AccessibilityNotification.Announcement(message).post()
+        pushNoteDismissal?.cancel()
+        pushNoteDismissal = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            pushNote = nil
+        }
     }
 
     /// A one-off change in force, said plainly, with the way out next to it.
@@ -381,7 +411,7 @@ struct AlarmSettingsView: View {
                 icon: "bed.double.fill",
                 label: "bedtime",
                 time: shown.bedtime,
-                note: "tonight",
+                note: shown.bedtime == plan.rhythm.bedtime ? "tonight" : "tomorrow night",
                 isLive: dialGrab == .bedtime || dialGrab == .sleepBody
             ),
             HeaderSlot(
@@ -529,10 +559,10 @@ struct AlarmSettingsView: View {
 
         switch scope {
         case .schedule:
-            let previous = rhythmOnOpen ?? store.plan.rhythm
             var updated = draft
             updated.hasBeenSet = true
-            store.plan.rhythm = updated
+            // Wake time applies now; a new bedtime starts tomorrow night.
+            store.commitRhythm(updated)
             // The alarm going off and getting up are one event, so the dial
             // writes the alarm too and the user is never asked twice.
             if let index = primaryMorningSlotIndex {
@@ -540,13 +570,7 @@ struct AlarmSettingsView: View {
             }
             // A schedule change makes any lingering one-off meaningless.
             store.plan.nextAlarmOverride = nil
-
-            if let prompt = RhythmChangeProposer.prompt(for: updated, since: previous, plan: plan) {
-                nightLockPrompt = prompt
-            } else {
-                store.applyRhythmToNightLock()
-                rhythmOnOpen = updated
-            }
+            coordinator.reconcileWindDown()
 
         case .nextOnly:
             guard let slot = primarySlot else { break }
@@ -696,7 +720,11 @@ struct AlarmSettingsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(dialContext == .sleep ? "\(day.spokenName) night" : day.shortLabel)
-        .accessibilityHint(isRequired ? "needed before \(day.next.spokenName)'s gym day" : "")
+        .accessibilityHint(
+            isRequired
+                ? "needed for \(SleepSchedule.gymDay(protectedBy: day, bedtime: shown.bedtime, wake: shown.wakeTime).spokenName)'s gym day"
+                : ""
+        )
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
@@ -922,50 +950,20 @@ struct AlarmSettingsView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     cardLabel("wind-down lock")
-                    Text(plan.nightLock.summary(in: rhythm))
+                    Text("\(plan.rhythm.bedtime.displayString) → \(plan.rhythm.wakeTime.displayString)")
                         .font(.system(size: 15, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(Theme.ink)
-                    Text(plan.nightLock.followsRhythm ? "follows your sleep times" : "custom window")
+                    // Honest until the background extension exists: the lock
+                    // engages the next time the app runs inside the window.
+                    Text("every sleep night. locks when you next open gymlock after bedtime.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 8)
-
-                Toggle(
-                    "",
-                    isOn: Binding(
-                        get: { plan.nightLock.isEnabled },
-                        set: {
-                            store.plan.nightLock.isEnabled = $0
-                            Haptics.tap()
-                            // Switching it on while inside the window should
-                            // take hold now, not on the next foreground.
-                            coordinator.reconcileWindDown()
-                        }
-                    )
-                )
-                .labelsHidden()
-                .tint(Theme.ink)
             }
-
-            Button {
-                Haptics.tap()
-                isEditingWindDown = true
-            } label: {
-                HStack {
-                    Text("edit window")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.inkSecondary)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.inkTertiary)
-                }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

@@ -54,17 +54,26 @@ enum SleepSchedule {
         bedtime.minutesFromMidnight > wake.minutesFromMidnight
     }
 
-    /// The nights that must stay on because a gym morning follows them.
+    /// The nights that must stay on because they end on a gym morning.
     ///
-    /// Only an overnight schedule has a "night before". A 1 AM to 8 AM night
-    /// starts on the gym day itself, so nothing on the previous day is forced.
+    /// An overnight schedule (23:00 → 07:00) starts the day before the gym
+    /// morning, so the nights before gym days are required. A night that
+    /// starts after midnight (00:30 → 08:30) starts on the gym day itself, so
+    /// the gym days' own nights are required (FLOW, "Which nights").
     static func requiredNights(
         gymDays: Set<Weekday>,
         bedtime: TimeOfDay,
         wake: TimeOfDay
     ) -> Set<Weekday> {
-        guard crossesMidnight(bedtime: bedtime, wake: wake) else { return [] }
+        // Bedtime equal to wake time is a degenerate schedule, not a night.
+        guard bedtime.minutesFromMidnight != wake.minutesFromMidnight else { return [] }
+        guard crossesMidnight(bedtime: bedtime, wake: wake) else { return gymDays }
         return Set(gymDays.map(\.previous))
+    }
+
+    /// The gym morning a required night leads into.
+    static func gymDay(protectedBy night: Weekday, bedtime: TimeOfDay, wake: TimeOfDay) -> Weekday {
+        crossesMidnight(bedtime: bedtime, wake: wake) ? night.next : night
     }
 
     /// What is actually in force: the user's own nights plus the required ones.
@@ -94,7 +103,10 @@ enum SleepSchedule {
     ) -> Toggle {
         let required = requiredNights(gymDays: gymDays, bedtime: bedtime, wake: wake)
         if required.contains(night) {
-            return .required(night: night, gymDay: night.next)
+            return .required(
+                night: night,
+                gymDay: gymDay(protectedBy: night, bedtime: bedtime, wake: wake)
+            )
         }
 
         var updated = chosen
@@ -109,6 +121,240 @@ enum SleepSchedule {
     /// The quiet line shown when a required night is tapped.
     static func requiredMessage(night: Weekday, gymDay: Weekday) -> String {
         "\(gymDay.spokenName) is a gym day. keep \(night.spokenName) night on for rest."
+    }
+}
+
+// MARK: - Sleep rules: pending bedtime, the lock window, legacy wake times
+
+/// Pure rules for when a bedtime takes effect, what the night lock runs on,
+/// and which existing users had a gym alarm stored as their wake time.
+///
+/// A night is found by the morning it ends on. Wake time is one fixed time of
+/// day, so "the night that ends at Wednesday 07:00" means one thing whatever
+/// the bedtime is, including a bedtime that moves across midnight. Each night
+/// is still keyed to the day it *starts* on for the sleep schedule's circles.
+enum SleepRules {
+    /// When tonight ends: the first wake time after `now`.
+    ///
+    /// Inside tonight's window that is the end of the window. Before bedtime
+    /// it is tomorrow morning. A new bedtime starts with the night after this.
+    static func tonightEnds(after now: Date, wake: TimeOfDay, calendar: Calendar) -> Date {
+        let today = calendar.startOfDay(for: now)
+        for offset in 0...1 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today),
+                  let moment = calendar.date(bySettingHour: wake.hour, minute: wake.minute, second: 0, of: day),
+                  moment > now
+            else { continue }
+            return moment
+        }
+        return now.addingTimeInterval(86_400)
+    }
+
+    /// The bedtime for the night that ends at `nightEnd`.
+    ///
+    /// Tonight (ending at `pending.startsAt`) and any earlier night keep the
+    /// current bedtime. Every night after it uses the pending one.
+    static func bedtime(
+        forNightEnding nightEnd: Date,
+        current: TimeOfDay,
+        pending: PendingBedtime?,
+        calendar: Calendar
+    ) -> TimeOfDay {
+        guard let pending else { return current }
+        // Compared by morning, not by minute: one night ends per morning, so
+        // a wake time edited later cannot slide tonight past the boundary.
+        let nightMorning = calendar.startOfDay(for: nightEnd)
+        let tonightMorning = calendar.startOfDay(for: pending.startsAt)
+        return nightMorning > tonightMorning ? pending.bedtime : current
+    }
+
+    /// Whether a pending bedtime can be folded into the plan: tonight is over,
+    /// so every night still to come uses it.
+    static func isDue(_ pending: PendingBedtime, at now: Date) -> Bool {
+        now >= pending.startsAt
+    }
+
+    /// One night: when it starts and ends, and the weekday it belongs to.
+    struct Night: Equatable {
+        let start: Date
+        let end: Date
+        let weekday: Weekday
+    }
+
+    /// The night that ends on the morning of `day`, or nil for a degenerate
+    /// schedule (bedtime equal to wake time).
+    static func night(
+        endingOnMorningOf day: Date,
+        rhythm: MorningRhythm,
+        pending: PendingBedtime?,
+        calendar: Calendar
+    ) -> Night? {
+        let wake = rhythm.wakeTime
+        guard let end = calendar.date(bySettingHour: wake.hour, minute: wake.minute, second: 0, of: day) else {
+            return nil
+        }
+        let bed = bedtime(forNightEnding: end, current: rhythm.bedtime, pending: pending, calendar: calendar)
+        guard bed.minutesFromMidnight != wake.minutesFromMidnight else { return nil }
+
+        // An overnight schedule starts the day before the morning it ends on.
+        let startDayOffset = SleepSchedule.crossesMidnight(bedtime: bed, wake: wake) ? -1 : 0
+        guard let startDay = calendar.date(byAdding: .day, value: startDayOffset, to: calendar.startOfDay(for: day)),
+              let start = calendar.date(bySettingHour: bed.hour, minute: bed.minute, second: 0, of: startDay),
+              let weekday = Weekday(rawValue: calendar.component(.weekday, from: startDay))
+        else { return nil }
+        return Night(start: start, end: end, weekday: weekday)
+    }
+
+    /// The night-lock window holding at `now`, only on the sleep schedule's
+    /// nights (keyed by the day each night starts on). Always on: there is no
+    /// switch (FLOW, "The Night Lock").
+    static func lockWindow(
+        at now: Date,
+        rhythm: MorningRhythm,
+        pending: PendingBedtime?,
+        nights: Set<Weekday>,
+        calendar: Calendar
+    ) -> (start: Date, end: Date)? {
+        let today = calendar.startOfDay(for: now)
+        // A night is shorter than a day and ends at a wake time, so the one
+        // holding `now` ends this morning or tomorrow morning.
+        for offset in 0...1 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today),
+                  let night = night(endingOnMorningOf: day, rhythm: rhythm, pending: pending, calendar: calendar),
+                  nights.contains(night.weekday),
+                  now >= night.start, now < night.end
+            else { continue }
+            return (night.start, night.end)
+        }
+        return nil
+    }
+
+    /// The next moment a night on the sleep schedule starts, after `now`.
+    static func nextLockStart(
+        after now: Date,
+        rhythm: MorningRhythm,
+        pending: PendingBedtime?,
+        nights: Set<Weekday>,
+        calendar: Calendar
+    ) -> Date? {
+        guard !nights.isEmpty else { return nil }
+        let today = calendar.startOfDay(for: now)
+        for offset in 0...9 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today),
+                  let night = night(endingOnMorningOf: day, rhythm: rhythm, pending: pending, calendar: calendar),
+                  nights.contains(night.weekday),
+                  night.start > now
+            else { continue }
+            return night.start
+        }
+        return nil
+    }
+
+    /// Whether an existing plan's wake time was really its gym alarm.
+    ///
+    /// Seeding used to copy the gym alarm into the wake time, so anyone who
+    /// trains after work, in the evening or "something else", or whose wake
+    /// time is 11:00 or later, was given a gym time as a wake time.
+    static func wakeTimeWasGymAlarm(failureWindow: FailureWindow?, wakeTime: TimeOfDay) -> Bool {
+        switch failureWindow {
+        case .afterWork, .evening, .other: return true
+        default: return wakeTime.hour >= 11
+        }
+    }
+
+    /// The repair for such a plan: the gym stays where it is, wake time goes
+    /// to 07:00 until the user answers. Alarm times are not touched here.
+    static func repairedRhythm(_ rhythm: MorningRhythm) -> MorningRhythm {
+        var repaired = rhythm
+        repaired.gymTime = rhythm.gymByTime
+        repaired.wakeTime = OnboardingProfile.defaultWakeTime
+        return repaired
+    }
+
+    /// Runs the wake-time check once on a plan saved before it existed.
+    ///
+    /// Returns whether the plan was repaired. Plans with no alarm yet were
+    /// never seeded the old way, so they only get marked as checked.
+    @discardableResult
+    static func migrateLegacyWakeTime(_ plan: inout MorningPlan, failureWindow: FailureWindow?) -> Bool {
+        guard !plan.hasCheckedWakeTime else { return false }
+        plan.hasCheckedWakeTime = true
+        guard !plan.slots.isEmpty,
+              wakeTimeWasGymAlarm(failureWindow: failureWindow, wakeTime: plan.rhythm.wakeTime)
+        else { return false }
+        plan.rhythm = repairedRhythm(plan.rhythm)
+        plan.needsWakeTimeAnswer = true
+        return true
+    }
+}
+
+// MARK: - Changing the sleep schedule
+
+extension MorningPlan {
+    /// Applies a new sleep schedule. Wake time and everything else apply at
+    /// once; a new bedtime starts from tomorrow night (FLOW, the night lock
+    /// edge cases).
+    ///
+    /// `immediately` is for the very first bedtime, set during onboarding and
+    /// setup, which applies at once.
+    mutating func applyRhythmChange(
+        _ updated: MorningRhythm,
+        now: Date,
+        calendar: Calendar,
+        immediately: Bool = false
+    ) {
+        applyDuePendingBedtime(now: now)
+
+        guard !immediately else {
+            rhythm = updated
+            pendingBedtime = nil
+            return
+        }
+
+        let newBedtime = updated.bedtime
+        var next = updated
+        next.bedtime = rhythm.bedtime
+        rhythm = next
+
+        if newBedtime == rhythm.bedtime {
+            pendingBedtime = nil
+        } else {
+            pendingBedtime = PendingBedtime(
+                bedtime: newBedtime,
+                startsAt: SleepRules.tonightEnds(after: now, wake: rhythm.wakeTime, calendar: calendar)
+            )
+        }
+    }
+
+    /// Folds a pending bedtime in once tonight is over. Returns whether it did.
+    @discardableResult
+    mutating func applyDuePendingBedtime(now: Date) -> Bool {
+        guard let pendingBedtime, SleepRules.isDue(pendingBedtime, at: now) else { return false }
+        rhythm.bedtime = pendingBedtime.bedtime
+        self.pendingBedtime = nil
+        return true
+    }
+
+    /// The night-lock window holding at `now`, if any.
+    func nightLockWindow(at now: Date, calendar: Calendar) -> (start: Date, end: Date)? {
+        SleepRules.lockWindow(
+            at: now,
+            rhythm: rhythm,
+            pending: pendingBedtime,
+            nights: effectiveSleepDays(),
+            calendar: calendar
+        )
+    }
+
+    /// When the next night lock starts, for the wind-down notification.
+    func nextNightLockStart(after now: Date, calendar: Calendar) -> Date? {
+        SleepRules.nextLockStart(
+            after: now,
+            rhythm: rhythm,
+            pending: pendingBedtime,
+            nights: effectiveSleepDays(),
+            calendar: calendar
+        )
     }
 }
 

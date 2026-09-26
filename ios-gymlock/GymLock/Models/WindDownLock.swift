@@ -89,30 +89,3 @@ enum WindDownLock {
     }
 }
 
-// MARK: - NightLockWindow convenience
-
-extension NightLockWindow {
-    /// True when this lock should be holding apps at `now`.
-    ///
-    /// A disabled lock is never active, whatever the window says. A window
-    /// that follows the rhythm reads its bounds from the sleep rhythm at the
-    /// moment of the question, so a bedtime change moves the lock with it.
-    ///
-    /// `nights` limits it to the sleep schedule's days, keyed by the day the
-    /// night starts on. `nil` means every night.
-    func isActive(
-        at now: Date = Date(),
-        calendar: Calendar = .current,
-        rhythm: MorningRhythm,
-        nights: Set<Weekday>? = nil
-    ) -> Bool {
-        guard isEnabled else { return false }
-        return WindDownLock.window(
-            start: start(in: rhythm),
-            end: end(in: rhythm),
-            at: now,
-            calendar: calendar,
-            nights: nights
-        ) != nil
-    }
-}

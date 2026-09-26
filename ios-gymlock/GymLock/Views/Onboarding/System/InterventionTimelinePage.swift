@@ -59,17 +59,15 @@ struct InterventionTimelinePage: View {
             Moment(id: 4, time: "then", icon: "lock.open.fill", text: "apps unlock", isAccented: true)
         )
 
-        if profile.wantsNightLock {
-            built.append(
-                Moment(
-                    id: 5,
-                    time: profile.bedtime.displayString.lowercased(),
-                    icon: "moon.fill",
-                    text: "night lock starts",
-                    isAccented: true
-                )
+        built.append(
+            Moment(
+                id: 5,
+                time: profile.bedtime.displayString.lowercased(),
+                icon: "moon.fill",
+                text: "night lock starts",
+                isAccented: true
             )
-        }
+        )
 
         return built
     }

@@ -41,9 +41,7 @@ struct ActivationPage: View {
 
         items.append("gym + health verification")
 
-        if profile.wantsNightLock {
-            items.append("night lock at \(profile.bedtime.displayString.lowercased())")
-        }
+        items.append("night lock at \(profile.bedtime.displayString.lowercased())")
         if profile.comebackModeEnabled {
             items.append("comeback mode")
         }

@@ -78,6 +78,12 @@ extension GymSessionCoordinator {
         case sundayLateAlarmVisitAfterMidnight
         case tryRemoveGymDayAtThree
 
+        // Sleep and night lock (FLOW items 1, 2, 4).
+        case legacyEveningUser
+        case changeBedtimeTonight
+        case bedtimeAfterMidnightGymMonday
+        case oldPlanNightLockOff
+
         // Sound: the ringer and the fallback chain.
         case ringerStart
         case ringerEscalated
@@ -120,6 +126,9 @@ extension GymSessionCoordinator {
             case .legacyUserTwoGymDays, .changePlanMidWeek,
                  .sundayLateAlarmVisitAfterMidnight, .tryRemoveGymDayAtThree:
                 "week rules"
+            case .legacyEveningUser, .changeBedtimeTonight,
+                 .bedtimeAfterMidnightGymMonday, .oldPlanNightLockOff:
+                "sleep and night lock"
             case .ringerStart, .ringerEscalated, .ringerStop,
                  .ringerCeiling, .customSongMissing, .customSongProtected:
                 "sound"
@@ -177,6 +186,10 @@ extension GymSessionCoordinator {
             case .changePlanMidWeek: "change plan mid-week"
             case .sundayLateAlarmVisitAfterMidnight: "Sunday 23:30 alarm, visit at 00:20"
             case .tryRemoveGymDayAtThree: "try to remove a gym day at 3"
+            case .legacyEveningUser: "legacy evening user (then reopen the app)"
+            case .changeBedtimeTonight: "change bedtime tonight"
+            case .bedtimeAfterMidnightGymMonday: "bedtime 00:30, gym Monday"
+            case .oldPlanNightLockOff: "old plan with night lock off"
             case .ringerStart: "ringer: start"
             case .ringerEscalated: "ringer: jump to full volume"
             case .ringerStop: "ringer: stop"
@@ -187,7 +200,7 @@ extension GymSessionCoordinator {
         }
 
         static var sections: [String] {
-            ["week rules", "notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
+            ["sleep and night lock", "week rules", "notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
         }
     }
 
@@ -577,6 +590,94 @@ extension GymSessionCoordinator {
             Self.debugWeekRulesResult =
                 "\(note) · \(store.plan.gymDays.count) days · monday \(store.plan.gymDays.contains(.monday) ? "on" : "off")"
 
+        // MARK: Sleep and night lock
+        //
+        // The result line in the panel says what each rule decided.
+
+        case .legacyEveningUser:
+            // A plan saved before the fix: an after-work user whose gym alarm
+            // was copied into their wake time. The "when do you wake up?"
+            // sheet is asked for on the next open, so background and reopen.
+            guard let store = debugStore else { return }
+            store.profile.failureWindow = .afterWork
+            var plan = store.plan
+            let evening = TimeOfDay(hour: 17, minute: 15)
+            if let index = plan.slots.firstIndex(where: { $0.id == plan.primaryAlarmSlot?.id }) {
+                plan.slots[index].alarmTime = evening
+            } else {
+                plan.slots = [AlarmSlot(days: [.monday, .wednesday, .friday], alarmTime: evening)]
+            }
+            plan.rhythm.wakeTime = evening
+            plan.rhythm.gymTime = nil
+            plan.hasCheckedWakeTime = false
+            plan.needsWakeTimeAnswer = false
+            plan.hasBeenReviewed = true
+            store.plan = plan
+            let gymBefore = store.plan.rhythm.gymByTime
+            store.migrateLegacyWakeTimeIfNeeded()
+            let after = store.plan
+            Self.debugSleepResult =
+                "wake \(after.rhythm.wakeTime.clockString) · gym \(after.rhythm.gymByTime.clockString) (was \(gymBefore.clockString)) · alarm \(after.primaryAlarmSlot?.alarmTime.clockString ?? "none") · ask \(after.needsWakeTimeAnswer ? "yes, reopen the app" : "NO")"
+
+        case .changeBedtimeTonight:
+            // Sleep 23:00 to 07:00, then bedtime moved to 03:00 right now.
+            // Tonight's lock and wind-down must still start at 23:00.
+            guard let store = debugStore else { return }
+            var plan = store.plan
+            plan.rhythm.bedtime = TimeOfDay(hour: 23, minute: 0)
+            plan.rhythm.wakeTime = TimeOfDay(hour: 7, minute: 0)
+            plan.pendingBedtime = nil
+            plan.sleepScheduleDays = Set(Weekday.allCases)
+            store.plan = plan
+
+            var dodge = store.plan.scheduledRhythm
+            dodge.bedtime = TimeOfDay(hour: 3, minute: 0)
+            store.commitRhythm(dodge)
+            reconcileWindDown()
+
+            let now = Date()
+            let tonight = store.plan.nightLockWindow(at: now, calendar: .current)?.start
+                ?? store.plan.nextNightLockStart(after: now, calendar: .current)
+            let tonightLabel = tonight.map { TimeOfDay(from: $0).clockString } ?? "none"
+            let pending = store.plan.pendingBedtime?.bedtime.clockString ?? "none"
+            Self.debugSleepResult =
+                "tonight locks at \(tonightLabel) · \(pending) starts tomorrow night"
+
+        case .bedtimeAfterMidnightGymMonday:
+            // Sleep 00:30 to 08:30, gym Mon/Wed/Fri, every night switched off.
+            // Monday's own night (Monday 00:30) must still lock.
+            guard let store = debugStore else { return }
+            store.debugSetGymDays([.monday, .wednesday, .friday])
+            var plan = store.plan
+            plan.rhythm.bedtime = TimeOfDay(hour: 0, minute: 30)
+            plan.rhythm.wakeTime = TimeOfDay(hour: 8, minute: 30)
+            plan.pendingBedtime = nil
+            plan.sleepScheduleDays = []
+            store.plan = plan
+
+            let calendar = Calendar.current
+            let required = store.plan.requiredSleepNights()
+            let nextMondayOne = calendar.nextDate(
+                after: Date(),
+                matching: DateComponents(hour: 1, minute: 0, weekday: Weekday.monday.rawValue),
+                matchingPolicy: .nextTime
+            )
+            let locks = nextMondayOne.map { store.plan.nightLockWindow(at: $0, calendar: calendar) != nil } ?? false
+            let names = Weekday.allCases.filter { required.contains($0) }.map(\.shortLabel).joined(separator: " ")
+            Self.debugSleepResult =
+                "protected: \(names.isEmpty ? "none" : names) · Monday 01:00 \(locks ? "locked" : "NOT locked")"
+
+        case .oldPlanNightLockOff:
+            // The old switch set to off, with a night open right now. The
+            // lock must hold anyway: the switch is read and ignored.
+            guard let store = debugStore else { return }
+            debugEnsureShieldSelection()
+            debugSetWindDownWindow(startMinutesAgo: 30, endMinutesFromNow: 30)
+            store.plan.nightLock.isEnabled = false
+            debugReconcileWindDown()
+            Self.debugSleepResult =
+                "old switch off · night lock \(windDown.isActive ? "on" : "OFF") · apps \(shield.isShielded ? "locked" : "unlocked")"
+
         // MARK: Sound
 
         case .ringerStart:
@@ -638,6 +739,11 @@ extension GymSessionCoordinator {
         }
     }
 
+    // MARK: - Sleep and night lock helpers
+
+    /// The last sleep-and-night-lock result, shown in the panel.
+    static var debugSleepResult = "none"
+
     // MARK: - Week rules helpers
 
     /// The last week-rules result, shown in the panel.
@@ -679,20 +785,19 @@ extension GymSessionCoordinator {
         debugStore?.hasConfiguredBlockedApps = true
     }
 
-    /// Sets a hand-tuned wind-down window that opened `startMinutesAgo` and
-    /// closes `endMinutesFromNow` from now, whatever the clock says.
+    /// Moves the sleep schedule so the night opened `startMinutesAgo` and
+    /// ends `endMinutesFromNow` from now, on every night, whatever the clock
+    /// says. The lock has no window of its own any more: it is bedtime to
+    /// wake time, so the debug step moves those directly (skipping the
+    /// tomorrow-night rule on purpose).
     private func debugSetWindDownWindow(startMinutesAgo: Int, endMinutesFromNow: Int) {
         guard let store = debugStore else { return }
 
         var plan = store.plan
-        plan.nightLock.isEnabled = true
-        plan.nightLock.followsRhythm = false
-        plan.nightLock.customStart = TimeOfDay(
-            from: Date().addingTimeInterval(-Double(startMinutesAgo) * 60)
-        )
-        plan.nightLock.customEnd = TimeOfDay(
-            from: Date().addingTimeInterval(Double(endMinutesFromNow) * 60)
-        )
+        plan.rhythm.bedtime = TimeOfDay(from: Date().addingTimeInterval(-Double(startMinutesAgo) * 60))
+        plan.rhythm.wakeTime = TimeOfDay(from: Date().addingTimeInterval(Double(endMinutesFromNow) * 60))
+        plan.pendingBedtime = nil
+        plan.sleepScheduleDays = Set(Weekday.allCases)
         store.plan = plan
     }
 

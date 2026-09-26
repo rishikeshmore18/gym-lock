@@ -28,9 +28,7 @@ struct FinalCommitmentPage: View {
         if profile.comebackModeEnabled {
             items.append(("arrow.uturn.left", "comeback mode"))
         }
-        if profile.wantsNightLock {
-            items.append(("moon.fill", "night lock"))
-        }
+        items.append(("moon.fill", "night lock"))
         return items
     }
 

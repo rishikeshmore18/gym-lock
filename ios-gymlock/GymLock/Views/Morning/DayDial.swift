@@ -48,8 +48,9 @@ enum DayDialModel {
         let bodyGrab: Grab
     }
 
-    /// The shortest night the dial will let a user set.
-    static let minimumSleepMinutes = 60
+    /// The shortest night the dial will let a user set: 5 hours, the same
+    /// rule as everywhere else sleep can be set.
+    static let minimumSleepMinutes = MorningRhythm.minimumSleepMinutes
     /// Gap kept between the end of the gym visit and the next bedtime so the
     /// two bars never lap.
     static let minimumGapMinutes = 30
@@ -289,6 +290,76 @@ enum DayDialModel {
         return min(max(delta, min(earliest, 0)), max(latest, 0))
     }
 
+    // MARK: The gym bar pushes the night
+
+    /// What a gym drag did: where the visit sits, how long it is, how far the
+    /// whole night slid later, and how much of the drag found no room.
+    struct GymPush: Equatable {
+        let gapMinutes: Int
+        let sessionMinutes: Int
+        /// Minutes the night moved later, bedtime and wake together. Zero
+        /// when the visit fitted before bedtime.
+        let nightShift: Int
+        let overshoot: Int
+    }
+
+    /// Slides the whole visit. Dragged into the night, the night slides later
+    /// and keeps its length, always leaving `minimumGapMinutes` of travel
+    /// between the end of the visit and bedtime (FLOW, "Gym and sleep never
+    /// overlap"). It only stops when the waking day is too short to hold the
+    /// visit, the travel and a few minutes after the alarm.
+    static func pushedGymBody(desiredGap: Int, awakeSpan: Int, sessionMinutes: Int) -> GymPush {
+        let floor = minimumLeadMinutes
+        guard desiredGap >= floor else {
+            return GymPush(gapMinutes: floor, sessionMinutes: sessionMinutes, nightShift: 0, overshoot: desiredGap - floor)
+        }
+
+        let ceiling = awakeSpan - sessionMinutes - minimumGapMinutes
+        guard desiredGap > ceiling else {
+            return GymPush(gapMinutes: desiredGap, sessionMinutes: sessionMinutes, nightShift: 0, overshoot: 0)
+        }
+
+        // No room in the ring at all: the visit stays where it fits.
+        guard ceiling >= floor else {
+            let gap = max(ceiling, floor)
+            return GymPush(gapMinutes: gap, sessionMinutes: sessionMinutes, nightShift: 0, overshoot: desiredGap - gap)
+        }
+
+        // The night moves by exactly what the visit overran. The wake end
+        // moves with it, so measured from the alarm the visit sits at the
+        // ceiling while in the day it is exactly where the finger put it.
+        return GymPush(gapMinutes: ceiling, sessionMinutes: sessionMinutes, nightShift: desiredGap - ceiling, overshoot: 0)
+    }
+
+    /// Lengthens the visit from its end. Past bedtime the night slides later,
+    /// keeping its length, until the alarm would reach the start of the visit.
+    static func pushedGymEnd(desiredSession: Int, awakeSpan: Int, gapMinutes: Int) -> GymPush {
+        let range = MorningRhythm.sessionRange
+        var session = min(max(desiredSession, range.lowerBound), range.upperBound)
+
+        let room = awakeSpan - gapMinutes - minimumGapMinutes
+        var shift = 0
+        if session > room {
+            // The visit's start is fixed in the day, so every minute the night
+            // slides brings the alarm a minute closer to it.
+            let maxShift = max(gapMinutes - minimumLeadMinutes, 0)
+            shift = min(session - room, maxShift)
+            session = room + shift
+        }
+
+        return GymPush(
+            gapMinutes: gapMinutes - shift,
+            sessionMinutes: session,
+            nightShift: shift,
+            overshoot: desiredSession - session
+        )
+    }
+
+    /// The note after a push, with the real times. 24-hour, as in FLOW.
+    static func pushMessage(bedtime: TimeOfDay, wake: TimeOfDay) -> String {
+        "moved your sleep to \(bedtime.clockString)–\(wake.clockString) so it starts after the gym."
+    }
+
     /// Travel minutes implied by the gap the user has drawn.
     ///
     /// The bar can be placed anywhere in the day, but the *lock* is still a
@@ -352,6 +423,10 @@ struct DayDial: View {
     /// Called when a gesture ends.
     var onSettle: (() -> Void)?
 
+    /// Called once the finger lifts after a gym drag that pushed the night,
+    /// with the rhythm as it now stands.
+    var onNightPushed: ((MorningRhythm) -> Void)?
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var grab: DayDialModel.Grab?
@@ -362,6 +437,8 @@ struct DayDial: View {
     @State private var grabRhythm: MorningRhythm = .default
     @State private var lastTickKey: Int = -1
     @State private var didKnock = false
+    /// Whether the drag in progress currently has the night pushed later.
+    @State private var isPushingNight = false
     /// Visual overshoot, in minutes of arc, while an end is held past its
     /// clamp. Springs back to zero on release.
     @State private var overshootMinutes: CGFloat = 0
@@ -847,6 +924,7 @@ struct DayDial: View {
                     grabFingerMinutes = DayDialModel.minutes(at: value.startLocation, centre: centre)
                     grabRhythm = rhythm
                     didKnock = false
+                    isPushingNight = false
                     lastTickKey = valueKey(for: picked)
                     Haptics.prepareSelection()
                     Haptics.press(intensity: 0.7)
@@ -964,27 +1042,27 @@ struct DayDial: View {
             syncWindow(gap: gap)
 
         case .gymBody:
-            // The whole visit slides, anywhere in the waking day. There is no
-            // two-hour wall here any more; it only stops where the night is.
-            let desiredGap = baseGap + delta
-            let gap = DayDialModel.clampedGap(
-                desiredGap,
+            // The whole visit slides anywhere in the day. Dragged into the
+            // night it pushes the night later, keeping its length.
+            let push = DayDialModel.pushedGymBody(
+                desiredGap: baseGap + delta,
                 awakeSpan: baseAwake,
                 sessionMinutes: baseSession
             )
-            overshoot = desiredGap - gap
-            next.gymTime = time(at: baseWake + gap)
-            syncWindow(gap: gap)
+            overshoot = push.overshoot
+            applyPush(push, to: &next, baseBed: baseBed, baseWake: baseWake)
+            syncWindow(gap: push.gapMinutes)
 
         case .gymEnd:
-            let desired = baseSession + delta
-            let session = DayDialModel.clampedSession(
-                desired,
+            let push = DayDialModel.pushedGymEnd(
+                desiredSession: baseSession + delta,
                 awakeSpan: baseAwake,
                 gapMinutes: baseGap
             )
-            overshoot = desired - session
-            next.gymSessionMinutes = session
+            overshoot = push.overshoot
+            next.gymSessionMinutes = push.sessionMinutes
+            applyPush(push, to: &next, baseBed: baseBed, baseWake: baseWake)
+            if push.nightShift != 0 { syncWindow(gap: push.gapMinutes) }
         }
 
         if next != rhythm { rhythm = next }
@@ -1011,6 +1089,21 @@ struct DayDial: View {
         }
     }
 
+    /// Writes a gym drag into the rhythm: the night slides by the push, and
+    /// the visit is placed relative to the (possibly moved) alarm.
+    private func applyPush(
+        _ push: DayDialModel.GymPush,
+        to next: inout MorningRhythm,
+        baseBed: Int,
+        baseWake: Int
+    ) {
+        let newWake = baseWake + push.nightShift
+        next.bedtime = time(at: baseBed + push.nightShift + 1440)
+        next.wakeTime = time(at: newWake + 1440)
+        next.gymTime = time(at: newWake + push.gapMinutes)
+        isPushingNight = push.nightShift != 0
+    }
+
     private func valueKey(for grab: DayDialModel.Grab) -> Int {
         switch grab {
         case .bedtime: bedtimeMinutes
@@ -1023,8 +1116,10 @@ struct DayDial: View {
     /// The finger lifted. The bar is already where the finger left it; the
     /// only thing to do is let any overshoot spring back.
     private func settle() {
-        guard grab != nil else { return }
+        guard let released = grab else { return }
         grab = nil
+        if released.isGym, isPushingNight { onNightPushed?(rhythm) }
+        isPushingNight = false
         lastTickKey = -1
         didKnock = false
         onGrabChange?(nil)
