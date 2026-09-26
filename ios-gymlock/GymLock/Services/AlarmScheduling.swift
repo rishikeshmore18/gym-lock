@@ -30,6 +30,8 @@ struct GymAlarmRequest: Hashable {
     /// repeats. `time` and `weekdays` still describe it for backends that
     /// only think in weekly terms.
     var fireDate: Date? = nil
+    /// What ringing does. A plain wake alarm never locks or starts a session.
+    var kind: AlarmKind = .gym
 
     var isOneOff: Bool { fireDate != nil }
 }
@@ -120,10 +122,14 @@ extension GymAlarmRequest {
     /// registrations. Deriving each id from the slot means a replace can find
     /// and remove all of them without keeping a side table.
     func notificationIdentifier(for day: Weekday) -> String {
-        "gymlock.alarm.\(slotID.uuidString).\(day.rawValue)"
+        let prefix = kind == .plainWake ? Self.wakeIdentifierPrefix : Self.identifierPrefix
+        return "\(prefix)\(slotID.uuidString).\(day.rawValue)"
     }
 
     static let identifierPrefix = "gymlock.alarm."
+    /// Plain wake alarms use their own prefix, so the tap router never takes
+    /// one for a gym alarm.
+    static let wakeIdentifierPrefix = "gymlock.wake."
 
     static func slotID(fromNotificationIdentifier identifier: String) -> UUID? {
         guard identifier.hasPrefix(identifierPrefix) else { return nil }

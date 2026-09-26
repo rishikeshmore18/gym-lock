@@ -21,7 +21,6 @@ final class MorningNotifier {
         static let departure = NotificationRoute.ID.departure
         static let deadline = NotificationRoute.ID.deadline
         static let comeback = NotificationRoute.ID.comeback
-        static let moved = NotificationRoute.ID.moved
         static let arrival = NotificationRoute.ID.arrival
         static let snooze = NotificationRoute.ID.snooze
         /// Not session-scoped, so deliberately not in `all`: ending a morning
@@ -107,24 +106,34 @@ final class MorningNotifier {
         await cancel(ID.deadline)
     }
 
-    // MARK: - Moved session
+    // MARK: - Missed
 
-    /// One reminder at the time the user pushed today's session to.
-    ///
-    /// A one-off, deliberately separate from the recurring alarms: moving today
-    /// must not disturb tomorrow.
-    func scheduleMovedSession(at date: Date) async {
-        await cancel(ID.moved)
-
-        let interval = date.timeIntervalSinceNow
-        guard interval > 30 else { return }
-
+    /// "missed ... pick a day to make it up." scheduled the moment the alarm
+    /// rings, for when the lock lifts, so it arrives even if the app was
+    /// killed (FLOW, Flow 1 and 2). Committing or resolving cancels it.
+    func scheduleMissedNotice(day: Date, at date: Date, message: String) async {
+        let id = MissedNotice.identifier(forDay: day)
         await deliver(
-            id: ID.moved,
-            title: "Gym time",
-            body: "you moved today's session to now. still yours to take.",
-            after: interval
+            id: id,
+            title: "gymlock",
+            body: message,
+            after: max(1, date.timeIntervalSinceNow)
         )
+    }
+
+    func cancelMissedNotice(day: Date) async {
+        await cancel(MissedNotice.identifier(forDay: day))
+    }
+
+    /// Makes sure the notice reaches the user once: left alone if it is still
+    /// waiting or was already shown, sent now otherwise (a session saved
+    /// before it was scheduled at the ring).
+    func ensureMissedNotice(day: Date, message: String) async {
+        let id = MissedNotice.identifier(forDay: day)
+        let pending = await center.pendingNotificationRequests().map(\.identifier)
+        let delivered = await center.deliveredNotifications().map(\.request.identifier)
+        guard !pending.contains(id), !delivered.contains(id) else { return }
+        await deliver(id: id, title: "gymlock", body: message, after: 1)
     }
 
     // MARK: - Snooze

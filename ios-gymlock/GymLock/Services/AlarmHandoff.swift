@@ -5,6 +5,9 @@ extension Notification.Name {
     /// that the alarm fired, so a foreground app reacts immediately instead of
     /// waiting for the next scene-phase change.
     static let gymLockAlarmHandoffAvailable = Notification.Name("gymlock.alarm.handoffAvailable")
+    /// Posted when a non-alarm notification tap leaves a route, so a
+    /// frontmost app can act on it straight away.
+    static let gymLockNotificationRouteAvailable = Notification.Name("gymlock.notification.routeAvailable")
 }
 
 /// What the alarm hands to the app.

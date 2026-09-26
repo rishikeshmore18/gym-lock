@@ -317,7 +317,7 @@ struct AlarmSettingsView: View {
         let day = Calendar.current.isDateInTomorrow(override.fireDate)
             ? "tomorrow"
             : override.fireDate.formatted(.dateTime.weekday(.wide)).lowercased()
-        return "next alarm only: \(override.rhythm.wakeTime.displayString) \(day). the week stays as it was."
+        return "next alarm only: \(TimeOfDay(from: override.fireDate).displayString) \(day). the week stays as it was."
     }
 
     private func overrideRow(_ line: String) -> some View {
@@ -509,6 +509,9 @@ struct AlarmSettingsView: View {
         if let guardrail = guardrailLine { return guardrail }
         switch dialGrab {
         case .gymStart, .gymBody:
+            if shown.flowMode == .goLater {
+                return "gym by \(shown.gymByTime.displayString). time to go at \(shown.timeToGo.displayString)."
+            }
             return "gym by \(shown.gymByTime.displayString). apps lock when the alarm rings."
         case .gymEnd:
             return "done by \(shown.gymDoneTime.displayString)."
@@ -529,9 +532,9 @@ struct AlarmSettingsView: View {
     /// lock actually covers, because the block is still a run-up and stops
     /// well short of an afternoon session.
     private var guardrailLine: String? {
-        if shown.gapToGymMinutes > MorningRhythm.absoluteMaximumWindow {
-            return "the lock covers the first 2 hours after the alarm."
-        }
+        // Go Later: get ready and travel are the user's own numbers, set
+        // below the dial, so there is no window to warn about.
+        if shown.flowMode == .goLater { return nil }
         if shown.exceedsNormalMaximum {
             return "that's a long window. still fine."
         }
@@ -541,10 +544,9 @@ struct AlarmSettingsView: View {
         return nil
     }
 
-    /// Only a morning slot is coupled to the sleep rhythm; an evening alarm is
-    /// set from its own editor and never silently rewritten by the dial.
+    /// The main alarm, which the rhythm drives in both flows.
     private var primaryMorningSlotIndex: Int? {
-        guard let primary = primarySlot, primary.daypart.usesSleepRhythm else { return nil }
+        guard let primary = primarySlot else { return nil }
         return store.plan.slots.firstIndex { $0.id == primary.id }
     }
 
@@ -563,10 +565,10 @@ struct AlarmSettingsView: View {
             updated.hasBeenSet = true
             // Wake time applies now; a new bedtime starts tomorrow night.
             store.commitRhythm(updated)
-            // The alarm going off and getting up are one event, so the dial
-            // writes the alarm too and the user is never asked twice.
+            // The main alarm follows the rhythm (wake time in Wake & Go, the
+            // time to go in Go Later). Stored too, for older readers.
             if let index = primaryMorningSlotIndex {
-                store.plan.slots[index].alarmTime = updated.wakeTime
+                store.plan.slots[index].alarmTime = updated.lockAlarmTime
             }
             // A schedule change makes any lingering one-off meaningless.
             store.plan.nextAlarmOverride = nil
@@ -574,9 +576,11 @@ struct AlarmSettingsView: View {
 
         case .nextOnly:
             guard let slot = primarySlot else { break }
-            // The next training day, at the new wake time. If today's alarm
-            // has already gone the next one is tomorrow or later.
-            if let fireDate = draft.wakeTime.nextDate(after: Date(), on: slot.days) {
+            // The next training day, at the new lock alarm time. The draft's
+            // own gap decides the flow for that one day (Step 0).
+            if let fireDate = AlarmPlan.nextLockFireDate(
+                rhythm: draft, days: slot.days, after: Date(), calendar: .current
+            ) {
                 store.plan.nextAlarmOverride = NextAlarmOverride(
                     slotID: slot.id,
                     fireDate: fireDate,
@@ -824,6 +828,15 @@ struct AlarmSettingsView: View {
 
             AlarmRowDivider()
 
+            plainWakeRow
+
+            if plan.rhythm.flowMode == .goLater {
+                AlarmRowDivider()
+                goLaterTimesRow
+            }
+
+            AlarmRowDivider()
+
             persistentModeRow
 
             AlarmRowDivider()
@@ -902,6 +915,72 @@ struct AlarmSettingsView: View {
                 store.plan.snoozeMinutes = minutes
                 // The system alarm's snooze button names the minutes, so the
                 // OS needs the new length, but not once per detent of a spin.
+                snoozeSync?.cancel()
+                snoozeSync = Task {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    guard !Task.isCancelled else { return }
+                    await coordinator.syncAlarms()
+                }
+            }
+        )
+    }
+
+    // PLACEHOLDER UI: designed in Step 3
+    /// The plain wake alarm: no lock, no session (FLOW, Flow 1 and 2).
+    private var plainWakeRow: some View {
+        Toggle(isOn: Binding(
+            get: { plan.plainWakeAlarmEnabled },
+            set: { isOn in
+                Haptics.tap()
+                store.plan.plainWakeAlarmEnabled = isOn
+                resyncAlarms()
+            }
+        )) {
+            Text("wake alarm on other days")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+        }
+        .tint(Theme.ink)
+        .frame(minHeight: 50)
+    }
+
+    // PLACEHOLDER UI: designed in Step 3
+    /// Go Later only: get ready and travel are the user's own numbers, and
+    /// the time to go follows from them.
+    private var goLaterTimesRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Stepper(
+                value: goLaterBinding(\.getReadyMinutes),
+                in: MorningRhythm.getReadyRange,
+                step: 5
+            ) {
+                AlarmValueRow(title: "get ready", value: "\(plan.rhythm.getReadyMinutes) min", showsChevron: false)
+            }
+            Stepper(
+                value: goLaterBinding(\.travelMinutes),
+                in: MorningRhythm.travelRange,
+                step: 5
+            ) {
+                AlarmValueRow(title: "travel", value: "\(plan.rhythm.travelMinutes) min", showsChevron: false)
+            }
+            Text("time to go at \(plan.rhythm.timeToGo.displayString).")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.inkSecondary)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func goLaterBinding(_ keyPath: WritableKeyPath<MorningRhythm, Int>) -> Binding<Int> {
+        Binding(
+            get: { store.plan.rhythm[keyPath: keyPath] },
+            set: { minutes in
+                Haptics.selection()
+                var plan = store.plan
+                plan.rhythm[keyPath: keyPath] = minutes
+                if let index = plan.slots.firstIndex(where: { $0.id == plan.primaryAlarmSlot?.id }) {
+                    plan.slots[index].alarmTime = plan.rhythm.lockAlarmTime
+                }
+                store.plan = plan
                 snoozeSync?.cancel()
                 snoozeSync = Task {
                     try? await Task.sleep(for: .milliseconds(600))

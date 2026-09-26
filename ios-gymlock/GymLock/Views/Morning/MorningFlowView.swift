@@ -72,7 +72,8 @@ struct MorningFlowView: View {
                 session: session,
                 onGoing: { coordinator.commitToGoing() },
                 onSnooze: { coordinator.snooze() },
-                onMoveTime: { coordinator.moveTodaysTime(by: $0) },
+                runningLateOptions: coordinator.runningLateOptions,
+                onRunningLate: { coordinator.runningLate(by: $0) },
                 onCantToday: { coordinator.beginCantToday() }
             )
 

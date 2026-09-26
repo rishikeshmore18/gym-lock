@@ -15,6 +15,7 @@ final class AlarmObserverBag: @unchecked Sendable {
     private let lock = NSLock()
     private var alarmUpdates: Task<Void, Never>?
     private var handoffToken: NSObjectProtocol?
+    private var routeToken: NSObjectProtocol?
 
     var hasAlarmObserver: Bool {
         lock.withLock { alarmUpdates != nil }
@@ -38,8 +39,16 @@ final class AlarmObserverBag: @unchecked Sendable {
         }
     }
 
+    func hold(route token: NSObjectProtocol) {
+        lock.withLock {
+            if let routeToken { NotificationCenter.default.removeObserver(routeToken) }
+            routeToken = token
+        }
+    }
+
     deinit {
         alarmUpdates?.cancel()
         if let handoffToken { NotificationCenter.default.removeObserver(handoffToken) }
+        if let routeToken { NotificationCenter.default.removeObserver(routeToken) }
     }
 }

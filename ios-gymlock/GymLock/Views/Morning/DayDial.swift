@@ -974,9 +974,11 @@ struct DayDial: View {
         // is touched.
         next.gymTime = time(at: baseGym)
 
-        /// The lock window follows the gap the user drew, up to its own
-        /// ceiling. Called whenever the gap changes, from either end.
+        /// In Wake & Go the lock window follows the gap the user drew (get
+        /// ready plus travel). In Go Later (gap over 2 hours) get ready and
+        /// travel are the user's own numbers, so the gap leaves them alone.
         func syncWindow(gap: Int) {
+            guard gap <= MorningRhythm.absoluteMaximumWindow else { return }
             next.travelMinutes = DayDialModel.travelMinutes(
                 gapMinutes: gap,
                 getReadyMinutes: base.getReadyMinutes

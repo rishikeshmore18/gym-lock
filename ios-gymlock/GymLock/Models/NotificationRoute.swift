@@ -5,7 +5,8 @@ import UserNotifications
 ///
 /// `docs/FLOW.md`, Flow 3: only alarm notifications may start a session. Every
 /// other notification GymLock sends (departure, deadline, arrival, comeback,
-/// moved, the snooze re-fire, wind-down) just opens the app. Before this type
+/// the snooze re-fire, wind-down, the missed-day notice, a plain wake alarm)
+/// just opens the app. Before this type
 /// existed, tapping any of them wrote an alarm handoff, so tapping "you're
 /// here" after the gym could lock the apps again for up to two hours.
 ///
@@ -18,7 +19,6 @@ enum NotificationRoute: Codable, Hashable {
         case deadline
         case arrival
         case comeback
-        case moved
 
         var identifier: String {
             switch self {
@@ -26,7 +26,6 @@ enum NotificationRoute: Codable, Hashable {
             case .deadline: ID.deadline
             case .arrival: ID.arrival
             case .comeback: ID.comeback
-            case .moved: ID.moved
             }
         }
     }
@@ -39,6 +38,11 @@ enum NotificationRoute: Codable, Hashable {
     case session(SessionKind)
     /// The night lock's heads-up. The lock catches up on foreground by itself.
     case windDown
+    /// "missed ... pick a day to make it up." Opens the skip screen for
+    /// that day (FLOW, Flow 1 and 2).
+    case missed(day: Date)
+    /// A plain wake alarm (no lock, no session). Never an alarm route.
+    case plainWake
     case unknown
 
     /// Every identifier `MorningNotifier` sends, in one place, so the sender
@@ -47,20 +51,40 @@ enum NotificationRoute: Codable, Hashable {
         static let departure = "gymlock.session.departure"
         static let deadline = "gymlock.session.deadline"
         static let comeback = "gymlock.session.comeback"
-        static let moved = "gymlock.session.moved"
         static let arrival = "gymlock.session.arrival"
         static let snooze = "gymlock.session.snooze"
         /// Not session-scoped: ending a morning must not cancel tonight's
         /// heads-up, so it is deliberately not in `sessionScoped`.
         static let windDown = "gymlock.session.windDown"
 
-        static let sessionScoped = [departure, deadline, comeback, moved, arrival, snooze]
+        /// Followed by the day key. Not session-scoped: it has to fire after
+        /// the session that scheduled it has ended.
+        static let missedPrefix = "gymlock.missed."
+
+        static let sessionScoped = [departure, deadline, comeback, arrival, snooze]
     }
 
     init(identifier: String, categoryIdentifier: String) {
+        // Checked first: a plain wake alarm must never read as a gym alarm.
+        if identifier.hasPrefix(GymAlarmRequest.wakeIdentifierPrefix) {
+            self = .plainWake
+            return
+        }
+
         if identifier.hasPrefix(GymAlarmRequest.identifierPrefix)
-            || categoryIdentifier == NotificationAlarmScheduler.categoryIdentifier {
+            || categoryIdentifier == NotificationAlarmScheduler.categoryIdentifier
+            || categoryIdentifier == NotificationAlarmScheduler.timeToGoCategoryIdentifier {
             self = .alarm(slotID: GymAlarmRequest.slotID(fromNotificationIdentifier: identifier))
+            return
+        }
+
+        if identifier.hasPrefix(ID.missedPrefix) {
+            let key = String(identifier.dropFirst(ID.missedPrefix.count))
+            if let day = Self.day(fromKey: key) {
+                self = .missed(day: day)
+            } else {
+                self = .unknown
+            }
             return
         }
 
@@ -81,6 +105,14 @@ enum NotificationRoute: Codable, Hashable {
     var isAlarm: Bool {
         if case .alarm = self { return true }
         return false
+    }
+
+    /// Reads a `SessionResume.dayKey` ("yyyy-MM-dd") back into the start of
+    /// that day, in the current calendar.
+    static func day(fromKey key: String, calendar: Calendar = .current) -> Date? {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
     }
 
     /// The handoff a tap writes, or nil when the tap must not start anything.

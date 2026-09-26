@@ -40,8 +40,51 @@ struct NotificationRouteTests {
         #expect(route(NotificationRoute.ID.comeback) == .session(.comeback))
     }
 
-    @Test func movedIsASessionRoute() {
-        #expect(route(NotificationRoute.ID.moved) == .session(.moved))
+    @Test func theOldMovedIdentifierIsNoLongerSent() {
+        // "move time" and its notification were removed (FLOW, Flow 2).
+        #expect(route("gymlock.session.moved") == .unknown)
+    }
+
+    @Test func aPlainWakeAlarmIsNeverAnAlarmRoute() {
+        let request = GymAlarmRequest(
+            slotID: WakeAlarmID.weekly,
+            time: TimeOfDay(hour: 7, minute: 0),
+            weekdays: [.tuesday],
+            title: "Wake up",
+            message: "Good morning.",
+            kind: .plainWake
+        )
+        let parsed = route(request.notificationIdentifier(for: .tuesday))
+        #expect(parsed == .plainWake)
+        for action in allActions {
+            #expect(parsed.handoff(forAction: action, at: Date()) == nil)
+        }
+    }
+
+    @Test func theTimeToGoCategoryIsAnAlarm() {
+        let slot = UUID()
+        let request = GymAlarmRequest(
+            slotID: slot,
+            time: TimeOfDay(hour: 17, minute: 30),
+            weekdays: [.monday],
+            title: "Time to go",
+            message: "You planned this.",
+            kind: .timeToGo
+        )
+        let parsed = route(
+            request.notificationIdentifier(for: .monday),
+            category: NotificationAlarmScheduler.timeToGoCategoryIdentifier
+        )
+        #expect(parsed == .alarm(slotID: slot))
+    }
+
+    @Test func theMissedNoticeCarriesItsDay() throws {
+        let calendar = Calendar.current
+        let day = try #require(calendar.date(from: DateComponents(year: 2026, month: 9, day: 28)))
+        let parsed = route(MissedNotice.identifier(forDay: day, calendar: calendar))
+        #expect(parsed == .missed(day: day))
+        #expect(!parsed.isAlarm)
+        #expect(parsed.handoff(forAction: UNNotificationDefaultActionIdentifier, at: Date()) == nil)
     }
 
     @Test func theSnoozeRefireIsItsOwnRoute() {
@@ -111,7 +154,7 @@ struct NotificationRouteTests {
     @Test func onlyAnAlarmEverProducesAHandoff() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let nonAlarms: [NotificationRoute] = NotificationRoute.SessionKind.allCases.map { .session($0) }
-            + [.snoozeRefire, .windDown, .unknown]
+            + [.snoozeRefire, .windDown, .unknown, .plainWake, .missed(day: Date(timeIntervalSince1970: 0))]
 
         for route in nonAlarms {
             for action in allActions {
@@ -168,7 +211,8 @@ struct NotificationRouteTests {
 
     @Test func everyRouteSurvivesEncoding() throws {
         let routes: [NotificationRoute] = NotificationRoute.SessionKind.allCases.map { .session($0) }
-            + [.snoozeRefire, .windDown, .unknown, .alarm(slotID: UUID()), .alarm(slotID: nil)]
+            + [.snoozeRefire, .windDown, .unknown, .alarm(slotID: UUID()), .alarm(slotID: nil),
+               .plainWake, .missed(day: Date(timeIntervalSince1970: 86_400))]
 
         for route in routes {
             let entry = PendingNotificationRoute.Entry(route: route, tappedAt: Date(timeIntervalSince1970: 1))

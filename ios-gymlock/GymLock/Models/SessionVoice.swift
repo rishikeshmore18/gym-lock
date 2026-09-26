@@ -26,17 +26,24 @@ nonisolated struct SessionVoice: Hashable {
     let snoozeEnabled: Bool
     /// The snooze length the user chose, 1 to 15.
     let snoozeMinutes: Int
+    /// Which flow the alarm ran in (Step 0). Decides whether a snooze exists;
+    /// the wording still follows the clock.
+    let flowMode: GymFlowMode
 
+    /// `flowMode` left out falls back to what the clock used to decide, so a
+    /// voice built from a time alone reads as it always did.
     init(
         daypart: SessionDaypart,
         hasSnoozed: Bool = false,
         snoozeEnabled: Bool = true,
-        snoozeMinutes: Int = 5
+        snoozeMinutes: Int = 5,
+        flowMode: GymFlowMode? = nil
     ) {
         self.daypart = daypart
         self.hasSnoozed = hasSnoozed
         self.snoozeEnabled = snoozeEnabled
         self.snoozeMinutes = snoozeMinutes
+        self.flowMode = flowMode ?? (daypart == .morning ? .wakeAndGo : .goLater)
     }
 
     init(session: GymSession) {
@@ -44,7 +51,8 @@ nonisolated struct SessionVoice: Hashable {
             daypart: SessionDaypart(session.alarmTime),
             hasSnoozed: session.hasSnoozed,
             snoozeEnabled: session.offersSnooze,
-            snoozeMinutes: session.snoozeDurationMinutes
+            snoozeMinutes: session.snoozeDurationMinutes,
+            flowMode: session.resolvedFlowMode
         )
     }
 
@@ -73,12 +81,21 @@ nonisolated struct SessionVoice: Hashable {
 
     /// Whether a snooze may be offered at all.
     ///
-    /// Morning only, and only once. Somebody whose alarm rings after work is
-    /// already awake; the button would not be buying them five minutes of
-    /// sleep, it would be buying them a way out.
+    /// Wake & Go only, and only once (FLOW, Flow 1). A Go Later alarm finds
+    /// the user already awake, so it offers running late instead (Flow 2).
     ///
     /// And only if the user has not switched it off.
-    var allowsSnooze: Bool { snoozeEnabled && daypart == .morning && !hasSnoozed }
+    var allowsSnooze: Bool { snoozeEnabled && flowMode == .wakeAndGo && !hasSnoozed }
+
+    /// The Go Later option on the decision screen (FLOW, Flow 2).
+    var runningLateAction: String { "running late" }
+
+    /// Shown while running late waits for its alarm.
+    func runningLateHeadline(until time: String) -> String {
+        "rings again at \(time)."
+    }
+
+    var runningLateSupport: String { "your apps stay locked." }
 
     /// The action the user is being asked to take.
     var primaryAction: String {
@@ -120,27 +137,9 @@ nonisolated struct SessionVoice: Hashable {
     var snoozeAction: String { "\(snoozeMinutes) more min" }
 
     /// The escape hatch on the alarm screen. It is never hidden.
-    var changePlanAction: String {
-        hasSnoozed ? "move today's time" : "plans changed"
-    }
+    var changePlanAction: String { "plans changed" }
 
     var cantTodayAction: String { "can't today" }
-
-    var moveTimeTitle: String {
-        switch daypart {
-        case .morning: "move this morning to when?"
-        case .midday, .evening: "move today's session to when?"
-        }
-    }
-
-    /// The reassurance under the move-time options. The whole point of the
-    /// bounded choice is that it touches today only.
-    var moveTimeNote: String {
-        switch daypart {
-        case .morning: "today only. your other mornings stay exactly as they are."
-        case .midday, .evening: "today only. the rest of your week stays exactly as it is."
-        }
-    }
 
     // MARK: - The preparation window
 

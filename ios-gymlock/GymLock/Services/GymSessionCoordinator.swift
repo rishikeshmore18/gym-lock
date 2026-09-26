@@ -55,7 +55,17 @@ final class GymSessionCoordinator {
         /// app at 6:50 has their apps locked again by the clock check. That is
         /// the single worst bug this feature could ship with.
         static let resolvedSlots = "gymlock.alarm.resolvedSlots"
+        /// Gym days already offered the skip screen after the phone was off,
+        /// as day keys, so each is offered once.
+        static let offeredMissedDays = "gymlock.alarm.offeredMissedDays"
+        /// When the phone-off check first ran. Days before it are never
+        /// offered, so an update never reaches back into old weeks.
+        static let missedCheckSince = "gymlock.alarm.missedCheckSince"
     }
+
+    /// Set while an ignored alarm is being closed, so ending the session
+    /// does not cancel the "pick a day" notice it just made sure of.
+    private var isEndingIgnoredAlarm = false
 
     /// The morning in progress, if there is one.
     private(set) var session: GymSession?
@@ -130,6 +140,14 @@ final class GymSessionCoordinator {
         // for: the app is already active by the time this runs.
         resumeSessionIfDue()
         reconcileWindDown()
+        openPendingSkipScreenIfNeeded()
+        offerMissedGymDayIfNeeded()
+    }
+
+    /// Only the store, without any of the system wiring `attach(to:)` does.
+    /// For tests of the session rules.
+    func bindStoreOnly(_ store: AppStore) {
+        self.store = store
     }
 
     /// The second belt on door one.
@@ -165,6 +183,15 @@ final class GymSessionCoordinator {
         ) { [weak self] _ in
             Task { @MainActor in self?.resumeSessionIfDue() }
         })
+
+        // A non-alarm notification tapped while the app is frontmost.
+        observers.hold(route: NotificationCenter.default.addObserver(
+            forName: .gymLockNotificationRouteAvailable,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.openPendingSkipScreenIfNeeded() }
+        })
     }
 
     var alarmCapability: AlarmDeliveryCapability { alarms.capability }
@@ -177,6 +204,10 @@ final class GymSessionCoordinator {
     /// that happened while the app was not running.
     func applicationDidBecomeActive() {
         enforceShieldFailsafe()
+        // Before the shield is reconciled: an ignored alarm must end, not be
+        // locked again.
+        endIgnoredSessionIfNeeded()
+        resolveElapsedRunningLate()
         reconcileShieldWithSession()
         // A snooze that ran out while the app was backgrounded must resolve the
         // moment the user looks at the phone. Without this, someone who taps
@@ -187,6 +218,8 @@ final class GymSessionCoordinator {
         resumeSessionIfDue()
         // Door four, in effect: the evening lock catches up with the clock.
         reconcileWindDown()
+        openPendingSkipScreenIfNeeded()
+        offerMissedGymDayIfNeeded()
         Task { await health.fetchNewWorkouts() }
     }
 
@@ -201,17 +234,20 @@ final class GymSessionCoordinator {
     func resumeSessionIfDue(at now: Date = Date()) {
         guard let store else { return }
 
-        let isLive = session?.state.isLive ?? false
+        // An open skip screen for a past day never holds up a real alarm.
+        let isLive = (session?.state.isLive ?? false) && session?.isMakeUpOffer != true
         let resolution = SessionResume.resolve(
             now: now,
             isSessionLive: isLive,
             liveSlotID: isLive ? session?.slotID : nil,
             liveSessionDay: isLive ? session?.day : nil,
             handoff: AlarmHandoff.peek(now: now),
-            slots: store.plan.slots,
+            // The enabled slots carry the real ring time (wake time, or the
+            // time to go), so the clock check follows the flow.
+            slots: store.plan.enabledSlots,
             windowMinutes: store.plan.windowMinutes,
             resolvedKeys: resolvedSlotKeys,
-            alarmSlotIDs: store.plan.nextAlarmOverride.map { [$0.id: $0.slotID] } ?? [:]
+            alarmSlotIDs: store.plan.oneOffSlotIDs
         )
 
         // Cleared when acted on, and when it is a note for a day already
@@ -277,15 +313,18 @@ final class GymSessionCoordinator {
         Set(defaults.stringArray(forKey: Key.resolvedSlots) ?? [])
     }
 
-    /// Remembers that this slot is finished for today.
+    /// Remembers that this slot is finished for the session's own day.
     ///
-    /// Only today's keys are kept, so the list cannot grow without bound and a
-    /// key from last Tuesday can never suppress this Tuesday's alarm.
+    /// Keyed by the day the alarm rang, so a session from yesterday closed
+    /// this morning can never suppress today's alarm. Only today's and
+    /// yesterday's keys are kept, so the list cannot grow without bound.
     private func markSlotResolved(_ session: GymSession, at now: Date = Date()) {
-        let todayKey = SessionResume.dayKey(for: now)
-        let key = SessionResume.resolvedKey(slotID: session.slotID, day: now)
+        let calendar = Calendar.current
+        let key = SessionResume.resolvedKey(slotID: session.slotID, day: session.day)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+        let recent = [now, yesterday].map { SessionResume.dayKey(for: $0) }
 
-        var kept = resolvedSlotKeys.filter { $0.hasSuffix("|\(todayKey)") }
+        var kept = resolvedSlotKeys.filter { stored in recent.contains { stored.hasSuffix("|\($0)") } }
         kept.insert(key)
         defaults.set(Array(kept), forKey: Key.resolvedSlots)
     }
@@ -303,7 +342,7 @@ final class GymSessionCoordinator {
         // knows it is counting down, which keeps the five minutes and the
         // decision in one place rather than inventing a screen the user has to
         // be moved off again.
-        case .alarmFired, .awaitingDecision, .snoozed:
+        case .alarmFired, .awaitingDecision, .snoozed, .runningLate:
             return .decision
         case .activationMission:
             return .mission
@@ -345,7 +384,11 @@ final class GymSessionCoordinator {
     private func applyShield(for session: GymSession) {
         guard shield.hasSelection else { return }
 
-        let deadline = ShieldPolicy.deadline(forWindowMinutes: session.windowMinutes)
+        // Before a commitment the lock lifts at the session's own deadline
+        // (alarm + window + 90 min, max 4 h), which running late moves.
+        let deadline = session.state.hasCommitted
+            ? ShieldPolicy.deadline(forWindowMinutes: session.windowMinutes)
+            : session.effectiveLockDeadline
 
         // The handover. If the wind-down lock currently owns the shield, this
         // call takes ownership in one step: the shield is re-applied with the
@@ -429,48 +472,26 @@ final class GymSessionCoordinator {
         let profile = store.profile
 
         let soundFile = notificationSoundFileName(for: profile)
-        var requests = plan.enabledSlots.map { slot in
+        // Which alarms ring is decided in one pure place (`AlarmPlan`): the
+        // gym alarm or the time to go, the plain wake alarm, and every
+        // one-off. The alert is built by the system long before the app runs,
+        // so whether it snoozes travels with the request.
+        let requests = AlarmPlan.alarms(for: plan, now: Date(), calendar: .current).map { alarm in
             GymAlarmRequest(
-                slotID: slot.id,
-                time: slot.alarmTime,
-                weekdays: slot.days,
-                title: "Gym time",
-                message: "You planned this.",
+                slotID: alarm.id,
+                time: alarm.time,
+                weekdays: alarm.weekdays,
+                title: Self.alarmTitle(for: alarm.kind),
+                message: Self.alarmMessage(for: alarm.kind),
                 soundResource: profile.alarmSound.resourceName,
                 // The notification backend needs the caf, not the mp3: the
                 // system sound facility cannot decode mp3 and silently plays
                 // its own default instead.
                 soundFileName: soundFile,
-                // The alert is built by the system long before the app runs, so
-                // the morning-only snooze rule has to be decided here.
-                allowsSnooze: plan.snoozeEnabled && slot.daypart.usesSleepRhythm,
-                snoozeMinutes: plan.snoozeMinutes
-            )
-        }
-
-        // "Change next alarm only": one extra alarm at the one-off time, and
-        // the weekly alarm skips that day so the two never both ring.
-        if let override = plan.activeOverride(), override.fireDate > Date(),
-           let slot = plan.slots.first(where: { $0.id == override.slotID }), slot.isEnabled,
-           let day = override.weekday() {
-            if let index = requests.firstIndex(where: { $0.slotID == slot.id }) {
-                requests[index].weekdays.remove(day)
-                if requests[index].weekdays.isEmpty { requests.remove(at: index) }
-            }
-            requests.append(
-                GymAlarmRequest(
-                    slotID: override.id,
-                    time: TimeOfDay(from: override.fireDate),
-                    weekdays: [day],
-                    title: "Gym time",
-                    message: "You planned this.",
-                    soundResource: profile.alarmSound.resourceName,
-                    soundFileName: soundFile,
-                    allowsSnooze: plan.snoozeEnabled
-                        && SessionDaypart(TimeOfDay(from: override.fireDate)).usesSleepRhythm,
-                    snoozeMinutes: plan.snoozeMinutes,
-                    fireDate: override.fireDate
-                )
+                allowsSnooze: alarm.allowsSnooze,
+                snoozeMinutes: plan.snoozeMinutes,
+                fireDate: alarm.fireDate,
+                kind: alarm.kind
             )
         }
 
@@ -484,13 +505,28 @@ final class GymSessionCoordinator {
         await alarms.replaceAll(with: requests)
     }
 
-    /// Drops a one-off alarm once its morning is over, so the weekly alarm
-    /// for that day comes back on the next sync.
+    private static func alarmTitle(for kind: AlarmKind) -> String {
+        switch kind {
+        case .gym: "Gym time"
+        case .timeToGo: "Time to go"
+        case .plainWake: "Wake up"
+        }
+    }
+
+    private static func alarmMessage(for kind: AlarmKind) -> String {
+        switch kind {
+        case .gym, .timeToGo: "You planned this."
+        case .plainWake: "Good morning."
+        }
+    }
+
+    /// Drops one-off alarms once their day is over, so the weekly alarm for
+    /// that day comes back on the next sync.
     func expireNextAlarmOverrideIfNeeded(now: Date = Date()) {
-        guard let store, let override = store.plan.nextAlarmOverride,
-              !override.isActive(at: now)
-        else { return }
-        store.plan.nextAlarmOverride = nil
+        guard let store else { return }
+        let kept = store.plan.oneOffAlarms.filter { $0.isActive(at: now) }
+        guard kept.count != store.plan.oneOffAlarms.count else { return }
+        store.plan.oneOffAlarms = kept
         Task { await syncAlarms() }
     }
 
@@ -749,20 +785,29 @@ final class GymSessionCoordinator {
         let calendar = Calendar.current
         let day = calendar.startOfDay(for: date)
 
-        // Two sessions in one day are legitimate, but the *same* session
-        // reopening is not a new one.
-        if let existing = session, existing.state.isLive, existing.slotID == slot?.id {
-            return
+        if let existing = session, existing.state.isLive {
+            if existing.isMakeUpOffer == true {
+                // An open skip screen gives way to a real alarm.
+                endSession(clearingAnchor: true, keepingReminders: true)
+            } else if !calendar.isDate(existing.day, inSameDayAs: date) {
+                // A session left over from an earlier day must not block this
+                // one: ignored, it ends as missed; otherwise it is dropped.
+                endLeftover(existing, now: date)
+            } else if existing.slotID == slot?.id {
+                // Two sessions in one day are legitimate, but the *same*
+                // session reopening is not a new one.
+                return
+            }
         }
 
         let plan = store.plan
-        // The rhythm for *this* morning: a one-off change if the user made
-        // one for today, the weekly schedule otherwise.
+        // The rhythm for *this* day: a one-off change if the user made one
+        // for today, the weekly schedule otherwise.
         let rhythm = plan.rhythm(at: date, calendar: calendar)
-        let isOverrideMorning = plan.activeOverride(at: date).map {
-            calendar.isDate(date, inSameDayAs: $0.fireDate) && $0.slotID == slot?.id
-        } ?? false
-        let alarmTime = isOverrideMorning ? rhythm.wakeTime : (slot?.alarmTime ?? plan.rhythm.wakeTime)
+        let oneOff = plan.oneOffAlarms.first {
+            $0.kind.replacesWeeklyRing && $0.slotID == slot?.id && calendar.isDate(date, inSameDayAs: $0.fireDate)
+        }
+        let alarmTime = oneOff.map { TimeOfDay(from: $0.fireDate) } ?? slot?.alarmTime ?? rhythm.lockAlarmTime
         let daypart = SessionDaypart(alarmTime)
 
         var new = GymSession(
@@ -777,9 +822,16 @@ final class GymSessionCoordinator {
         new.alarmFiredAt = date
         new.snoozeOffered = plan.snoozeEnabled
         new.snoozeLengthMinutes = plan.snoozeMinutes
+        // Step 0, by the rhythm in force today. Decides snooze or running late.
+        new.flowMode = rhythm.flowMode
+        new.lockDeadline = ShieldPolicy.deadline(forWindowMinutes: new.windowMinutes, from: date)
 
         session = new
         store.record(.alarmFired, sessionID: new.id)
+
+        // Scheduled now, for when the lock lifts, so it arrives even if the
+        // app is killed. Committing or resolving cancels it.
+        scheduleMissedNotice(for: new)
 
         // The shield goes on here, not after "I'm going". The product exists
         // precisely for the moment another app wins the argument, and that
@@ -838,11 +890,17 @@ final class GymSessionCoordinator {
 
         current.committedAt = Date()
         current.snoozeExpiresAt = nil
+        current.runningLateUntil = nil
         current.state = .activationMission
 
         // A snooze re-fire arriving after the user is already up would be the
         // app waking someone who is standing in their kitchen.
-        Task { [notifier] in await notifier.cancelSnoozeRefire() }
+        let day = current.day
+        Task { [notifier] in
+            await notifier.cancelSnoozeRefire()
+            await notifier.cancelMissedNotice(day: day)
+        }
+        clearRunningLateAlarm(for: current)
 
         // A temporary anchor, captured now and deleted when the session ends.
         // Never labelled or stored as a home address.
@@ -927,26 +985,212 @@ final class GymSessionCoordinator {
         startRingingIfFrontmost()
     }
 
-    /// Pushes today's session later without abandoning it.
-    func moveTodaysTime(by minutes: Int) {
-        guard var current = session else { return }
+    // MARK: - Running late (Go Later)
 
-        let newTime = Date().addingTimeInterval(Double(minutes) * 60)
-        current.state = .rescheduled
+    /// The running-late choices on offer right now: Go Later only, once,
+    /// and never one that runs the visit into sleep hours.
+    var runningLateOptions: [Int] {
+        guard let session, let store else { return [] }
+        return RunningLate.options(
+            for: session,
+            rhythm: store.plan.rhythm(at: session.day),
+            pending: store.plan.pendingBedtime,
+            now: Date(),
+            calendar: .current
+        )
+    }
+
+    /// "Running late" (FLOW, Flow 2). The apps stay locked, a real one-off
+    /// alarm rings in `minutes`, and the lock deadline moves with it.
+    func runningLate(by minutes: Int, now: Date = Date()) {
+        guard let current = session, let store,
+              runningLateOptions.contains(minutes)
+        else { return }
+
+        ringer.stop()
+        let updated = RunningLate.apply(minutes, to: current, now: now)
+        session = updated
+        persist()
+
+        store.plan.oneOffAlarms.append(
+            OneOffAlarm(kind: .runningLate, slotID: updated.slotID, fireDate: updated.runningLateUntil ?? now)
+        )
+        store.record(.rescheduled, sessionID: updated.id, detail: "running late +\(minutes)")
+
+        // The lock stays on, now until the moved deadline.
+        applyShield(for: updated)
+        scheduleMissedNotice(for: updated)
+        Haptics.soft()
+        startTicking()
+        Task { await syncAlarms() }
+    }
+
+    /// Brings the decision back when the running-late alarm rings.
+    func resolveElapsedRunningLate(at now: Date = Date()) {
+        guard var current = session, RunningLate.hasElapsed(current, at: now) else { return }
+        current.state = .awaitingDecision
+        current.runningLateUntil = nil
+        session = current
+        persist()
+        Haptics.medium()
+        startRingingIfFrontmost()
+    }
+
+    /// Takes the running-late alarm back off once it is no longer wanted.
+    private func clearRunningLateAlarm(for session: GymSession) {
+        guard let store,
+              store.plan.oneOffAlarms.contains(where: { $0.kind == .runningLate && $0.slotID == session.slotID })
+        else { return }
+        store.plan.oneOffAlarms.removeAll { $0.kind == .runningLate && $0.slotID == session.slotID }
+        Task { await syncAlarms() }
+    }
+
+    // MARK: - Ignored alarms
+
+    private func scheduleMissedNotice(for session: GymSession) {
+        guard MissedNotice.stands(for: session.state), session.isMakeUpOffer != true else { return }
+        let day = session.day
+        let deadline = session.effectiveLockDeadline
+        let message = MissedNotice.message(forAlarmAt: session.alarmTime)
+        Task { [notifier] in
+            await notifier.scheduleMissedNotice(day: day, at: deadline, message: message)
+        }
+    }
+
+    /// Ends a session nobody answered once its lock deadline has passed
+    /// (FLOW, Flow 1 and 2): `.missed` on the alarm's day, the shield off,
+    /// the slot resolved, and the "pick a day" notice. Runs from the ticker,
+    /// on every foreground and on restore.
+    func endIgnoredSessionIfNeeded(now: Date = Date()) {
+        guard let current = session,
+              LeftoverSession.action(for: current, now: now, calendar: .current) == .endAsMissed
+        else { return }
+        endIgnoredSession(current, now: now)
+    }
+
+    private func endIgnoredSession(_ ignored: GymSession, now: Date) {
+        var current = ignored
+        current.state = .missed
+        current.snoozeExpiresAt = nil
+        current.runningLateUntil = nil
         session = current
 
-        // The shield follows the decision: moving the session moves the lock
-        // rather than leaving the user blocked for a commitment that is no
-        // longer live.
+        store?.log.record(
+            SessionOutcome(date: now, kind: .missed, sessionID: current.id, countsOn: current.day)
+        )
+        store?.record(.missed, sessionID: current.id, detail: "alarm ignored")
         releaseShield(sessionID: current.id)
+        markSlotResolved(current, at: now)
+        clearRunningLateAlarm(for: current)
 
+        // Usually already waiting, scheduled at the ring. Sent now only if it
+        // somehow is not (a session saved before this existed).
+        let day = current.day
+        let message = MissedNotice.message(forAlarmAt: current.alarmTime)
         Task { [notifier] in
-            await notifier.scheduleMovedSession(at: newTime)
+            await notifier.cancelSnoozeRefire()
+            await notifier.ensureMissedNotice(day: day, message: message)
         }
 
-        store?.log.record(SessionOutcome(kind: .rescheduled, sessionID: current.id, countsOn: current.day))
-        store?.record(.rescheduled, sessionID: current.id)
-        endSession(clearingAnchor: true, keepingReminders: true)
+        isEndingIgnoredAlarm = true
+        endSession(clearingAnchor: true)
+        isEndingIgnoredAlarm = false
+    }
+
+    /// A live session from an earlier day, found when a new alarm starts.
+    private func endLeftover(_ leftover: GymSession, now: Date) {
+        if !leftover.state.hasCommitted {
+            endIgnoredSession(leftover, now: now)
+        } else {
+            // Committed and never finished: dropped with nothing recorded,
+            // exactly as a relaunch treats a stale session.
+            if shield.isShielded { releaseShield(sessionID: leftover.id) }
+            endSession(clearingAnchor: true)
+        }
+    }
+
+    // MARK: - The skip screen for a day
+
+    /// Opens the skip screen for a day with no session running: from the
+    /// "pick a day" notice, or after a gym day the phone was off for. Until
+    /// the skip screen is rebuilt this is the existing "can't today" screen.
+    /// Nothing is recorded unless the user picks something there.
+    func openSkipScreen(for day: Date) {
+        guard let store, !isSessionLive else { return }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: day)
+        let rhythm = store.plan.rhythm(at: start, calendar: calendar)
+        let slot = store.plan.enabledSlots.first
+        let alarmTime = rhythm.lockAlarmTime
+
+        var offer = GymSession(
+            day: start,
+            slotID: slot?.id,
+            alarmTime: alarmTime,
+            isMorningSession: SessionDaypart(alarmTime).usesSleepRhythm,
+            getReadyMinutes: rhythm.getReadyMinutes,
+            travelMinutes: rhythm.travelMinutes,
+            state: .cantToday
+        )
+        offer.flowMode = rhythm.flowMode
+        offer.isMakeUpOffer = true
+        session = offer
+        persist()
+        store.record(.cantToday, sessionID: offer.id, detail: "skip screen offered")
+    }
+
+    /// Acts on a tapped "pick a day" notice.
+    func openPendingSkipScreenIfNeeded() {
+        guard let store, !isSessionLive,
+              let entry = store.pendingNotificationRoute,
+              case let .missed(day) = entry.route
+        else { return }
+        _ = store.takePendingNotificationRoute()
+        openSkipScreen(for: day)
+    }
+
+    /// The phone was off and the alarm never rang (FLOW, Flow 1 edge cases):
+    /// nothing is recorded, and the skip screen is offered once for the
+    /// first such gym day this week.
+    @discardableResult
+    func offerMissedGymDayIfNeeded(now: Date = Date()) -> Date? {
+        guard let store, !isSessionLive,
+              store.stage == .home, store.plan.hasBeenReviewed
+        else { return nil }
+
+        let calendar = Calendar.current
+        let since: Date
+        if let stored = defaults.object(forKey: Key.missedCheckSince) as? Date {
+            since = stored
+        } else {
+            since = now
+            defaults.set(now, forKey: Key.missedCheckSince)
+        }
+
+        let offered = Set(defaults.stringArray(forKey: Key.offeredMissedDays) ?? [])
+        var handled = Set(store.log.outcomes.map { $0.countingDay(calendar: calendar) })
+        handled.formUnion(
+            store.events.events.filter { $0.kind == .alarmFired }.map { calendar.startOfDay(for: $0.at) }
+        )
+        for key in offered {
+            if let day = NotificationRoute.day(fromKey: key, calendar: calendar) { handled.insert(day) }
+        }
+
+        guard let day = MissedDayCheck.unhandledGymDay(
+            now: now,
+            plan: store.plan,
+            handledDays: handled,
+            notBefore: max(since, AppInstallDate.resolve(defaults)),
+            calendar: calendar
+        ) else { return nil }
+
+        // Once only, whatever the user does with it.
+        var updated = offered
+        updated.insert(SessionResume.dayKey(for: day, calendar: calendar))
+        defaults.set(Array(updated), forKey: Key.offeredMissedDays)
+
+        openSkipScreen(for: day)
+        return day
     }
 
     // MARK: - Missions
@@ -1219,10 +1463,14 @@ final class GymSessionCoordinator {
     func beginCantToday() {
         guard var current = session else { return }
         current.state = .cantToday
+        current.runningLateUntil = nil
         session = current
         store?.record(.cantToday, sessionID: current.id)
         markSlotResolved(current)
         persist()
+        let day = current.day
+        Task { [notifier] in await notifier.cancelMissedNotice(day: day) }
+        clearRunningLateAlarm(for: current)
     }
 
     var hasEasySkipRemaining: Bool {
@@ -1299,6 +1547,12 @@ final class GymSessionCoordinator {
 
         if clearingAnchor { location.endSession() }
 
+        // The "pick a day" notice only stands for an alarm nobody answered.
+        if let current = session, !isEndingIgnoredAlarm {
+            let day = current.day
+            Task { [notifier] in await notifier.cancelMissedNotice(day: day) }
+        }
+
         // Belt and braces: no session may end with a shield still standing.
         if shield.isShielded { releaseShield(sessionID: session?.id) }
 
@@ -1332,9 +1586,18 @@ final class GymSessionCoordinator {
               let stored = try? JSONDecoder().decode(GymSession.self, from: data)
         else { return }
 
-        // Anything from a previous day is stale, and a stale session must never
-        // keep a shield alive.
-        guard Calendar.current.isDateInToday(stored.day), stored.state.isLive else {
+        // An alarm nobody answered ends as missed, even if the app was killed
+        // the whole time.
+        if LeftoverSession.action(for: stored, now: Date(), calendar: .current) == .endAsMissed {
+            session = stored
+            endIgnoredSession(stored, now: Date())
+            return
+        }
+
+        // Anything else from a previous day is stale, and a stale session must
+        // never keep a shield alive. An open skip screen for a past day stays.
+        let isCurrent = Calendar.current.isDateInToday(stored.day) || stored.isMakeUpOffer == true
+        guard isCurrent, stored.state.isLive else {
             defaults.removeObject(forKey: Key.session)
             if shield.isShielded { releaseShield(sessionID: stored.id) }
             return
@@ -1363,7 +1626,9 @@ final class GymSessionCoordinator {
 
         // A snooze survives termination: the expiry is an absolute date, so a
         // relaunch either resumes the remaining seconds or resolves it at once.
+        // Running late works the same way.
         resolveElapsedSnooze()
+        resolveElapsedRunningLate()
 
         reconcileShieldWithSession()
         startTicking()
@@ -1401,8 +1666,18 @@ final class GymSessionCoordinator {
             return
         }
 
+        if LeftoverSession.action(for: current, now: Date(), calendar: .current) == .endAsMissed {
+            endIgnoredSessionIfNeeded()
+            return
+        }
+
         if current.state == .snoozed {
             resolveElapsedSnooze()
+            return
+        }
+
+        if current.state == .runningLate {
+            resolveElapsedRunningLate()
             return
         }
 
@@ -1472,6 +1747,14 @@ final class GymSessionCoordinator {
 
     func debugReconcileWindDown() {
         reconcileWindDown()
+    }
+
+    /// Forgets which days were offered after the phone was off, and starts
+    /// the check from `since`.
+    func debugResetMissedDayCheck(since: Date) {
+        defaults.removeObject(forKey: Key.offeredMissedDays)
+        defaults.set(since, forKey: Key.missedCheckSince)
+        defaults.set(since, forKey: AppInstallDate.key)
     }
     #endif
 }

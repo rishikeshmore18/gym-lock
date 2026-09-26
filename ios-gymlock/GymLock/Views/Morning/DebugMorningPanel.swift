@@ -20,6 +20,7 @@ struct DebugMorningPanel: View {
     @State private var tapResultSummary = "none"
     @State private var weekRulesSummary = "none"
     @State private var sleepSummary = "none"
+    @State private var alarmRulesSummary = "none"
 
     var body: some View {
         NavigationStack {
@@ -70,6 +71,11 @@ struct DebugMorningPanel: View {
             row("next alarm", nextAlarmLabel)
             row("handoff pending", handoffSummary)
             row("resolved today", resolvedSummary)
+            row("flow", store.plan.rhythm.flowMode.label)
+            row("lock alarm", store.plan.rhythm.lockAlarmTime.clockString)
+            row("plain wake alarm", store.plan.plainWakeAlarmEnabled ? "on" : "off")
+            row("one-off alarms", "\(store.plan.oneOffAlarms.count)")
+            row("alarm rules result", alarmRulesSummary)
             row("sleep", "\(store.plan.rhythm.bedtime.clockString) to \(store.plan.rhythm.wakeTime.clockString)")
             row("pending bedtime", store.plan.pendingBedtime?.bedtime.clockString ?? "none")
             row("ask wake time", store.plan.needsWakeTimeAnswer ? "yes" : "no")
@@ -123,6 +129,7 @@ struct DebugMorningPanel: View {
         tapResultSummary = GymSessionCoordinator.debugNotificationTapResult
         weekRulesSummary = GymSessionCoordinator.debugWeekRulesResult
         sleepSummary = GymSessionCoordinator.debugSleepResult
+        alarmRulesSummary = GymSessionCoordinator.debugAlarmRulesResult
     }
 
     private var ringerLabel: String {
@@ -220,6 +227,10 @@ struct DebugMorningPanel: View {
             // Sleep rules are judged by the sleep result reading.
             .legacyEveningUser, .changeBedtimeTonight,
             .bedtimeAfterMidnightGymMonday, .oldPlanNightLockOff,
+            // Alarm rules are judged by the alarm rules result reading.
+            .wakeAndGoGymDay, .goLaterGymDay, .plainWakeAlarmRings,
+            .ignoreAlarmUntilDeadline, .runningLateNearBedtime,
+            .runningLateTwice, .phoneWasOffOnGymDay,
             // Every sound step is judged by the readings above, not by a
             // screen change, so the panel stays put.
             .ringerStart, .ringerEscalated, .ringerStop, .ringerCeiling,

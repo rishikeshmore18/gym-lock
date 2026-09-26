@@ -67,7 +67,17 @@ final class AlarmNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
             options: [.customDismissAction]
         )
 
-        UNUserNotificationCenter.current().setNotificationCategories([alarm, refire])
+        // Go Later's "time to go": no snooze, running late is in the app.
+        let going = UNNotificationCategory(
+            identifier: NotificationAlarmScheduler.timeToGoCategoryIdentifier,
+            actions: [
+                UNNotificationAction(identifier: Action.imUp, title: "I'm going", options: [.foreground]),
+            ],
+            intentIdentifiers: [],
+            options: [.customDismissAction]
+        )
+
+        UNUserNotificationCenter.current().setNotificationCategories([alarm, refire, going])
     }
 
     // MARK: - UNUserNotificationCenterDelegate
@@ -116,6 +126,7 @@ final class AlarmNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
             // Swiping a non-alarm away does not open the app, so it is not
             // a route anyone asked for.
             PendingNotificationRoute.write(route, at: now)
+            NotificationCenter.default.post(name: .gymLockNotificationRouteAvailable, object: nil)
         }
 
         return route

@@ -192,39 +192,9 @@ extension MorningRhythm: Codable {
 
 // MARK: - Next alarm only
 
-/// A one-time change to the very next alarm, leaving the weekly schedule as
-/// it was: Apple's "Change Next Alarm Only".
-///
-/// Carries its own id because the alarm backends key alarms by id and the
-/// slot's weekly alarm must keep its own. Once the morning it describes is
-/// over the override is dropped and the schedule resumes untouched.
-struct NextAlarmOverride: Codable, Hashable, Identifiable {
-    var id: UUID
-    /// The slot whose next ring this replaces.
-    var slotID: UUID
-    /// The exact moment the one-off alarm rings.
-    var fireDate: Date
-    /// The rhythm in force for that one morning.
-    var rhythm: MorningRhythm
-
-    init(id: UUID = UUID(), slotID: UUID, fireDate: Date, rhythm: MorningRhythm) {
-        self.id = id
-        self.slotID = slotID
-        self.fireDate = fireDate
-        self.rhythm = rhythm
-    }
-
-    /// The override outlives its ring long enough for the morning to be
-    /// resumed, then expires so the weekly alarm for that day comes back.
-    func isActive(at now: Date) -> Bool {
-        let closesAt = fireDate.addingTimeInterval(Double(rhythm.windowMinutes + 30) * 60)
-        return now < closesAt
-    }
-
-    func weekday(calendar: Calendar = .current) -> Weekday? {
-        Weekday(rawValue: calendar.component(.weekday, from: fireDate))
-    }
-}
+/// "Change next alarm only" is now one kind of one-off alarm. The old name
+/// is kept so older call sites and tests read the same.
+typealias NextAlarmOverride = OneOffAlarm
 
 // MARK: - Night lock (legacy settings)
 
@@ -323,8 +293,13 @@ struct MorningPlan: Hashable {
     var recentMissions: [ActivationMissionType]
     /// Set once the plan has been reviewed on the Morning Alarm Plan screen.
     var hasBeenReviewed: Bool
-    /// A one-off change to the next alarm, if the user asked for one.
-    var nextAlarmOverride: NextAlarmOverride? = nil
+    /// Alarms that ring once: "change next alarm only", running late, and
+    /// (with the skip screen) reschedules. Old plans decode their single
+    /// `nextAlarmOverride` into this list.
+    var oneOffAlarms: [OneOffAlarm] = []
+    /// The plain wake alarm: no lock, no session. On by default
+    /// (FLOW, Flow 1 rest days and Flow 2 every morning).
+    var plainWakeAlarmEnabled: Bool = true
     /// Whether the morning alarm offers its single snooze at all.
     var snoozeEnabled: Bool = true
     /// How long that snooze lasts. Five until the user says otherwise, which
@@ -363,7 +338,19 @@ struct MorningPlan: Hashable {
 
     // MARK: Derived
 
-    /// The override, but only while it still means something.
+    /// The "change next alarm only" alarm, read and written as one value.
+    var nextAlarmOverride: OneOffAlarm? {
+        get { oneOffAlarms.first { $0.kind == .nextAlarmChange } }
+        set {
+            oneOffAlarms.removeAll { $0.kind == .nextAlarmChange }
+            if var newValue {
+                newValue.kind = .nextAlarmChange
+                oneOffAlarms.append(newValue)
+            }
+        }
+    }
+
+    /// The next-alarm change, but only while it still means something.
     func activeOverride(at now: Date = Date()) -> NextAlarmOverride? {
         guard let nextAlarmOverride, nextAlarmOverride.isActive(at: now),
               slots.contains(where: { $0.id == nextAlarmOverride.slotID })
@@ -371,26 +358,57 @@ struct MorningPlan: Hashable {
         return nextAlarmOverride
     }
 
-    /// The rhythm that governs a morning starting at `date`: the one-off if
-    /// this is the morning it was made for, the schedule otherwise.
+    /// The rhythm that governs a day starting at `date`: a one-off's own
+    /// rhythm if this is the day it was made for, the schedule otherwise.
     func rhythm(at date: Date = Date(), calendar: Calendar = .current) -> MorningRhythm {
-        guard let override = activeOverride(at: date),
-              calendar.isDate(date, inSameDayAs: override.fireDate)
-        else { return rhythm }
-        return override.rhythm
+        let oneOff = oneOffAlarms.first { alarm in
+            alarm.rhythm != nil
+                && alarm.isActive(at: date)
+                && calendar.isDate(date, inSameDayAs: alarm.fireDate)
+                && slots.contains { $0.id == alarm.slotID }
+        }
+        return oneOff?.rhythm ?? rhythm
+    }
+
+    /// Which flow a day runs, by the rhythm in force that day (Step 0).
+    func flowMode(at date: Date = Date(), calendar: Calendar = .current) -> GymFlowMode {
+        rhythm(at: date, calendar: calendar).flowMode
     }
 
     /// The slot an alarm id stands for. A one-off alarm carries its own id,
     /// so this is how the morning it starts finds its way back to the slot.
     func slot(forAlarmID id: UUID?) -> AlarmSlot? {
         guard let id else { return nil }
-        if let slot = slots.first(where: { $0.id == id }) { return slot }
-        guard let override = nextAlarmOverride, override.id == id else { return nil }
-        return slots.first { $0.id == override.slotID }
+        if let slot = enabledSlots.first(where: { $0.id == id }) ?? slots.first(where: { $0.id == id }) {
+            return slot
+        }
+        guard let oneOff = oneOffAlarms.first(where: { $0.id == id }) else { return nil }
+        return enabledSlots.first { $0.id == oneOff.slotID } ?? slots.first { $0.id == oneOff.slotID }
     }
 
+    /// One-off alarm ids mapped to the slot each stands for.
+    var oneOffSlotIDs: [UUID: UUID] {
+        oneOffAlarms.reduce(into: [:]) { map, alarm in
+            if let slotID = alarm.slotID { map[alarm.id] = slotID }
+        }
+    }
+
+    /// The alarms that ring each week.
+    ///
+    /// The main alarm's time is the rhythm's lock alarm: wake time in Wake &
+    /// Go, the "time to go" time in Go Later. Derived rather than stored, so
+    /// no edit anywhere can leave the ring out of step with the dial. Any
+    /// older extra slot keeps the time it was given.
     var enabledSlots: [AlarmSlot] {
-        slots.filter { $0.isEnabled && !$0.days.isEmpty }
+        let active = slots.filter { $0.isEnabled && !$0.days.isEmpty }
+        guard let primaryID = active.first?.id else { return active }
+        let lockTime = rhythm.lockAlarmTime
+        return active.map { slot in
+            guard slot.id == primaryID else { return slot }
+            var updated = slot
+            updated.alarmTime = lockTime
+            return updated
+        }
     }
 
     /// True when at least one enabled alarm rings in the morning, which is the
@@ -421,13 +439,15 @@ struct MorningPlan: Hashable {
     /// comes back with the override's alarm time so every screen that reads
     /// "next alarm" agrees with what will actually ring.
     func nextOccurrence(after date: Date = Date(), calendar: Calendar = .current) -> (slot: AlarmSlot, fireDate: Date)? {
-        let override = activeOverride(at: date)
+        let oneOffs = oneOffAlarms.filter { alarm in
+            alarm.isActive(at: date) && slots.contains { $0.id == alarm.slotID && $0.isEnabled }
+        }
 
         var candidates = enabledSlots.compactMap { slot -> (AlarmSlot, Date)? in
             var days = slot.days
-            if let override, override.slotID == slot.id, let day = override.weekday(calendar: calendar) {
-                // The weekly ring on the override's day is replaced, not added to.
-                days.remove(day)
+            for oneOff in oneOffs where oneOff.kind.replacesWeeklyRing && oneOff.slotID == slot.id {
+                // The weekly ring on a one-off's day is replaced, not added to.
+                if let day = oneOff.weekday(calendar: calendar) { days.remove(day) }
             }
             guard !days.isEmpty,
                   let next = slot.alarmTime.nextDate(after: date, on: days, calendar: calendar)
@@ -435,10 +455,10 @@ struct MorningPlan: Hashable {
             return (slot, next)
         }
 
-        if let override, override.fireDate > date,
-           var slot = slots.first(where: { $0.id == override.slotID }), slot.isEnabled {
-            slot.alarmTime = TimeOfDay(from: override.fireDate)
-            candidates.append((slot, override.fireDate))
+        for oneOff in oneOffs where oneOff.fireDate > date {
+            guard var slot = slots.first(where: { $0.id == oneOff.slotID }) else { continue }
+            slot.alarmTime = TimeOfDay(from: oneOff.fireDate)
+            candidates.append((slot, oneOff.fireDate))
         }
 
         return candidates
@@ -484,11 +504,17 @@ struct MorningPlan: Hashable {
 
 extension MorningPlan: Codable {
     private enum CodingKeys: String, CodingKey {
-        case rhythm, nightLock, slots, missionsEnabled, recentMissions, hasBeenReviewed, nextAlarmOverride
+        case rhythm, nightLock, slots, missionsEnabled, recentMissions, hasBeenReviewed
+        case oneOffAlarms, plainWakeAlarmEnabled
         case snoozeEnabled, snoozeMinutes, alarmHaptic
         case alarmScreenStyle
         case sleepScheduleDays
         case pendingBedtime, needsWakeTimeAnswer, hasCheckedWakeTime
+    }
+
+    /// Keys older builds wrote and this one only reads.
+    private enum LegacyKeys: String, CodingKey {
+        case nextAlarmOverride
     }
 
     init(from decoder: Decoder) throws {
@@ -499,7 +525,17 @@ extension MorningPlan: Codable {
         missionsEnabled = try container.decode(Bool.self, forKey: .missionsEnabled)
         recentMissions = try container.decode([ActivationMissionType].self, forKey: .recentMissions)
         hasBeenReviewed = try container.decode(Bool.self, forKey: .hasBeenReviewed)
-        nextAlarmOverride = try container.decodeIfPresent(NextAlarmOverride.self, forKey: .nextAlarmOverride)
+        if let list = try? container.decodeIfPresent([OneOffAlarm].self, forKey: .oneOffAlarms) {
+            oneOffAlarms = list
+        } else {
+            // A plan saved before the list existed: its single override, if
+            // any, becomes a next-alarm change.
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            oneOffAlarms = (try? legacy.decodeIfPresent(OneOffAlarm.self, forKey: .nextAlarmOverride))
+                .flatMap { $0 }
+                .map { [$0] } ?? []
+        }
+        plainWakeAlarmEnabled = (try? container.decodeIfPresent(Bool.self, forKey: .plainWakeAlarmEnabled)) ?? true
         // Plans saved before these options existed decode to exactly what
         // the alarm already did: a five minute snooze and the original pulse.
         snoozeEnabled = try container.decodeIfPresent(Bool.self, forKey: .snoozeEnabled) ?? true
@@ -517,6 +553,26 @@ extension MorningPlan: Codable {
         needsWakeTimeAnswer = (try? container.decodeIfPresent(Bool.self, forKey: .needsWakeTimeAnswer)) ?? false
         // Missing means the plan predates the check, so it still has to run.
         hasCheckedWakeTime = (try? container.decodeIfPresent(Bool.self, forKey: .hasCheckedWakeTime)) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(rhythm, forKey: .rhythm)
+        try container.encode(nightLock, forKey: .nightLock)
+        try container.encode(slots, forKey: .slots)
+        try container.encode(missionsEnabled, forKey: .missionsEnabled)
+        try container.encode(recentMissions, forKey: .recentMissions)
+        try container.encode(hasBeenReviewed, forKey: .hasBeenReviewed)
+        try container.encode(oneOffAlarms, forKey: .oneOffAlarms)
+        try container.encode(plainWakeAlarmEnabled, forKey: .plainWakeAlarmEnabled)
+        try container.encode(snoozeEnabled, forKey: .snoozeEnabled)
+        try container.encode(snoozeMinutes, forKey: .snoozeMinutes)
+        try container.encode(alarmHaptic, forKey: .alarmHaptic)
+        try container.encode(alarmScreenStyle, forKey: .alarmScreenStyle)
+        try container.encode(sleepScheduleDays, forKey: .sleepScheduleDays)
+        try container.encodeIfPresent(pendingBedtime, forKey: .pendingBedtime)
+        try container.encode(needsWakeTimeAnswer, forKey: .needsWakeTimeAnswer)
+        try container.encode(hasCheckedWakeTime, forKey: .hasCheckedWakeTime)
     }
 }
 

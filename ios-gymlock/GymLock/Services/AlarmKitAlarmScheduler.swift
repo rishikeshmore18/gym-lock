@@ -77,8 +77,13 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
     // MARK: - Private
 
     private func schedule(_ request: GymAlarmRequest) async {
+        if request.kind == .plainWake {
+            await schedulePlainWake(request)
+            return
+        }
+
         let stopButton = AlarmButton(
-            text: "I'm up",
+            text: request.kind == .timeToGo ? "I'm going" : "I'm up",
             textColor: .white,
             systemImageName: "figure.walk"
         )
@@ -86,8 +91,9 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
         // `.custom` rather than AlarmKit's built-in countdown: GymLock's snooze
         // has rules the generic one cannot express (the apps stay locked, it is
         // offered exactly once, and it is clamped inside the gym window), so
-        // our own intent has to be what runs.
-        let alert: AlarmPresentation.Alert = if request.allowsSnooze {
+        // our own intent has to be what runs. The "time to go" alarm has no
+        // secondary button: running late lives on the decision screen.
+        let alert: AlarmPresentation.Alert = if request.allowsSnooze && request.kind == .gym {
             AlarmPresentation.Alert(
                 title: LocalizedStringResource(stringLiteral: request.title),
                 stopButton: stopButton,
@@ -130,7 +136,7 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
             schedule: schedule,
             attributes: attributes,
             stopIntent: StartGymSessionIntent(alarmID: request.slotID.uuidString),
-            secondaryIntent: request.allowsSnooze
+            secondaryIntent: request.allowsSnooze && request.kind == .gym
                 ? SnoozeGymSessionIntent(alarmID: request.slotID.uuidString)
                 : nil,
             sound: sound(for: request)
@@ -138,6 +144,58 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
 
         // The slot id is reused as the alarm id, which is what makes a replace a
         // genuine replace: the same slot can never occupy two alarms.
+        _ = try? await manager.schedule(id: request.slotID, configuration: configuration)
+    }
+
+    /// A plain wake-up: AlarmKit's own stop and its own snooze, and no
+    /// intents at all, so nothing it does can reach the app or start a
+    /// session. Its id is a `WakeAlarmID`, which the observer ignores.
+    private func schedulePlainWake(_ request: GymAlarmRequest) async {
+        let stopButton = AlarmButton(text: "Stop", textColor: .white, systemImageName: "stop.fill")
+        let alert: AlarmPresentation.Alert = if request.allowsSnooze {
+            AlarmPresentation.Alert(
+                title: LocalizedStringResource(stringLiteral: request.title),
+                stopButton: stopButton,
+                secondaryButton: AlarmButton(
+                    text: LocalizedStringResource(stringLiteral: "\(request.snoozeMinutes) more min"),
+                    textColor: .white,
+                    systemImageName: "zzz"
+                ),
+                secondaryButtonBehavior: .countdown
+            )
+        } else {
+            AlarmPresentation.Alert(
+                title: LocalizedStringResource(stringLiteral: request.title),
+                stopButton: stopButton
+            )
+        }
+
+        let attributes = AlarmAttributes<GymAlarmMetadata>(
+            presentation: AlarmPresentation(alert: alert),
+            metadata: GymAlarmMetadata(),
+            tintColor: Theme.accent
+        )
+
+        let schedule: Alarm.Schedule = if let fireDate = request.fireDate {
+            .fixed(fireDate)
+        } else {
+            .relative(
+                .init(
+                    time: .init(hour: request.time.hour, minute: request.time.minute),
+                    repeats: .weekly(request.weekdays.map(\.localeWeekday))
+                )
+            )
+        }
+
+        let configuration = AlarmManager.AlarmConfiguration(
+            countdownDuration: request.allowsSnooze
+                ? Alarm.CountdownDuration(preAlert: nil, postAlert: TimeInterval(request.snoozeMinutes * 60))
+                : nil,
+            schedule: schedule,
+            attributes: attributes,
+            sound: sound(for: request)
+        )
+
         _ = try? await manager.schedule(id: request.slotID, configuration: configuration)
     }
 
@@ -158,8 +216,12 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
             for await alarms in AlarmManager.shared.alarmUpdates {
                 guard !Task.isCancelled else { return }
 
+                // A plain wake alarm never starts a session, so it is never
+                // reported as a gym alarm firing.
                 let nowAlerting = Set(
-                    alarms.filter { $0.state == .alerting }.map(\.id)
+                    alarms
+                        .filter { $0.state == .alerting && WakeAlarmID.startsSession(alarmID: $0.id) }
+                        .map(\.id)
                 )
 
                 // Only the transition into alerting is interesting. Reporting

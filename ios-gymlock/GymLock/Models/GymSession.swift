@@ -15,6 +15,9 @@ enum GymSessionState: String, Codable, Hashable {
     /// are still locked — a snooze buys five minutes of sleep, not five
     /// minutes of scrolling.
     case snoozed
+    /// Go Later's "running late": waiting for the one-off alarm to ring
+    /// again. The apps stay locked, like the snooze.
+    case runningLate
     case activationMission
     case preparing
     case departed
@@ -52,7 +55,7 @@ enum GymSessionState: String, Codable, Hashable {
     /// escalating and starts supporting.
     var hasCommitted: Bool {
         switch self {
-        case .idle, .alarmScheduled, .alarmFired, .awaitingDecision, .snoozed:
+        case .idle, .alarmScheduled, .alarmFired, .awaitingDecision, .snoozed, .runningLate:
             false
         default:
             true
@@ -82,7 +85,7 @@ enum GymSessionState: String, Codable, Hashable {
     /// user is confirmed at the gym, or resolves the day another way.
     var wantsShield: Bool {
         switch self {
-        case .alarmFired, .awaitingDecision, .snoozed, .activationMission,
+        case .alarmFired, .awaitingDecision, .snoozed, .runningLate, .activationMission,
              .preparing, .departed, .approachingGym,
              .windowExpired, .quickWorkoutActive:
             true
@@ -180,6 +183,25 @@ struct GymSession: Codable, Hashable, Identifiable {
     var snoozeOffered: Bool?
     /// The snooze length the plan had when this alarm rang.
     var snoozeLengthMinutes: Int?
+
+    // MARK: Flow
+
+    /// Which flow this session's alarm ran in (Step 0). Optional so sessions
+    /// saved before it existed still decode; see `resolvedFlowMode`.
+    var flowMode: GymFlowMode?
+    /// When the lock lifts if the user never commits. Set when the alarm
+    /// rings, moved by running late. Nil on older sessions; see
+    /// `effectiveLockDeadline`.
+    var lockDeadline: Date?
+    /// When running late was used. Its presence is the once-only rule.
+    var runningLateUsedAt: Date?
+    /// When the running-late alarm rings. Absolute, like the snooze, so it
+    /// survives a relaunch.
+    var runningLateUntil: Date?
+    /// True for the skip screen opened for a day with no alarm running (the
+    /// "pick a day" notice, or a day the phone was off). Holds no lock and
+    /// gives way to any real alarm.
+    var isMakeUpOffer: Bool?
 
     var quickWorkoutMinutes: Int?
     var quickWorkoutStartedAt: Date?

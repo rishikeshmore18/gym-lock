@@ -24,6 +24,10 @@ struct StartGymSessionIntent: LiveActivityIntent {
     }
 
     func perform() async throws -> some IntentResult {
+        // Plain wake alarms carry no intents; this is a second belt.
+        if let id = UUID(uuidString: alarmID), !WakeAlarmID.startsSession(alarmID: id) {
+            return .result()
+        }
         AlarmHandoff.write(
             .init(slotID: UUID(uuidString: alarmID), firedAt: Date(), wantsSnooze: false)
         )
@@ -53,6 +57,9 @@ struct SnoozeGymSessionIntent: LiveActivityIntent {
     }
 
     func perform() async throws -> some IntentResult {
+        if let id = UUID(uuidString: alarmID), !WakeAlarmID.startsSession(alarmID: id) {
+            return .result()
+        }
         AlarmHandoff.write(
             .init(slotID: UUID(uuidString: alarmID), firedAt: Date(), wantsSnooze: true)
         )

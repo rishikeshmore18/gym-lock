@@ -50,7 +50,10 @@ final class NotificationAlarmScheduler: AlarmScheduling {
         let pending = await center.pendingNotificationRequests()
         let ours = pending
             .map(\.identifier)
-            .filter { $0.hasPrefix(GymAlarmRequest.identifierPrefix) }
+            .filter {
+                $0.hasPrefix(GymAlarmRequest.identifierPrefix)
+                    || $0.hasPrefix(GymAlarmRequest.wakeIdentifierPrefix)
+            }
         center.removePendingNotificationRequests(withIdentifiers: ours)
     }
 
@@ -67,7 +70,12 @@ final class NotificationAlarmScheduler: AlarmScheduling {
         content.body = request.message
         content.sound = sound(for: request)
         content.interruptionLevel = .timeSensitive
-        content.categoryIdentifier = Self.categoryIdentifier
+        // A plain wake alarm has no session buttons, so no alarm category.
+        switch request.kind {
+        case .gym: content.categoryIdentifier = Self.categoryIdentifier
+        case .timeToGo: content.categoryIdentifier = Self.timeToGoCategoryIdentifier
+        case .plainWake: break
+        }
 
         // Calendar components rather than a date: the system re-resolves this
         // against the current calendar every week, so a timezone change or a
@@ -130,4 +138,6 @@ final class NotificationAlarmScheduler: AlarmScheduling {
     }
 
     static let categoryIdentifier = "gymlock.alarm"
+    /// The "time to go" alarm: "I'm going" only, never a snooze.
+    static let timeToGoCategoryIdentifier = "gymlock.alarm.go"
 }

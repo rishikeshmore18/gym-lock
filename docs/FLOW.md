@@ -76,7 +76,7 @@ So the design is **strict in the moment** (apps lock), **forgiving across the we
  BOTH get the night lock, every night.
 ```
 
-**Change:** today the app decides by the clock — an alarm before 11:00 counts as "morning." Evening users also get their wake time set to their gym alarm (e.g. 17:15).
+**Built (`2026-09-26`):** today the app decides by the clock — an alarm before 11:00 counts as "morning." Evening users also get their wake time set to their gym alarm (e.g. 17:15).
 
 ## The Night Lock (Everyone, Every Sleep Night)
 
@@ -189,9 +189,9 @@ REST DAY (Tue / Thu / Sat / Sun)
  06:30  ⏰ plain alarm, same time, NO lock (optional)
 ```
 
-**Change:** today an ignored alarm never ends. Nothing is recorded, no reschedule is offered, and if the app stays open in the background the next day's alarm can't start.
+**Built (`2026-09-26`):** today an ignored alarm never ends. Nothing is recorded, no reschedule is offered, and if the app stays open in the background the next day's alarm can't start.
 
-**Change:** the rest-day plain alarm doesn't exist yet.
+**Built (`2026-09-26`):** the rest-day plain alarm doesn't exist yet.
 
 ### Edge cases
 
@@ -229,9 +229,9 @@ GYM DAY
                                     └─ SKIP FLOW
 ```
 
-**Change:** the "time to go" alarm is new — today the gym bar at 18:00 on the dial does nothing.
+**Built (`2026-09-26`):** the "time to go" alarm is new — today the gym bar at 18:00 on the dial does nothing.
 
-**Change:** today "move time" UNLOCKS the apps and only sends a normal notification. It's a free unlock. "Running late" should keep the lock and set a real alarm instead. Options that run into sleep hours are hidden.
+**Built (`2026-09-26`):** today "move time" UNLOCKS the apps and only sends a normal notification. It's a free unlock. "Running late" should keep the lock and set a real alarm instead. Options that run into sleep hours are hidden.
 
 ### Edge cases
 
@@ -532,11 +532,11 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 
 **Alarms**
 
-5. Choose the flow by the gap between waking and the gym, not by the clock. Fix evening users' wake time.
-6. Add the "time to go" alarm for go-later users.
-7. An ignored alarm ends when the lock lifts and sends the "pick a day to make it up" notification.
-8. "Running late" keeps the lock and sets a real alarm. Options that run into sleep hours are hidden.
-9. Optional plain wake alarm on rest days.
+5. Choose the flow by the gap between waking and the gym, not by the clock. Fix evening users' wake time. **(Built: `2026-09-26`)**
+6. Add the "time to go" alarm for go-later users. **(Built: `2026-09-26`)**
+7. An ignored alarm ends when the lock lifts and sends the "pick a day to make it up" notification. **(Built: `2026-09-26`)**
+8. "Running late" keeps the lock and sets a real alarm. Options that run into sleep hours are hidden. **(Built: `2026-09-26`)**
+9. Optional plain wake alarm on rest days. **(Built: `2026-09-26`)**
 
 **At the gym**
 

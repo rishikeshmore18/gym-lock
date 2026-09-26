@@ -17,20 +17,20 @@ struct AlarmFiredView: View {
     let session: GymSession
     let onGoing: () -> Void
     let onSnooze: () -> Void
-    /// Called with how many minutes to push today's session by.
-    let onMoveTime: (Int) -> Void
+    /// Go Later's running-late choices still on offer (minutes). Empty hides
+    /// the button: used already, Wake & Go, or every choice runs into sleep.
+    let runningLateOptions: [Int]
+    /// Called with the minutes chosen, counted from the tap.
+    let onRunningLate: (Int) -> Void
     let onCantToday: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hasAppeared = false
-    @State private var isMovingTime = false
-
-    /// Offered pushes. Bounded on purpose — an open-ended "later" at the moment
-    /// the alarm goes off is how a session quietly disappears.
-    private static let moveOptions = [30, 60, 120]
+    @State private var isChoosingLate = false
 
     private var voice: SessionVoice { SessionVoice(session: session) }
     private var isSnoozing: Bool { session.state == .snoozed }
+    private var isRunningLate: Bool { session.state == .runningLate }
 
     var body: some View {
         ZStack {
@@ -66,26 +66,24 @@ struct AlarmFiredView: View {
             try? await Task.sleep(for: .milliseconds(120))
             withAnimation(Theme.settle) { hasAppeared = true }
         }
+        // PLACEHOLDER UI: designed in Step 3
         .confirmationDialog(
-            voice.moveTimeTitle,
-            isPresented: $isMovingTime,
+            voice.runningLateAction,
+            isPresented: $isChoosingLate,
             titleVisibility: .visible
         ) {
-            ForEach(Self.moveOptions, id: \.self) { minutes in
-                Button(Self.moveLabel(minutes)) { onMoveTime(minutes) }
+            ForEach(runningLateOptions, id: \.self) { minutes in
+                Button(Self.lateLabel(minutes)) { onRunningLate(minutes) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(voice.moveTimeNote)
+            Text(voice.runningLateSupport)
         }
     }
 
-    private static func moveLabel(_ minutes: Int) -> String {
+    private static func lateLabel(_ minutes: Int) -> String {
         let target = Date().addingTimeInterval(Double(minutes) * 60)
-        let clock = target.formatted(date: .omitted, time: .shortened)
-        return minutes < 60
-            ? "in \(minutes) min · \(clock)"
-            : "in \(minutes / 60) hr · \(clock)"
+        return "+\(minutes) · \(target.formatted(date: .omitted, time: .shortened))"
     }
 
     // MARK: - The clock
@@ -147,11 +145,11 @@ struct AlarmFiredView: View {
     /// urge to keep checking.
     private var headline: some View {
         VStack(spacing: 6) {
-            Text(isSnoozing ? voice.snoozeHeadline(until: snoozeEndClock) : voice.alarmGreeting)
+            Text(headlineText)
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(Theme.ink)
 
-            Text(isSnoozing ? voice.snoozeSupport : voice.alarmSupport)
+            Text(supportText)
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(Theme.inkSecondary)
         }
@@ -162,9 +160,20 @@ struct AlarmFiredView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var snoozeEndClock: String {
-        guard let expires = session.snoozeExpiresAt else { return "" }
-        return TimeOfDay(from: expires).displayString
+    private var headlineText: String {
+        if isSnoozing { return voice.snoozeHeadline(until: clock(session.snoozeExpiresAt)) }
+        if isRunningLate { return voice.runningLateHeadline(until: clock(session.runningLateUntil)) }
+        return voice.alarmGreeting
+    }
+
+    private var supportText: String {
+        if isSnoozing { return voice.snoozeSupport }
+        if isRunningLate { return voice.runningLateSupport }
+        return voice.alarmSupport
+    }
+
+    private func clock(_ date: Date?) -> String {
+        date.map { TimeOfDay(from: $0).displayString } ?? ""
     }
 
     // MARK: - Actions
@@ -190,15 +199,14 @@ struct AlarmFiredView: View {
                 textAction(voice.snoozeAction, action: onSnooze)
             }
 
-            // Once the snooze is spent, moving the whole session is the honest
-            // remaining option. The absence of the snooze is the only message
-            // about it — no counter, no "you already snoozed once".
-            if session.hasSnoozed {
-                textAction(voice.changePlanAction) { isMovingTime = true }
-                textAction(voice.cantTodayAction, action: onCantToday)
-            } else {
-                textAction(voice.changePlanAction, action: onCantToday)
+            // PLACEHOLDER UI: designed in Step 3
+            // Go Later only, once. Gone after it is used; the absence is the
+            // only message about it.
+            if !runningLateOptions.isEmpty {
+                textAction(voice.runningLateAction) { isChoosingLate = true }
             }
+
+            textAction(session.hasSnoozed ? voice.cantTodayAction : voice.changePlanAction, action: onCantToday)
         }
     }
 
@@ -229,7 +237,8 @@ struct AlarmFiredView: View {
         ),
         onGoing: {},
         onSnooze: {},
-        onMoveTime: { _ in },
+        runningLateOptions: [],
+        onRunningLate: { _ in },
         onCantToday: {}
     )
 }
@@ -246,7 +255,8 @@ struct AlarmFiredView: View {
         ),
         onGoing: {},
         onSnooze: {},
-        onMoveTime: { _ in },
+        runningLateOptions: [15, 30, 60],
+        onRunningLate: { _ in },
         onCantToday: {}
     )
 }
