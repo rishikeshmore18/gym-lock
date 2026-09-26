@@ -588,7 +588,7 @@ final class GymSessionCoordinator {
         // Showing up is the outcome. A workout, if Health ever reports one,
         // attaches to this same record later rather than creating a second one.
         store?.log.record(
-            SessionOutcome(date: now, kind: .showedUp, sessionID: current.id)
+            SessionOutcome(date: now, kind: .showedUp, sessionID: current.id, countsOn: current.day)
         )
         store?.record(.gymArrivalVerified, sessionID: current.id)
 
@@ -654,7 +654,7 @@ final class GymSessionCoordinator {
 
         releaseShield(sessionID: current.id)
         store?.log.record(
-            SessionOutcome(date: Date(), kind: .technicalFailure, sessionID: current.id)
+            SessionOutcome(date: Date(), kind: .technicalFailure, sessionID: current.id, countsOn: current.day)
         )
         store?.record(.technicalRelease, sessionID: current.id, detail: "user released")
 
@@ -720,7 +720,9 @@ final class GymSessionCoordinator {
         }
 
         // A session that already closed this morning.
-        guard let todays = store.log.outcome(on: workout.startedAt),
+        // Found by when it was written, not the day it counts on: a visit
+        // after midnight still belongs to the workout that follows it.
+        guard let todays = store.log.outcome(recordedOn: workout.startedAt),
               !todays.workoutDetected,
               let sessionID = todays.sessionID
         else { return }
@@ -947,7 +949,7 @@ final class GymSessionCoordinator {
             await notifier.scheduleMovedSession(at: newTime)
         }
 
-        store?.log.record(SessionOutcome(kind: .rescheduled, sessionID: current.id))
+        store?.log.record(SessionOutcome(kind: .rescheduled, sessionID: current.id, countsOn: current.day))
         store?.record(.rescheduled, sessionID: current.id)
         endSession(clearingAnchor: true, keepingReminders: true)
     }
@@ -1196,7 +1198,8 @@ final class GymSessionCoordinator {
                     kind: .homeWorkout,
                     minutes: current.quickWorkoutMinutes,
                     sessionID: current.id,
-                    workoutDetected: current.workoutDetected
+                    workoutDetected: current.workoutDetected,
+                    countsOn: current.day
                 )
             )
             store?.record(.quickWorkoutCompleted, sessionID: current.id)
@@ -1209,7 +1212,7 @@ final class GymSessionCoordinator {
         } else {
             current.state = .missed
             session = current
-            store?.log.record(SessionOutcome(kind: .missed, sessionID: current.id))
+            store?.log.record(SessionOutcome(kind: .missed, sessionID: current.id, countsOn: current.day))
             store?.record(.missed, sessionID: current.id)
             releaseShield(sessionID: current.id)
             endSession(clearingAnchor: true)
@@ -1259,7 +1262,7 @@ final class GymSessionCoordinator {
             current.state = .rescheduled
             session = current
             releaseShield(sessionID: current.id)
-            store?.log.record(SessionOutcome(kind: .rescheduled, sessionID: current.id))
+            store?.log.record(SessionOutcome(kind: .rescheduled, sessionID: current.id, countsOn: current.day))
             scheduleComebackIfEnabled()
             endSession(clearingAnchor: true)
 
@@ -1268,7 +1271,7 @@ final class GymSessionCoordinator {
             session = current
             releaseShield(sessionID: current.id)
             let kind: SessionOutcomeKind = hasEasySkipRemaining ? .easySkip : .dayOff
-            store?.log.record(SessionOutcome(kind: kind, sessionID: current.id))
+            store?.log.record(SessionOutcome(kind: kind, sessionID: current.id, countsOn: current.day))
             scheduleComebackIfEnabled()
             endSession(clearingAnchor: true)
         }

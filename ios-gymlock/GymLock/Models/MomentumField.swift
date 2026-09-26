@@ -122,7 +122,7 @@ struct MomentumField: Equatable {
         var trainingDays = plan.enabledSlots.reduce(into: Set<Weekday>()) { $0.formUnion($1.days) }
         if trainingDays.isEmpty { trainingDays = schedule.trainingDays }
 
-        let byDay = Dictionary(grouping: log.outcomes) { calendar.startOfDay(for: $0.date) }
+        let byDay = Dictionary(grouping: log.outcomes) { $0.countingDay(calendar: calendar) }
 
         var days: [MomentumDay] = []
         var verified = 0

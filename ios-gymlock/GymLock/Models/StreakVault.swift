@@ -10,17 +10,43 @@ nonisolated enum StreakPolicy {
     static let maximumFreezes = 2
     /// Consecutive kept weeks that earn one freeze.
     static let weeksPerFreeze = 4
-    /// Session days a week needs by default.
+    /// Workouts a week needs to be kept. Whatever the plan says.
     static let defaultWeeklyGoal = 3
+    /// Nobody can plan fewer gym days than this.
+    static let minimumGymDays = 3
+    /// The note shown when a gym day can't come off (FLOW, "Which nights").
+    static let minimumGymDaysMessage = "3 gym days is the minimum."
 
-    /// Session days a week needs to be kept.
+    /// The rule weeks were judged by before the 3-day minimum: three, but
+    /// never more than the plan, floored at one.
     ///
-    /// Three, but never more than the user's own plan: someone who trains
-    /// twice a week has agreed to two, and asking three of them would make a
-    /// streak impossible by design. Floored at one so a user with no plan yet
-    /// can still hold a streak by showing up.
-    static func weeklyGoal(plannedDays: Int) -> Int {
+    /// Only used to save the goal of weeks that started before
+    /// `StreakVault.threeDayRuleStart`, so no existing user sees a past week
+    /// change. Never used for a week on or after it.
+    static func legacyWeeklyGoal(plannedDays: Int) -> Int {
         max(1, min(defaultWeeklyGoal, plannedDays))
+    }
+
+    /// The goal a week gets the first time the engine sees it.
+    ///
+    /// On or after the rule start it is always 3. Before it, the legacy rule
+    /// with the plan as it is when the goal is saved.
+    static func goal(
+        forWeekStarting weekStart: Date,
+        ruleStart: Date,
+        plannedDays: Int,
+        calendar: Calendar
+    ) -> Int {
+        let isCovered = calendar.compare(weekStart, to: ruleStart, toGranularity: .day) != .orderedAscending
+        return isCovered ? defaultWeeklyGoal : legacyWeeklyGoal(plannedDays: plannedDays)
+    }
+
+    /// Whether an existing user should be asked to add a gym day on open.
+    ///
+    /// Only for 1 or 2 days, the case FLOW names. Zero means no alarm at all,
+    /// which is a different situation.
+    static func asksToAddGymDay(plannedGymDays: Int) -> Bool {
+        (1..<minimumGymDays).contains(plannedGymDays)
     }
 }
 
@@ -44,6 +70,19 @@ nonisolated struct StreakVault: Codable, Hashable {
     var lastEvaluatedWeekStart: Date?
     /// Consecutive kept weeks since the last freeze was awarded.
     var kept4Counter: Int
+    /// Each week's goal, keyed by the week's Monday, saved the first time the
+    /// engine sees the week. After that it is the only thing that week is
+    /// judged by, so a plan change can never rewrite it.
+    var weekGoals: [Date: Int] = [:]
+    /// Monday of the first week the 3-day rule applies to. Set once and never
+    /// moved: next Monday for a user who already had history when this rule
+    /// arrived, their first week for everyone else.
+    var threeDayRuleStart: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case freezesAvailable, frozenWeekStarts, preArmedWeekStart
+        case lastEvaluatedWeekStart, kept4Counter, weekGoals, threeDayRuleStart
+    }
 
     static let empty = StreakVault(
         freezesAvailable: 0,
@@ -65,6 +104,28 @@ nonisolated struct StreakVault: Codable, Hashable {
     func isPreArmed(weekStarting start: Date, calendar: Calendar) -> Bool {
         guard let preArmedWeekStart else { return false }
         return calendar.isDate(preArmedWeekStart, inSameDayAs: start)
+    }
+
+    /// The saved goal for a week, tolerant of the stored key and the computed
+    /// Monday differing by a timezone's worth of seconds.
+    func savedGoal(forWeekStarting start: Date, calendar: Calendar) -> Int? {
+        if let exact = weekGoals[start] { return exact }
+        return weekGoals.first { calendar.isDate($0.key, inSameDayAs: start) }?.value
+    }
+}
+
+extension StreakVault {
+    /// Vaults saved before week goals existed decode with none saved and no
+    /// rule start, which the engine treats as the first run after the update.
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        freezesAvailable = try container.decode(Int.self, forKey: .freezesAvailable)
+        frozenWeekStarts = try container.decode(Set<Date>.self, forKey: .frozenWeekStarts)
+        preArmedWeekStart = try container.decodeIfPresent(Date.self, forKey: .preArmedWeekStart)
+        lastEvaluatedWeekStart = try container.decodeIfPresent(Date.self, forKey: .lastEvaluatedWeekStart)
+        kept4Counter = try container.decode(Int.self, forKey: .kept4Counter)
+        weekGoals = try container.decodeIfPresent([Date: Int].self, forKey: .weekGoals) ?? [:]
+        threeDayRuleStart = try container.decodeIfPresent(Date.self, forKey: .threeDayRuleStart)
     }
 }
 

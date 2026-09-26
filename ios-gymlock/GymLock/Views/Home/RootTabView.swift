@@ -16,6 +16,7 @@ struct RootTabView: View {
     @State private var selection: RootTab = .home
     @State private var intro = StreakIntroController()
     @State private var isRunningSetup = false
+    @State private var isAskingToAddGymDay = false
 
     var body: some View {
         ZStack {
@@ -53,6 +54,7 @@ struct RootTabView: View {
                 // A week may have ended while the app was away; rule on it
                 // before the streak is read anywhere on this screen.
                 store.refreshStreak()
+                askToAddGymDayIfNeeded()
                 intro.sceneBecameActive(
                     streak: store.streak.weeks,
                     reduceMotion: reduceMotion,
@@ -61,6 +63,17 @@ struct RootTabView: View {
             } else {
                 intro.sceneLeftForeground()
             }
+        }
+        .sheet(isPresented: $isAskingToAddGymDay) {
+            AddGymDaySheet(
+                onChange: { effects in
+                    if effects.contains(.resyncGymAlarms) {
+                        Task { await coordinator.syncAlarms() }
+                    }
+                    if effects.contains(.reconcileWindDown) { coordinator.reconcileWindDown() }
+                },
+                onDismiss: { isAskingToAddGymDay = false }
+            )
         }
         .fullScreenCover(isPresented: $isRunningSetup) {
             MorningSetupFlowView {
@@ -82,10 +95,20 @@ struct RootTabView: View {
             // the shell rather than inside a tab so it still runs when the new
             // home is the screen the user lands on.
             store.seedPlanIfNeeded()
-            guard !store.plan.hasBeenReviewed else { return }
+            guard !store.plan.hasBeenReviewed else {
+                askToAddGymDayIfNeeded()
+                return
+            }
             intro.isSuspended = true
             isRunningSetup = true
         }
+    }
+
+    /// Existing users with 1 or 2 gym days are asked on every open until
+    /// they have 3. Never on top of the setup flow or a live morning.
+    private func askToAddGymDayIfNeeded() {
+        guard store.shouldAskToAddGymDay, !isRunningSetup, !coordinator.isSessionLive else { return }
+        isAskingToAddGymDay = true
     }
 
     /// One destination, permanently mounted and hidden when it is not current.

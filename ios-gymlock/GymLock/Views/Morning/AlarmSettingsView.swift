@@ -700,12 +700,21 @@ struct AlarmSettingsView: View {
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
-    /// Turns a training day on or off on the one alarm. The rules live on
-    /// the plan; the view only pushes what they say changed.
+    /// Turns a training day on or off on the one alarm, or says quietly why
+    /// it cannot. The rules live on the plan; the view only pushes what they
+    /// say changed.
     private func toggleGymDay(_ day: Weekday) {
-        Haptics.selection()
-        let effects = store.plan.toggleGymDay(day, newAlarmTime: shown.wakeTime)
-        apply(effects)
+        let result = store.plan.toggleGymDay(day, newAlarmTime: shown.wakeTime)
+        switch result.outcome {
+        case .updated:
+            Haptics.selection()
+            clearRequiredNightNote()
+        case .belowMinimum:
+            // Same quiet note the required nights use.
+            Haptics.soft()
+            showRequiredNightNote(StreakPolicy.minimumGymDaysMessage)
+        }
+        apply(result.effects)
     }
 
     /// Turns a sleep night on or off, or says quietly why it cannot.

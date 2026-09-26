@@ -42,7 +42,9 @@ enum ShareContextBuilder {
         // the total as it stood then rather than the total today.
         let dayStart = calendar.startOfDay(for: referenceDay)
         let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? referenceDay
-        let verifiedTotal = log.outcomes.filter { $0.kind.isVerifiedGymVisit && $0.date < dayEnd }.count
+        let verifiedTotal = log.outcomes.filter {
+            $0.kind.isVerifiedGymVisit && $0.countingDay(calendar: calendar) < dayEnd
+        }.count
 
         let comeback = comeback(on: referenceDay, log: log, calendar: calendar)
         let journey = journey(
@@ -126,7 +128,7 @@ enum ShareContextBuilder {
         let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
         var daysByWeek: [Date: Set<Date>] = [:]
         for outcome in log.outcomes where outcome.kind.preservesMomentum {
-            let day = calendar.startOfDay(for: outcome.date)
+            let day = outcome.countingDay(calendar: calendar)
             guard let week = StreakEngine.weekStart(containing: day, weekCalendar: weekCalendar) else { continue }
             daysByWeek[week, default: []].insert(day)
         }
@@ -178,7 +180,7 @@ enum ShareContextBuilder {
         let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
         var days: Set<Date> = []
         for outcome in log.outcomes where predicate(outcome) {
-            let day = calendar.startOfDay(for: outcome.date)
+            let day = outcome.countingDay(calendar: calendar)
             guard let week = StreakEngine.weekStart(containing: day, weekCalendar: weekCalendar),
                   calendar.isDate(week, inSameDayAs: start)
             else { continue }
@@ -206,18 +208,20 @@ enum ShareContextBuilder {
 
     /// Distinct days with any outcome, oldest first.
     static func outcomeDays(in log: MomentumLog, calendar: Calendar) -> [Date] {
-        Set(log.outcomes.map { calendar.startOfDay(for: $0.date) }).sorted()
+        Set(log.outcomes.map { $0.countingDay(calendar: calendar) }).sorted()
     }
 
     static func preservesMomentum(on day: Date, log: MomentumLog, calendar: Calendar) -> Bool {
-        log.outcomes.contains { calendar.isDate($0.date, inSameDayAs: day) && $0.kind.preservesMomentum }
+        log.outcomes.contains {
+            calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) && $0.kind.preservesMomentum
+        }
     }
 
     /// A day counts as a miss only if it was recorded as one and nothing on
     /// that day preserved momentum — a technical failure followed by a home
     /// workout the same evening is not a miss.
     static func isMiss(on day: Date, log: MomentumLog, calendar: Calendar) -> Bool {
-        let outcomes = log.outcomes.filter { calendar.isDate($0.date, inSameDayAs: day) }
+        let outcomes = log.outcomes.filter { calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) }
         guard !outcomes.contains(where: \.kind.preservesMomentum) else { return false }
         return outcomes.contains { $0.kind == .missed || $0.kind == .technicalFailure }
     }
@@ -251,7 +255,9 @@ enum ShareContextBuilder {
             calendar: calendar
         )
 
-        let verified = store.log.outcomes.filter { $0.kind.isVerifiedGymVisit && $0.date < windowEnd }.count
+        let verified = store.log.outcomes.filter {
+            $0.kind.isVerifiedGymVisit && $0.countingDay(calendar: calendar) < windowEnd
+        }.count
 
         // The before-picture is only worth an inset when it is not the very
         // photo being shared.

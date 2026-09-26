@@ -90,7 +90,7 @@ struct Milestone: Hashable {
         let visits = log.outcomes.filter(\.kind.isVerifiedGymVisit).sorted { $0.date < $1.date }
         for threshold in visitThresholds where visits.count >= threshold {
             let reaching = visits[threshold - 1]
-            if calendar.isDate(reaching.date, inSameDayAs: referenceDay) {
+            if calendar.isDate(reaching.countingDay(calendar: calendar), inSameDayAs: referenceDay) {
                 return Milestone(kind: .verifiedVisits(threshold))
             }
         }

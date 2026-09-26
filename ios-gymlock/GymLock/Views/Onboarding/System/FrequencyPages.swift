@@ -13,8 +13,8 @@ struct TargetFrequencyPage: View {
 
     @State private var contentShown = false
 
-    /// One through seven — zero is not a target anyone sets.
-    private static let values = Array(1...7)
+    /// Three through seven. Nobody can plan fewer than 3 (FLOW, Flow 4).
+    private static let values = Array(StreakPolicy.minimumGymDays...7)
 
     var body: some View {
         @Bindable var store = store
@@ -31,15 +31,18 @@ struct TargetFrequencyPage: View {
                 ValueWheel(
                     labels: Self.values.map(String.init),
                     selection: Binding(
-                        get: { (store.profile.targetWorkoutsPerWeek - 1).clamped(to: 0...6) },
-                        set: { store.profile.targetWorkoutsPerWeek = $0 + 1 }
+                        get: {
+                            (store.profile.targetWorkoutsPerWeek - StreakPolicy.minimumGymDays)
+                                .clamped(to: 0...(Self.values.count - 1))
+                        },
+                        set: { store.profile.targetWorkoutsPerWeek = $0 + StreakPolicy.minimumGymDays }
                     ),
                     rowHeight: 46,
                     activeSize: 60,
                     accessibilityTitle: "Target days per week"
                 )
 
-                Text("minimum recommended: 3 days / week")
+                Text(StreakPolicy.minimumGymDaysMessage)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.inkTertiary)
                     .frame(maxWidth: .infinity)

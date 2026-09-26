@@ -72,6 +72,12 @@ extension GymSessionCoordinator {
         case tapWindDownAtNight
         case tapAlarmNotification
 
+        // Week rules: 3 is the minimum (FLOW items 18, 19, 20, 4).
+        case legacyUserTwoGymDays
+        case changePlanMidWeek
+        case sundayLateAlarmVisitAfterMidnight
+        case tryRemoveGymDayAtThree
+
         // Sound: the ringer and the fallback chain.
         case ringerStart
         case ringerEscalated
@@ -111,6 +117,9 @@ extension GymSessionCoordinator {
             case .tapArrivalAfterGym, .tapDepartureMidSession,
                  .tapWindDownAtNight, .tapAlarmNotification:
                 "notification taps"
+            case .legacyUserTwoGymDays, .changePlanMidWeek,
+                 .sundayLateAlarmVisitAfterMidnight, .tryRemoveGymDayAtThree:
+                "week rules"
             case .ringerStart, .ringerEscalated, .ringerStop,
                  .ringerCeiling, .customSongMissing, .customSongProtected:
                 "sound"
@@ -164,6 +173,10 @@ extension GymSessionCoordinator {
             case .tapDepartureMidSession: "tap departure notification mid-session, then finish the session"
             case .tapWindDownAtNight: "tap wind-down notification at night"
             case .tapAlarmNotification: "tap alarm notification"
+            case .legacyUserTwoGymDays: "legacy user with 2 gym days (then reopen the app)"
+            case .changePlanMidWeek: "change plan mid-week"
+            case .sundayLateAlarmVisitAfterMidnight: "Sunday 23:30 alarm, visit at 00:20"
+            case .tryRemoveGymDayAtThree: "try to remove a gym day at 3"
             case .ringerStart: "ringer: start"
             case .ringerEscalated: "ringer: jump to full volume"
             case .ringerStop: "ringer: stop"
@@ -174,7 +187,7 @@ extension GymSessionCoordinator {
         }
 
         static var sections: [String] {
-            ["notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
+            ["week rules", "notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
         }
     }
 
@@ -501,6 +514,69 @@ extension GymSessionCoordinator {
             resumeSessionIfDue()
             debugReportTap("alarm", wroteHandoff: wrote)
 
+        // MARK: Week rules
+        //
+        // The result line in the panel says what each rule decided.
+
+        case .legacyUserTwoGymDays:
+            // The sheet is asked for on the next open, as FLOW says, so
+            // background the app and come back to see it.
+            guard let store = debugStore else { return }
+            store.debugMakeLegacyUserWithTwoGymDays()
+            let start = store.streakVault.threeDayRuleStart?
+                .formatted(date: .abbreviated, time: .omitted) ?? "none"
+            Self.debugWeekRulesResult =
+                "2 gym days · goal \(store.streak.weeklyGoal) this week · 3 from \(start) · reopen the app"
+
+        case .changePlanMidWeek:
+            guard let store = debugStore else { return }
+            store.refreshStreak()
+            let before = store.streak.weeklyGoal
+            var seen: [Int] = []
+            for days in [
+                Set<Weekday>([.monday, .wednesday, .friday]),
+                [.monday, .tuesday, .wednesday, .thursday, .friday],
+                [.monday, .wednesday, .friday],
+            ] {
+                store.debugSetGymDays(days)
+                seen.append(store.streak.weeklyGoal)
+            }
+            let held = seen.allSatisfy { $0 == before }
+            Self.debugWeekRulesResult =
+                "goal \(before) before · \(seen.map(String.init).joined(separator: ", ")) after 3/5/3 days · \(held ? "unchanged" : "CHANGED")"
+
+        case .sundayLateAlarmVisitAfterMidnight:
+            // The real path: a session whose alarm rang last Sunday at 23:30,
+            // then the arrival confirmed now. The outcome must count on the
+            // alarm's Sunday, not on the day it was written.
+            guard let store = debugStore else { return }
+            let calendar = Calendar.current
+            let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
+            guard let thisMonday = StreakEngine.weekStart(containing: Date(), weekCalendar: weekCalendar),
+                  let lastSunday = calendar.date(byAdding: .day, value: -1, to: thisMonday),
+                  let alarm = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: lastSunday)
+            else { return }
+
+            endSession()
+            debugStore?.debugSeedGym()
+            beginSession(for: store.plan.enabledSlots.first, at: alarm)
+            confirmArrival()
+            endSession()
+
+            let counted = store.log.outcomes.last.map { $0.countingDay(calendar: calendar) }
+            let label = counted?.formatted(.dateTime.weekday(.abbreviated).day().month()) ?? "none"
+            let inLastWeek = counted.map { $0 < thisMonday } ?? false
+            Self.debugWeekRulesResult =
+                "counts on \(label) · \(inLastWeek ? "in Sunday's week" : "WRONG WEEK")"
+
+        case .tryRemoveGymDayAtThree:
+            guard let store = debugStore else { return }
+            store.debugSetGymDays([.monday, .wednesday, .friday])
+            let result = store.plan.toggleGymDay(.monday, newAlarmTime: store.plan.rhythm.wakeTime)
+            let note = result.outcome == .belowMinimum ? StreakPolicy.minimumGymDaysMessage : "NOT refused"
+            Self.debugWeekRulesResult =
+                "\(note) · \(store.plan.gymDays.count) days · monday \(store.plan.gymDays.contains(.monday) ? "on" : "off")"
+
         // MARK: Sound
 
         case .ringerStart:
@@ -561,6 +637,11 @@ extension GymSessionCoordinator {
             )
         }
     }
+
+    // MARK: - Week rules helpers
+
+    /// The last week-rules result, shown in the panel.
+    static var debugWeekRulesResult = "none"
 
     // MARK: - Notification tap helpers
 

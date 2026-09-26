@@ -18,6 +18,7 @@ struct DebugMorningPanel: View {
     @State private var resolvedSummary = "none"
     @State private var tapRouteSummary = "none"
     @State private var tapResultSummary = "none"
+    @State private var weekRulesSummary = "none"
 
     var body: some View {
         NavigationStack {
@@ -68,6 +69,10 @@ struct DebugMorningPanel: View {
             row("next alarm", nextAlarmLabel)
             row("handoff pending", handoffSummary)
             row("resolved today", resolvedSummary)
+            row("gym days", "\(store.plan.gymDays.count)")
+            row("this week's goal", "\(store.streak.weeklyGoal)")
+            row("3-day rule from", store.streakVault.threeDayRuleStart?.formatted(date: .abbreviated, time: .omitted) ?? "not set")
+            row("week rules result", weekRulesSummary)
             row("last tap route", tapRouteSummary)
             row("tap result", tapResultSummary)
             row("shield backend", coordinator.shieldCapability.headline)
@@ -111,6 +116,7 @@ struct DebugMorningPanel: View {
 
         tapRouteSummary = store.pendingNotificationRoute.map { String(describing: $0.route) } ?? "none"
         tapResultSummary = GymSessionCoordinator.debugNotificationTapResult
+        weekRulesSummary = GymSessionCoordinator.debugWeekRulesResult
     }
 
     private var ringerLabel: String {
@@ -202,6 +208,9 @@ struct DebugMorningPanel: View {
             // The three "must not start a session" taps are judged by the
             // tap result reading, so the panel stays put.
             .tapArrivalAfterGym, .tapDepartureMidSession, .tapWindDownAtNight,
+            // Week rules are judged by the result reading.
+            .legacyUserTwoGymDays, .changePlanMidWeek,
+            .sundayLateAlarmVisitAfterMidnight, .tryRemoveGymDayAtThree,
             // Every sound step is judged by the readings above, not by a
             // screen change, so the panel stays put.
             .ringerStart, .ringerEscalated, .ringerStop, .ringerCeiling,

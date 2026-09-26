@@ -135,20 +135,25 @@ struct SleepScheduleTests {
         #expect(!message.contains("\u{2014}"))
     }
 
+    // Four gym days, so one can come off without going under the minimum.
+    // Tue/Thu/Sat/Sun need Mon/Wed/Fri/Sat nights.
+    private let fourGymDays: Set<Weekday> = [.tuesday, .thursday, .saturday, .sunday]
+
     @Test func removingTheGymDayRemovesTheRequirement() {
-        var plan = plan(gymDays: [.tuesday], bedtime: eleven, wake: seven, sleep: [])
-        #expect(plan.effectiveSleepDays() == [.monday])
+        var plan = plan(gymDays: fourGymDays, bedtime: eleven, wake: seven, sleep: [])
+        #expect(plan.effectiveSleepDays() == [.monday, .wednesday, .friday, .saturday])
 
-        _ = plan.toggleGymDay(.tuesday, newAlarmTime: seven)
+        let result = plan.toggleGymDay(.tuesday, newAlarmTime: seven)
 
-        #expect(plan.requiredSleepNights().isEmpty)
+        #expect(result.outcome == .updated)
+        #expect(plan.requiredSleepNights() == [.wednesday, .friday, .saturday])
         // Monday was only there because of Tuesday, so it goes with it.
         #expect(!plan.effectiveSleepDays().contains(.monday))
         #expect(plan.sleepScheduleDays.isEmpty)
     }
 
     @Test func aChosenNightStaysAfterItStopsBeingRequired() {
-        var plan = plan(gymDays: [.tuesday], bedtime: eleven, wake: seven, sleep: [.monday])
+        var plan = plan(gymDays: fourGymDays, bedtime: eleven, wake: seven, sleep: [.monday])
 
         _ = plan.toggleGymDay(.tuesday, newAlarmTime: seven)
 
@@ -176,7 +181,7 @@ struct SleepScheduleTests {
     @Test func gymDayChangesStillRescheduleGymAlarms() {
         var plan = plan(gymDays: [.monday], bedtime: eleven, wake: seven, sleep: [])
 
-        let effects = plan.toggleGymDay(.wednesday, newAlarmTime: seven)
+        let effects = plan.toggleGymDay(.wednesday, newAlarmTime: seven).effects
 
         #expect(effects.contains(.resyncGymAlarms))
         #expect(plan.slots[0].days == [.monday, .wednesday])
@@ -194,7 +199,7 @@ struct SleepScheduleTests {
 
     @Test func theFirstGymDayCreatesAnAlarmAtTheShownTime() {
         var plan = MorningPlan.default
-        let effects = plan.toggleGymDay(.thursday, newAlarmTime: seven)
+        let effects = plan.toggleGymDay(.thursday, newAlarmTime: seven).effects
         #expect(effects.contains(.resyncGymAlarms))
         #expect(plan.slots.count == 1)
         #expect(plan.slots[0].days == [.thursday])

@@ -33,10 +33,40 @@ enum StreakEngine {
             return .empty
         }
 
-        let goal = StreakPolicy.weeklyGoal(
-            plannedDays: plan.effectiveTrainingDays(fallback: schedule).count
-        )
+        let plannedDays = plan.effectiveTrainingDays(fallback: schedule).count
         let sessionDays = sessionDaysByWeek(log, calendar: calendar, weekCalendar: weekCalendar)
+
+        // Set once, never moved. A user with history when the 3-day rule
+        // arrived keeps the week they are in; it starts next Monday. Anyone
+        // else gets it from their first week.
+        let ruleStart: Date
+        if let stored = vault.threeDayRuleStart {
+            ruleStart = stored
+        } else {
+            ruleStart = threeDayRuleStart(
+                hasHistory: !log.outcomes.isEmpty,
+                liveWeekStart: liveWeekStart,
+                weekCalendar: weekCalendar
+            )
+            vault.threeDayRuleStart = ruleStart
+        }
+
+        // A week's goal is saved the first time it is seen and read back ever
+        // after. On the first run after the update this backfills every past
+        // week with exactly the goal it shows today.
+        func goal(forWeekStarting week: Date) -> Int {
+            if let saved = vault.savedGoal(forWeekStarting: week, calendar: calendar) {
+                return saved
+            }
+            let goal = StreakPolicy.goal(
+                forWeekStarting: week,
+                ruleStart: ruleStart,
+                plannedDays: plannedDays,
+                calendar: calendar
+            )
+            vault.weekGoals[week] = goal
+            return goal
+        }
 
         // The first launch on the week-based logic has nothing to spend and
         // must not award from history either — the migration grant below is
@@ -46,11 +76,11 @@ enum StreakEngine {
 
         var streak = 0
 
-        if let earliest = log.outcomes.map(\.date).min(),
+        if let earliest = log.outcomes.map({ $0.countingDay(calendar: calendar) }).min(),
            var cursor = weekStart(containing: earliest, weekCalendar: weekCalendar) {
             while cursor < liveWeekStart {
                 let sessions = sessionDays[cursor] ?? 0
-                let isKept = sessions >= goal
+                let isKept = sessions >= goal(forWeekStarting: cursor)
                 let isNew = isMigrating || previouslyEvaluated.map { cursor > $0 } ?? true
 
                 if isKept {
@@ -89,8 +119,9 @@ enum StreakEngine {
         }
 
         // The live week counts only once it is kept, and can never break.
+        let liveGoal = goal(forWeekStarting: liveWeekStart)
         let thisWeekSessions = sessionDays[liveWeekStart] ?? 0
-        let isThisWeekKept = thisWeekSessions >= goal
+        let isThisWeekKept = thisWeekSessions >= liveGoal
         let weeks = isThisWeekKept ? streak + 1 : streak
 
         // A pre-armed live week that is kept has its freeze refunded at once.
@@ -127,7 +158,7 @@ enum StreakEngine {
 
         return StreakSnapshot(
             weeks: weeks,
-            weeklyGoal: goal,
+            weeklyGoal: liveGoal,
             thisWeekSessionDays: thisWeekSessions,
             isThisWeekKept: isThisWeekKept,
             freezesAvailable: vault.freezesAvailable,
@@ -142,6 +173,19 @@ enum StreakEngine {
     /// Monday 00:00 of the week containing `date`, in the display calendar.
     static func weekStart(containing date: Date, weekCalendar: Calendar) -> Date? {
         weekCalendar.dateInterval(of: .weekOfYear, for: date)?.start
+    }
+
+    /// The first week the 3-day rule covers: next Monday for someone who
+    /// already has history, the live week for someone who doesn't.
+    static func threeDayRuleStart(
+        hasHistory: Bool,
+        liveWeekStart: Date,
+        weekCalendar: Calendar
+    ) -> Date {
+        guard hasHistory else { return liveWeekStart }
+        return weekCalendar.date(byAdding: .weekOfYear, value: 1, to: liveWeekStart)
+            .flatMap { weekStart(containing: $0, weekCalendar: weekCalendar) }
+            ?? liveWeekStart
     }
 
     /// The distinct days in one week on which momentum was preserved, oldest
@@ -160,7 +204,7 @@ enum StreakEngine {
         var days: Set<Date> = []
 
         for outcome in log.outcomes where outcome.kind.preservesMomentum {
-            let day = calendar.startOfDay(for: outcome.date)
+            let day = outcome.countingDay(calendar: calendar)
             guard let week = weekStart(containing: day, weekCalendar: weekCalendar),
                   calendar.isDate(week, inSameDayAs: start)
             else { continue }
@@ -180,7 +224,7 @@ enum StreakEngine {
         var counts: [Date: Int] = [:]
 
         for outcome in log.outcomes where outcome.kind.preservesMomentum {
-            let day = calendar.startOfDay(for: outcome.date)
+            let day = outcome.countingDay(calendar: calendar)
             guard daysSeen.insert(day).inserted,
                   let week = weekStart(containing: day, weekCalendar: weekCalendar)
             else { continue }

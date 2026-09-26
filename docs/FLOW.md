@@ -105,7 +105,7 @@ So the design is **strict in the moment** (apps lock), **forgiving across the we
 
 This is already built, except:
 
-- **Change:** today the gym days card can go down to 0 days. Minimum 3, with a note: "3 gym days is the minimum."
+- **Built (`2026-09-26`):** today the gym days card can go down to 0 days. Minimum 3, with a note: "3 gym days is the minimum."
 - **Change:** today nothing is protected when bedtime is after midnight (e.g. 00:30). The night that ends on a gym morning must always stay on.
 
 ### Gym and sleep never overlap (on the dial)
@@ -513,10 +513,10 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 | Home-workout photo from the library, or taken before the timer | Doesn't count. It must be a camera photo taken after the timer starts, the same day. |
 | Already added a progress photo earlier today | The workout photo replaces it (one photo a day is already built). |
 | Two workouts in one day (gym + home, or two gym visits) | Counts as 1 day. Already built. |
-| Changes the plan in the middle of a week | The new rule starts next Monday. *(Change: today, raising the plan re-checks past weeks and can reset the streak)* |
-| Existing user with only 1–2 gym days | Asked to add a day next time they open the app. The 3-day rule starts next Monday. *(Change)* |
-| Tries to drop to 2 gym days | Refused: "3 gym days is the minimum." *(Change)* |
-| Target picker in onboarding | 3 to 7. *(Change: today it allows 1, and someone planning 2 days only needs 2 for the streak)* |
+| Changes the plan in the middle of a week | The new rule starts next Monday. *(Built (`2026-09-26`): today, raising the plan re-checks past weeks and can reset the streak)* |
+| Existing user with only 1–2 gym days | Asked to add a day next time they open the app. The 3-day rule starts next Monday. *(Built (`2026-09-26`))* |
+| Tries to drop to 2 gym days | Refused: "3 gym days is the minimum." *(Built (`2026-09-26`))* |
+| Target picker in onboarding | 3 to 7. *(Built (`2026-09-26`): today it allows 1, and someone planning 2 days only needs 2 for the streak)* |
 | Joined in November | 2 months lands in January. The new year restarts the count, so the first freeze comes Mar 1. |
 | Still holding a freeze on Dec 31 | It expires. The new year brings 2 more (Mar 1, Jul 1). |
 | Sick for 2 weeks with 1 freeze | Week 1 frozen, week 2 breaks the streak. Already built. |
@@ -554,8 +554,8 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 
 **Streak and freezes**
 
-18. 3 is the minimum everywhere: onboarding picker 3–7, and the streak always needs 3.
-19. Save each week's rule when the week starts, so plan changes never rewrite past weeks.
+18. 3 is the minimum everywhere: onboarding picker 3–7, and the streak always needs 3. **(Built: `2026-09-26`)**
+19. Save each week's rule when the week starts, so plan changes never rewrite past weeks. **(Built: `2026-09-26`)**
 20. Count a visit on the day the alarm rang, and let unplanned days count.
 21. Freezes: 2 per calendar year (at 2 and 6 months of use; Mar 1 and Jul 1 in later years). They expire Dec 31, with a notification when one is earned. A planned freeze pauses that week's gym alarms.
 22. Streak-at-risk notification plus a banner on Home.

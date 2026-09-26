@@ -344,7 +344,7 @@ struct ProgressAnalytics {
 
         // Grouped once for the whole month rather than scanned per day.
         let outcomesByDay = Dictionary(grouping: log.outcomes) {
-            calendar.startOfDay(for: $0.date)
+            $0.countingDay(calendar: calendar)
         }
 
         var weeks: [ProgressWeekSummary] = []
@@ -405,7 +405,7 @@ struct ProgressAnalytics {
         let today = calendar.startOfDay(for: now)
         let thisMonth = calendar.dateInterval(of: .month, for: today)?.start ?? today
 
-        let earliestRecord = log.outcomes.map(\.date).min()
+        let earliestRecord = log.outcomes.map { $0.countingDay(calendar: calendar) }.min()
         let earliest = earliestRecord
             .flatMap { calendar.dateInterval(of: .month, for: $0)?.start }
             .map { min($0, thisMonth) } ?? thisMonth
@@ -435,7 +435,7 @@ struct ProgressAnalytics {
         let today = calendar.startOfDay(for: now)
         let trainingDays = plan.effectiveTrainingDays(fallback: schedule)
         let outcomesByDay = Dictionary(grouping: log.outcomes) {
-            calendar.startOfDay(for: $0.date)
+            $0.countingDay(calendar: calendar)
         }
         return buildWeek(
             index: 0,

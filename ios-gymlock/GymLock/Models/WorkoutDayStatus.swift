@@ -80,7 +80,7 @@ struct DayStatusIndex {
         // can never disagree about the same day.
         var kinds: [Date: SessionOutcomeKind] = [:]
         for outcome in log.outcomes {
-            kinds[calendar.startOfDay(for: outcome.date)] = outcome.kind
+            kinds[outcome.countingDay(calendar: calendar)] = outcome.kind
         }
         outcomeKinds = kinds
 

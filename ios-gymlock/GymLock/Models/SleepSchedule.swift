@@ -153,31 +153,49 @@ extension MorningPlan {
         static let reconcileWindDown = DayEditEffects(rawValue: 1 << 1)
     }
 
+    /// The result of tapping a gym day.
+    enum GymDayToggle: Equatable {
+        /// The day went on or off.
+        case updated
+        /// Refused: taking it off would leave fewer than
+        /// `StreakPolicy.minimumGymDays`. Show
+        /// `StreakPolicy.minimumGymDaysMessage`.
+        case belowMinimum
+    }
+
     /// Turns a gym day on or off on the primary alarm.
     ///
+    /// Adding a day is always allowed. Removing one that would leave fewer
+    /// than 3 is refused and changes nothing, including for an existing user
+    /// who is already below 3 (FLOW, "Which nights").
+    ///
     /// Picking a day on an alarm that was switched off turns it back on, since
-    /// choosing a day to train is not an ambiguous act. An alarm left with no
-    /// days is kept rather than deleted, so its sound and its place in the
-    /// plan survive to be used again. With no alarm at all, the first tap
-    /// creates one at `newAlarmTime`.
+    /// choosing a day to train is not an ambiguous act. With no alarm at all,
+    /// the first tap creates one at `newAlarmTime`.
     ///
     /// Wind-down is reconciled too, because gym days decide which nights are
     /// required.
-    mutating func toggleGymDay(_ day: Weekday, newAlarmTime: TimeOfDay) -> DayEditEffects {
+    mutating func toggleGymDay(
+        _ day: Weekday,
+        newAlarmTime: TimeOfDay
+    ) -> (outcome: GymDayToggle, effects: DayEditEffects) {
         guard let slot = primaryAlarmSlot,
               let index = slots.firstIndex(where: { $0.id == slot.id })
         else {
             slots.append(AlarmSlot(days: [day], alarmTime: newAlarmTime))
-            return [.resyncGymAlarms, .reconcileWindDown]
+            return (.updated, [.resyncGymAlarms, .reconcileWindDown])
         }
 
         if slots[index].days.contains(day) {
+            guard slots[index].days.count > StreakPolicy.minimumGymDays else {
+                return (.belowMinimum, [])
+            }
             slots[index].days.remove(day)
         } else {
             slots[index].days.insert(day)
             slots[index].isEnabled = true
         }
-        return [.resyncGymAlarms, .reconcileWindDown]
+        return (.updated, [.resyncGymAlarms, .reconcileWindDown])
     }
 
     /// Turns a sleep night on or off, refusing a night a gym morning needs.

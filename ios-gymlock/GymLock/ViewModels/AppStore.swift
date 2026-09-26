@@ -241,6 +241,16 @@ final class AppStore {
     /// Whether the passive arrival system is fully configured.
     var isAutomaticArrivalReady: Bool { primaryGym != nil }
 
+    /// Whether to ask an existing user with 1 or 2 gym days to add one.
+    ///
+    /// Asked on every open until they have 3. Their goal is 3 from the rule
+    /// start either way; this only fixes the plan to match.
+    var shouldAskToAddGymDay: Bool {
+        stage == .home
+            && plan.hasBeenReviewed
+            && StreakPolicy.asksToAddGymDay(plannedGymDays: plan.gymDays.count)
+    }
+
     // MARK: - Notification taps
 
     /// The last non-alarm notification the app was opened from, if any.
@@ -339,10 +349,11 @@ final class AppStore {
         schedule.trainingDays = Self.spreadTrainingDays(count: profile.targetWorkoutsPerWeek)
     }
 
-    /// Picks `count` days spread as evenly as possible across the week.
+    /// Picks `count` days spread as evenly as possible across the week,
+    /// never fewer than 3 (FLOW, Flow 4).
     static func spreadTrainingDays(count: Int) -> Set<Weekday> {
         let ordered = Weekday.allCases
-        let clamped = min(max(count, 1), ordered.count)
+        let clamped = min(max(count, StreakPolicy.minimumGymDays), ordered.count)
         guard clamped < ordered.count else { return Set(ordered) }
 
         let stride = Double(ordered.count) / Double(clamped)
@@ -385,6 +396,41 @@ final class AppStore {
             latitude: 37.3349,
             longitude: -122.0090
         )
+    }
+
+    /// Turns this device into an existing user from before the 3-day rule:
+    /// 2 gym days, some history, and a vault that has never seen the rule, so
+    /// the next evaluation starts it next Monday. Freezes are reset too.
+    func debugMakeLegacyUserWithTwoGymDays() {
+        var updated = plan
+        if updated.slots.isEmpty {
+            updated.slots = [AlarmSlot(days: [.monday, .thursday], alarmTime: TimeOfDay(hour: 6, minute: 30))]
+        } else if let index = updated.slots.firstIndex(where: { $0.id == updated.primaryAlarmSlot?.id }) {
+            updated.slots[index].days = [.monday, .thursday]
+            updated.slots[index].isEnabled = true
+        }
+        updated.hasBeenReviewed = true
+        plan = updated
+
+        if log.outcomes.isEmpty {
+            log.record(SessionOutcome(date: Date().addingTimeInterval(-7 * 24 * 3600), kind: .showedUp))
+        }
+        streakVault = .empty
+        refreshStreak()
+    }
+
+    /// Sets the primary alarm's days directly, bypassing the minimum, so the
+    /// week rules can be exercised from any starting plan.
+    func debugSetGymDays(_ days: Set<Weekday>) {
+        var updated = plan
+        guard let index = updated.slots.firstIndex(where: { $0.id == updated.primaryAlarmSlot?.id }) else {
+            updated.slots = [AlarmSlot(days: days, alarmTime: TimeOfDay(hour: 6, minute: 30))]
+            plan = updated
+            return
+        }
+        updated.slots[index].days = days
+        updated.slots[index].isEnabled = true
+        plan = updated
     }
 
     /// Burns through the allowance so the over-allowance branch can be seen.

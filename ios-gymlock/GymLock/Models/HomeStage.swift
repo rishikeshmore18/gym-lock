@@ -517,13 +517,13 @@ enum HomeCardDeriver {
 
         guard let week = calendar.dateInterval(of: .weekOfYear, for: now) else { return nil }
         let done = store.log.outcomes.filter {
-            week.contains($0.date) && $0.kind.preservesMomentum
+            week.contains($0.countingDay(calendar: calendar)) && $0.kind.preservesMomentum
         }.count
 
         guard done > 0 else { return nil }
 
         // First week of use reads as steps; afterwards as a bar.
-        let firstOutcome = store.log.outcomes.map(\.date).min() ?? now
+        let firstOutcome = store.log.outcomes.map { $0.countingDay(calendar: calendar) }.min() ?? now
         let daysSinceFirst = max(0, calendar.dateComponents([.day], from: firstOutcome, to: now).day ?? 0)
         let useDots = daysSinceFirst < 7
 
@@ -548,9 +548,10 @@ enum HomeCardDeriver {
         var weeks = Set<Int>()
         var byWeekday = [Int](repeating: 0, count: 7)
         for visit in visits {
-            guard let week = calendar.dateInterval(of: .weekOfYear, for: visit.date) else { continue }
+            let visitDay = visit.countingDay(calendar: calendar)
+            guard let week = calendar.dateInterval(of: .weekOfYear, for: visitDay) else { continue }
             weeks.insert(week.start.hashValue)
-            let weekday = calendar.component(.weekday, from: visit.date) - 1 // Sun-first index
+            let weekday = calendar.component(.weekday, from: visitDay) - 1 // Sun-first index
             byWeekday[weekday] += 1
         }
         guard weeks.count >= 3 else { return nil }
@@ -574,7 +575,9 @@ enum HomeCardDeriver {
         let perWeek = store.plan.enabledSlots.reduce(into: Set<Weekday>()) { $0.formUnion($1.days) }.count
 
         func verified(in interval: DateInterval) -> Int {
-            store.log.outcomes.filter { interval.contains($0.date) && $0.kind.isVerifiedGymVisit }.count
+            store.log.outcomes.filter {
+                interval.contains($0.countingDay(calendar: calendar)) && $0.kind.isVerifiedGymVisit
+            }.count
         }
 
         // A month that just turned: show the closed month.

@@ -76,9 +76,13 @@ struct AlarmScreenStyleTests {
     @Test func selectionOnlyReportsARealChange() {
         var draft = AlarmScreenDraft(stored: .sunrise)
 
-        #expect(!draft.select(.sunrise))
-        #expect(draft.select(.focus))
-        #expect(!draft.select(.focus))
+        // Bound first: `#expect` can't call a mutating method inside its closure.
+        let sameAsSaved = draft.select(.sunrise)
+        let changed = draft.select(.focus)
+        let repeated = draft.select(.focus)
+        #expect(!sameAsSaved)
+        #expect(changed)
+        #expect(!repeated)
     }
 
     @Test func choosingTheSavedStyleAgainIsNotAChange() {

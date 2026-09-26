@@ -36,9 +36,11 @@ struct StreakEngineTests {
         return plan
     }
 
+    /// Explicit days: `spreadTrainingDays` now never returns fewer than 3.
     private func planWith(days: Int) -> MorningPlan {
         var plan = MorningPlan.default
-        plan.slots = [AlarmSlot(days: AppStore.spreadTrainingDays(count: days), alarmTime: TimeOfDay(hour: 6, minute: 30))]
+        let picked = Set(Weekday.allCases.prefix(days))
+        plan.slots = [AlarmSlot(days: picked, alarmTime: TimeOfDay(hour: 6, minute: 30))]
         return plan
     }
 
@@ -124,12 +126,14 @@ struct StreakEngineTests {
 
     // MARK: Goal clamping
 
-    @Test("Weekly goal is three, clamped to the plan")
+    @Test("Weeks before the 3-day rule keep the old goal, clamped to the plan")
     func goalClamping() {
-        #expect(StreakPolicy.weeklyGoal(plannedDays: 2) == 2)
-        #expect(StreakPolicy.weeklyGoal(plannedDays: 5) == 3)
-        #expect(StreakPolicy.weeklyGoal(plannedDays: 0) == 1)
+        #expect(StreakPolicy.legacyWeeklyGoal(plannedDays: 2) == 2)
+        #expect(StreakPolicy.legacyWeeklyGoal(plannedDays: 5) == 3)
+        #expect(StreakPolicy.legacyWeeklyGoal(plannedDays: 0) == 1)
 
+        // An existing user: history exists, so the live week keeps its old
+        // goal and the 3-day rule starts next Monday.
         var vault = StreakVault.empty
         let twoDays = MomentumLog(outcomes: [
             SessionOutcome(date: day(-7), kind: .showedUp),

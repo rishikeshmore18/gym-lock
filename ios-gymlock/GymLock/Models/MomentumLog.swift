@@ -59,6 +59,11 @@ struct SessionOutcome: Codable, Hashable, Identifiable {
     /// Strictly additive: its absence is never shown as a failure, because most
     /// people lifting weights are not wearing a watch that logs it.
     var workoutDetected: Bool
+    /// The day this outcome counts on: the start of the alarm's day for
+    /// anything recorded from a session. A Sunday 23:30 alarm with the visit
+    /// at 00:20 counts on Sunday. Nil on records saved before this existed,
+    /// which count on the day they were recorded, exactly as before.
+    var countsOn: Date?
 
     init(
         id: UUID = UUID(),
@@ -66,7 +71,8 @@ struct SessionOutcome: Codable, Hashable, Identifiable {
         kind: SessionOutcomeKind,
         minutes: Int? = nil,
         sessionID: UUID? = nil,
-        workoutDetected: Bool = false
+        workoutDetected: Bool = false,
+        countsOn: Date? = nil
     ) {
         self.id = id
         self.date = date
@@ -74,6 +80,15 @@ struct SessionOutcome: Codable, Hashable, Identifiable {
         self.minutes = minutes
         self.sessionID = sessionID
         self.workoutDetected = workoutDetected
+        self.countsOn = countsOn
+    }
+
+    /// The one definition of which day this outcome counts on.
+    ///
+    /// Every place that puts an outcome on a day (the streak, the week count,
+    /// Progress, the calendar, the share frames) asks this and nothing else.
+    func countingDay(calendar: Calendar) -> Date {
+        calendar.startOfDay(for: countsOn ?? date)
     }
 }
 
@@ -115,7 +130,8 @@ struct MomentumLog: Codable, Hashable {
         let calendar = Calendar.current
         let now = Date()
         return outcomes.filter {
-            $0.kind.isVerifiedGymVisit && calendar.isDate($0.date, equalTo: now, toGranularity: .month)
+            $0.kind.isVerifiedGymVisit
+                && calendar.isDate($0.countingDay(calendar: calendar), equalTo: now, toGranularity: .month)
         }.count
     }
 
@@ -123,9 +139,16 @@ struct MomentumLog: Codable, Hashable {
         outcomes.filter(\.kind.isVerifiedGymVisit).count
     }
 
-    /// The outcome recorded on a given day, if the morning already resolved.
+    /// The outcome that counts on a given day, if the morning already resolved.
     func outcome(on day: Date = Date(), calendar: Calendar = .current) -> SessionOutcome? {
-        outcomes.last { calendar.isDate($0.date, inSameDayAs: day) }
+        outcomes.last { calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) }
+    }
+
+    /// The last outcome *written* on a given calendar day, whatever day it
+    /// counts on. For finding a record again (a late Health workout), never
+    /// for counting.
+    func outcome(recordedOn moment: Date, calendar: Calendar = .current) -> SessionOutcome? {
+        outcomes.last { calendar.isDate($0.date, inSameDayAs: moment) }
     }
 
     /// Attaches a detected workout to an already-recorded outcome.
@@ -155,7 +178,7 @@ struct MomentumLog: Codable, Hashable {
                 return false
             }
             return outcomes.contains {
-                calendar.isDate($0.date, inSameDayAs: day) && $0.kind.preservesMomentum
+                calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) && $0.kind.preservesMomentum
             }
         }
     }
