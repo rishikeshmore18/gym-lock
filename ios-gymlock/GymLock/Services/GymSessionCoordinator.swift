@@ -17,6 +17,7 @@ enum MorningRoute: Equatable {
     case plansChanged
     case quickWorkoutPicker
     case quickWorkoutActive
+    case homeWorkoutProof
     case momentumSaved
     case cantToday
     case gymSuccess
@@ -191,12 +192,25 @@ final class GymSessionCoordinator {
     @discardableResult
     func evaluateVisits(now: Date = Date(), extraPhotos: [ProgressPhoto] = []) -> [GymVisit] {
         guard let store else { return [] }
-        return visits.evaluate(
+        let counted = visits.evaluate(
             now: now,
             store: store,
             photos: (photos?.photos ?? []) + extraPhotos,
             calendar: .current
         )
+        settleHomeWorkoutState(counted: counted)
+        return counted
+    }
+
+    /// A home workout that just counted closes the flow with the saved screen.
+    private func settleHomeWorkoutState(counted: [GymVisit]) {
+        guard var current = session, current.state == .homeWorkoutAwaitingProof,
+              counted.contains(where: { $0.isHome && $0.sessionID == current.id })
+        else { return }
+        current.state = .homeWorkoutVerified
+        session = current
+        persist()
+        Haptics.commit()
     }
 
     func noteGymExit(at date: Date, now: Date = Date()) {
@@ -526,6 +540,8 @@ final class GymSessionCoordinator {
             return .quickWorkoutPicker
         case .quickWorkoutActive:
             return .quickWorkoutActive
+        case .homeWorkoutAwaitingProof:
+            return .homeWorkoutProof
         case .homeWorkoutVerified:
             return .momentumSaved
         case .cantToday:
@@ -1601,9 +1617,9 @@ final class GymSessionCoordinator {
     /// Starts the home fallback.
     ///
     /// The shield stays on for the duration. The user chose a workout instead of
-    /// the gym, not instead of the commitment.
+    /// the gym, not instead of the commitment. Greyed out at the monthly cap.
     func startQuickWorkout(minutes: Int) {
-        guard var current = session else { return }
+        guard var current = session, !homeWorkoutCapReached else { return }
         let now = Date()
         current.state = .quickWorkoutActive
         current.quickWorkoutMinutes = minutes
@@ -1618,37 +1634,56 @@ final class GymSessionCoordinator {
     }
 
     /// Finishes a home workout.
+    ///
+    /// The timer ends and the apps unlock (FLOW, Flow 4). The day only counts
+    /// when Apple Health confirms it or a camera progress photo lands, so the
+    /// outcome is recorded unproven and a home visit follows it until midnight.
     func finishQuickWorkout(completed wasCompleted: Bool) {
         guard var current = session else { return }
 
-        if wasCompleted {
-            current.state = .homeWorkoutVerified
-            session = current
-
-            store?.log.record(
-                SessionOutcome(
-                    kind: .homeWorkout,
-                    minutes: current.quickWorkoutMinutes,
-                    sessionID: current.id,
-                    workoutDetected: current.workoutDetected,
-                    countsOn: current.day
-                )
-            )
-            store?.record(.quickWorkoutCompleted, sessionID: current.id)
-
-            releaseShield(sessionID: current.id)
-            Haptics.commit()
-            persist()
-
-            Task { await matchWorkoutForCurrentSession() }
-        } else {
+        guard wasCompleted else {
             current.state = .missed
             session = current
             store?.log.record(SessionOutcome(kind: .missed, sessionID: current.id, countsOn: current.day))
             store?.record(.missed, sessionID: current.id)
             releaseShield(sessionID: current.id)
             endSession(clearingAnchor: true)
+            return
         }
+
+        let started = current.quickWorkoutStartedAt ?? Date()
+        current.state = .homeWorkoutAwaitingProof
+        session = current
+
+        let outcome = SessionOutcome(
+            kind: .homeWorkout,
+            minutes: current.quickWorkoutMinutes,
+            sessionID: current.id,
+            countsOn: current.day,
+            proof: .unproven
+        )
+        store?.log.record(outcome)
+        store?.record(.quickWorkoutCompleted, sessionID: current.id)
+
+        releaseShield(sessionID: current.id)
+        persist()
+
+        // The check that decides it: Health now, a photo any time until
+        // midnight. Modelled as a home visit so the settling rules are the
+        // gym's rules, with the timer's start standing in for the arrival.
+        let visit = GymVisit(
+            outcomeID: outcome.id,
+            sessionID: current.id,
+            countsOn: current.day,
+            arrivedAt: started,
+            timeCounts: false,
+            manualAt: started,
+            isHome: true
+        )
+        visits.begin(visit)
+        fetchWorkouts(around: started)
+        Haptics.tap()
+        evaluateVisits()
     }
 
     // MARK: - Can't today
@@ -1666,21 +1701,105 @@ final class GymSessionCoordinator {
         clearRunningLateAlarm(for: current)
     }
 
-    var hasEasySkipRemaining: Bool {
-        guard let store else { return true }
-        return store.log.hasEasySkipRemaining(
-            plannedSessionsIn28Days: store.plan.plannedSessionsPer28Days
-        )
+    // MARK: - The skip screen (FLOW, Flow 4)
+
+    /// The one skip screen for the session's day: "can't today", the
+    /// missed-alarm notice, "you left after", a missed rescheduled day, or a
+    /// day the phone was off for. The heading and the order of the doors
+    /// follow whether the week can still be reached.
+    var skipScreen: SkipScreenPlan {
+        guard let store, let day = session?.day else {
+            return SkipScreenPlan(
+                heading: "make it up. this keeps your streak.",
+                moreNeeded: StreakPolicy.defaultWeeklyGoal,
+                options: [.homeWorkout, .skip],
+                rescheduleNote: nil
+            )
+        }
+        return SkipRules.screen(log: store.log, plan: store.plan, day: day, now: Date(), calendar: .current)
     }
 
-    var easySkipAllowance: Int {
-        guard let store else { return 1 }
-        return MomentumLog.easySkipAllowance(
-            plannedSessionsIn28Days: store.plan.plannedSessionsPer28Days
-        )
+    /// Where today's workout can be moved to.
+    var rescheduleChoices: [ReschedulePlanner.Choice] {
+        guard let store, let day = session?.day else { return [] }
+        return ReschedulePlanner.choices(plan: store.plan, day: day, now: Date(), calendar: .current)
     }
 
-    var easySkipsUsed: Int { store?.log.skipsUsedInLast28Days() ?? 0 }
+    /// The usual lock-alarm time for `day`'s mode, as the picker's default.
+    func rescheduleDefaultTime(for day: Date) -> TimeOfDay {
+        guard let store else { return TimeOfDay(hour: 6, minute: 30) }
+        return ReschedulePlanner.defaultTime(plan: store.plan, on: day, calendar: .current)
+    }
+
+    func isRescheduleTimeAvailable(_ time: TimeOfDay, on day: Date) -> Bool {
+        guard let store else { return false }
+        return ReschedulePlanner.isTimeAvailable(time, on: day, plan: store.plan, now: Date(), calendar: .current)
+    }
+
+    var homeWorkoutsUsedThisMonth: Int {
+        guard let store else { return 0 }
+        return HomeWorkoutRules.usedThisMonth(log: store.log, now: Date())
+    }
+
+    var homeWorkoutCapReached: Bool {
+        guard let store else { return false }
+        return HomeWorkoutRules.atCap(log: store.log, now: Date())
+    }
+
+    /// Pending reschedules, for the alarm screen and cancelling.
+    var pendingReschedules: [OneOffAlarm] {
+        guard let store else { return [] }
+        return store.plan.oneOffAlarms.filter { $0.kind == .reschedule && $0.isActive(at: Date()) }
+    }
+
+    /// A real reschedule (FLOW, Flow 4): a one-off alarm of kind `.reschedule`
+    /// that runs that day exactly like a gym day — lock, session, arrival,
+    /// workout done. Apps unlock now; today is given up (`.rescheduled`,
+    /// which does not count and keeps the comeback line true).
+    func reschedule(to day: Date, at time: TimeOfDay, now: Date = Date()) {
+        guard var current = session, current.state == .cantToday, let store else { return }
+        guard isRescheduleTimeAvailable(time, on: day) else { return }
+        guard let fireDate = Calendar.current.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: day) else { return }
+
+        let alarm = OneOffAlarm(
+            kind: .reschedule,
+            slotID: store.plan.primaryAlarmSlot?.id,
+            fireDate: fireDate,
+            originDay: current.day
+        )
+        store.plan.oneOffAlarms.append(alarm)
+
+        store.log.record(SessionOutcome(kind: .rescheduled, sessionID: current.id, countsOn: current.day))
+        store.record(
+            .rescheduled,
+            sessionID: current.id,
+            detail: "reschedule to \(day.formatted(.dateTime.weekday(.wide)).lowercased()) \(time.clockString)"
+        )
+
+        current.state = .rescheduled
+        session = current
+        releaseShield(sessionID: current.id)
+        let oldDay = current.day
+        Task { [notifier] in await notifier.cancelMissedNotice(day: oldDay) }
+        clearRunningLateAlarm(for: current)
+        scheduleComebackIfEnabled()
+        endSession(clearingAnchor: true)
+        Task { await syncAlarms() }
+    }
+
+    /// Cancelling a pending reschedule is allowed; it turns into a skip on
+    /// the day the workout was moved from (FLOW, Flow 4 edge cases).
+    func cancelReschedule(_ alarmID: UUID, now: Date = Date()) {
+        guard let store,
+              let index = store.plan.oneOffAlarms.firstIndex(where: { $0.id == alarmID && $0.kind == .reschedule })
+        else { return }
+        let alarm = store.plan.oneOffAlarms.remove(at: index)
+
+        let day = alarm.originDay ?? Calendar.current.startOfDay(for: alarm.fireDate)
+        store.log.record(SessionOutcome(date: now, kind: .skipped, countsOn: day))
+        store.record(.cantToday, detail: "reschedule cancelled")
+        Task { await syncAlarms() }
+    }
 
     /// The shield follows the resolution, always. Nobody gets trapped because
     /// they legitimately could not go.
@@ -1689,25 +1808,17 @@ final class GymSessionCoordinator {
         current.cantTodayResolution = resolution
 
         switch resolution {
-        case .quickWorkout:
+        case .homeWorkout:
             current.state = .quickWorkoutOffered
             session = current
             persist()
 
-        case .rescheduledWithin24h:
-            current.state = .rescheduled
-            session = current
-            releaseShield(sessionID: current.id)
-            store?.log.record(SessionOutcome(kind: .rescheduled, sessionID: current.id, countsOn: current.day))
-            scheduleComebackIfEnabled()
-            endSession(clearingAnchor: true)
-
-        case .tookTheDayOff:
+        case .skip:
             current.state = .completed
             session = current
             releaseShield(sessionID: current.id)
-            let kind: SessionOutcomeKind = hasEasySkipRemaining ? .easySkip : .dayOff
-            store?.log.record(SessionOutcome(kind: kind, sessionID: current.id, countsOn: current.day))
+            store?.log.record(SessionOutcome(kind: .skipped, sessionID: current.id, countsOn: current.day))
+            store?.record(.cantToday, sessionID: current.id, detail: "skipped")
             scheduleComebackIfEnabled()
             endSession(clearingAnchor: true)
         }

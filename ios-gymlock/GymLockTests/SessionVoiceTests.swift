@@ -97,7 +97,6 @@ struct SessionVoiceTests {
                     voice.nudgeHeading,
                     voice.nudgeSupport,
                     voice.departureSupport,
-                    voice.rescheduleDetail,
                     voice.windowHeading(hasLeft: false),
                     voice.windowSupport(hasLeft: false),
                     voice.windowFooterDetail(hasLeft: false),

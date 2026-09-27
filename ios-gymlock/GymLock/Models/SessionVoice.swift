@@ -213,16 +213,7 @@ nonisolated struct SessionVoice: Hashable {
 
     // MARK: - Resolving the day
 
-    /// Subtitle on the "reschedule within 24h" row.
-    var rescheduleDetail: String {
-        switch daypart {
-        case .morning: "pick it back up tomorrow morning"
-        case .midday: "pick it back up tomorrow"
-        case .evening: "pick it back up tomorrow evening"
-        }
-    }
-
-    /// Subtitle on the "take today off" row.
+    /// Subtitle on the "skip" row.
     var dayOffDetail: String { "no penalty, no catch-up" }
 
     // MARK: - Sharing

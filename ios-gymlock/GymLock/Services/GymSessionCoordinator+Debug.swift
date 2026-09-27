@@ -44,8 +44,6 @@ extension GymSessionCoordinator {
 
         // Fallbacks
         case quickWorkoutComplete
-        case cantTodayWithinAllowance
-        case cantTodayOverAllowance
 
         // The three doors: every way a real morning can actually begin.
         case alarmKitButtonTapped
@@ -105,6 +103,16 @@ extension GymSessionCoordinator {
         case imHereCameraPhoto
         case tapWorkoutDoneNotification
 
+        // Skips, reschedules and home workouts (FLOW items 15, 16, 17).
+        case exampleA
+        case exampleB
+        case exampleC
+        case exampleD
+        case use3HomeWorkouts
+        case homeWorkoutNoHealthPhoto
+        case cancelAReschedule
+        case skipOnSunday
+
         // Sound: the ringer and the fallback chain.
         case ringerStart
         case ringerEscalated
@@ -129,7 +137,7 @@ extension GymSessionCoordinator {
                 "arrival"
             case .healthWorkoutDetected, .noHealthWorkout, .healthDenied:
                 "health"
-            case .quickWorkoutComplete, .cantTodayWithinAllowance, .cantTodayOverAllowance:
+            case .quickWorkoutComplete:
                 "fallbacks"
             case .alarmKitButtonTapped, .alarmKitSnoozeTapped,
                  .notificationActionImUp, .notificationActionSnooze,
@@ -158,6 +166,10 @@ extension GymSessionCoordinator {
                  .handTypedWorkout, .unplannedVisit, .visitInSleepHours,
                  .imHereCameraPhoto, .tapWorkoutDoneNotification:
                 "at the gym"
+            case .exampleA, .exampleB, .exampleC, .exampleD,
+                 .use3HomeWorkouts, .homeWorkoutNoHealthPhoto,
+                 .cancelAReschedule, .skipOnSunday:
+                "skips"
             case .ringerStart, .ringerEscalated, .ringerStop,
                  .ringerCeiling, .customSongMissing, .customSongProtected:
                 "sound"
@@ -190,8 +202,6 @@ extension GymSessionCoordinator {
             case .noHealthWorkout: "no HealthKit workout"
             case .healthDenied: "HealthKit denied"
             case .quickWorkoutComplete: "quick workout complete"
-            case .cantTodayWithinAllowance: "can't today (within allowance)"
-            case .cantTodayOverAllowance: "can't today (over allowance)"
             case .alarmKitButtonTapped: "AlarmKit: tapped I'm up"
             case .alarmKitSnoozeTapped: "AlarmKit: tapped 5 more min"
             case .notificationActionImUp: "notification: I'm up"
@@ -236,6 +246,14 @@ extension GymSessionCoordinator {
             case .visitInSleepHours: "visit at 23:30 in sleep hours"
             case .imHereCameraPhoto: "I'm here + camera photo"
             case .tapWorkoutDoneNotification: "tap the workout-done notification"
+            case .exampleA: "Example A: mon done, wed slept through"
+            case .exampleB: "Example B: mon to fri, tue can't today"
+            case .exampleC: "Example C: bad week, reschedule twice"
+            case .exampleD: "Example D: no watch, home workout"
+            case .use3HomeWorkouts: "use 3 home workouts this month"
+            case .homeWorkoutNoHealthPhoto: "home workout, no Health, add photo"
+            case .cancelAReschedule: "cancel a reschedule"
+            case .skipOnSunday: "skip on Sunday"
             case .ringerStart: "ringer: start"
             case .ringerEscalated: "ringer: jump to full volume"
             case .ringerStop: "ringer: stop"
@@ -246,7 +264,7 @@ extension GymSessionCoordinator {
         }
 
         static var sections: [String] {
-            ["at the gym", "alarm rules", "sleep and night lock", "week rules", "notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
+            ["skips", "at the gym", "alarm rules", "sleep and night lock", "week rules", "notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
         }
     }
 
@@ -407,16 +425,6 @@ extension GymSessionCoordinator {
             if session == nil { simulate(.alarmFired) }
             startQuickWorkout(minutes: 20)
             finishQuickWorkout(completed: true)
-
-        case .cantTodayWithinAllowance:
-            debugStore?.debugClearSkips()
-            if session == nil { simulate(.alarmFired) }
-            beginCantToday()
-
-        case .cantTodayOverAllowance:
-            debugStore?.debugExhaustSkips(count: easySkipAllowance)
-            if session == nil { simulate(.alarmFired) }
-            beginCantToday()
 
         // MARK: The three doors
         //
@@ -937,6 +945,95 @@ extension GymSessionCoordinator {
             Self.debugGymResult =
                 "handoff \(wrote ? "WRITTEN" : "none") · tab \(requestedTab == .progress ? "progress" : "NOT PROGRESS") · spotlight \(pendingSpotlightDay == nil ? "NOT SET" : "pending") · session \(session?.state.rawValue ?? "none")"
 
+        // MARK: Skips
+        //
+        // Each example sets the week up in one tap and opens the skip screen
+        // for the day in the FLOW example. They wipe this week's log entries,
+        // so they write to your real log.
+
+        case .exampleA:
+            debugSetupWeek(days: [.monday, .wednesday, .friday], outcomes: [(0, .showedUp)])
+            debugOpenSkipScreen(dayOffset: 2)
+            debugReportSkipScreen("A: mon done, wed slept")
+
+        case .exampleB:
+            debugSetupWeek(
+                days: [.monday, .tuesday, .wednesday, .thursday, .friday],
+                outcomes: [(0, .showedUp)]
+            )
+            debugOpenSkipScreen(dayOffset: 1)
+            debugReportSkipScreen("B: mon done, tue can't today")
+
+        case .exampleC:
+            debugSetupWeek(
+                days: [.monday, .tuesday, .wednesday, .thursday, .friday],
+                outcomes: [(0, .skipped), (1, .skipped)]
+            )
+            debugOpenSkipScreen(dayOffset: 2)
+            debugReportSkipScreen("C: mon tue skipped, wed slept")
+
+        case .exampleD:
+            debugSetupWeek(days: [.monday, .wednesday, .friday], outcomes: [(0, .showedUp)])
+            debugOpenSkipScreen(dayOffset: 2)
+            debugReportSkipScreen("D: no watch, home workout")
+
+        case .use3HomeWorkouts:
+            guard let store = debugStore else { return }
+            store.debugUseHomeWorkouts(3)
+            let used = HomeWorkoutRules.usedThisMonth(log: store.log, now: Date())
+            Self.debugSkipsResult =
+                "\(used) of \(HomeWorkoutRules.monthlyLimit) used · picker \(used >= HomeWorkoutRules.monthlyLimit ? "GREYED OUT" : "open")"
+
+        case .homeWorkoutNoHealthPhoto:
+            // The full home-workout path: no Health workout, then a camera
+            // photo taken after the timer. The photo is what counts it.
+            guard let store = debugStore else { return }
+            endSession()
+            store.debugSeedGym()
+            simulate(.alarmFired)
+            beginCantToday()
+            resolveCantToday(.homeWorkout)
+            startQuickWorkout(minutes: 20)
+            if var current = session {
+                current.quickWorkoutStartedAt = Date().addingTimeInterval(-25 * 60)
+                current.quickWorkoutDeadline = current.quickWorkoutStartedAt.map { $0.addingTimeInterval(20 * 60) }
+                debugReplace(current)
+            }
+            finishQuickWorkout(completed: true)
+            let stateBefore = session?.state.rawValue ?? "none"
+            evaluateVisits(extraPhotos: [debugPhoto(source: .camera)])
+            let outcome = store.log.outcomes.last
+            Self.debugSkipsResult =
+                "after timer: \(stateBefore) · after photo: \(outcome?.counts == true ? "counts (\(outcome?.proof.rawValue ?? "?"))" : "DOES NOT COUNT")"
+
+        case .cancelAReschedule:
+            guard let store = debugStore else { return }
+            endSession()
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            openSkipScreen(for: today)
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today
+            let time = ReschedulePlanner.defaultTime(plan: store.plan, on: tomorrow)
+            guard ReschedulePlanner.isTimeAvailable(time, on: tomorrow, plan: store.plan, now: Date()) else {
+                Self.debugSkipsResult = "no usable time tomorrow; run earlier in the day"
+                return
+            }
+            reschedule(to: tomorrow, at: time)
+            guard let alarm = store.plan.oneOffAlarms.last(where: { $0.kind == .reschedule }) else {
+                Self.debugSkipsResult = "RESCHEDULE NOT SET"
+                return
+            }
+            cancelReschedule(alarm.id)
+            let outcome = store.log.outcomes.last
+            let gone = !store.plan.oneOffAlarms.contains { $0.id == alarm.id }
+            Self.debugSkipsResult =
+                "alarm \(gone ? "gone" : "STILL THERE") · outcome \(outcome?.kind.rawValue ?? "none") · counts \(outcome?.counts == true ? "YES" : "no")"
+
+        case .skipOnSunday:
+            debugSetupWeek(days: [.monday, .wednesday, .friday], outcomes: [])
+            debugOpenSkipScreen(dayOffset: 6)
+            debugReportSkipScreen("sunday")
+
         // MARK: Sound
 
         case .ringerStart:
@@ -1049,6 +1146,60 @@ extension GymSessionCoordinator {
             notice = "\"\(WorkoutDoneLine.shortVisit(minutes: visit.minutesBeforeLeaving))\""
         }
         Self.debugGymResult = "\(prefix) · \(counted) · \(notice)"
+    }
+
+    // MARK: - Skips helpers
+
+    /// The last skips result, shown in the panel.
+    static var debugSkipsResult = "none"
+
+    /// A clean week for the examples: the given gym days, no one-offs, and
+    /// nothing counted this week except the outcomes listed as
+    /// `(dayOffsetFromMonday, kind)`.
+    private func debugSetupWeek(days: Set<Weekday>, outcomes: [(Int, SessionOutcomeKind)]) {
+        guard let store = debugStore else { return }
+        store.seedPlanIfNeeded()
+        store.debugSetGymDays(days)
+        var plan = store.plan
+        plan.oneOffAlarms = []
+        store.plan = plan
+
+        let calendar = Calendar.current
+        let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
+        guard let monday = StreakEngine.weekStart(containing: Date(), weekCalendar: weekCalendar) else { return }
+        store.log.outcomes.removeAll {
+            StreakEngine.weekStart(containing: $0.countingDay(calendar: calendar), weekCalendar: weekCalendar) == monday
+        }
+        for (offset, kind) in outcomes {
+            let day = monday.addingTimeInterval(Double(offset) * 24 * 3600)
+            store.log.record(SessionOutcome(date: day, kind: kind, countsOn: day))
+        }
+        store.refreshStreak()
+    }
+
+    /// Opens the skip screen for a day of this week, `dayOffset` days from
+    /// its Monday.
+    private func debugOpenSkipScreen(dayOffset: Int) {
+        guard debugStore != nil else { return }
+        let calendar = Calendar.current
+        let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
+        guard let monday = StreakEngine.weekStart(containing: Date(), weekCalendar: weekCalendar) else { return }
+        endSession()
+        openSkipScreen(for: monday.addingTimeInterval(Double(dayOffset) * 24 * 3600))
+    }
+
+    private func debugReportSkipScreen(_ prefix: String) {
+        let plan = skipScreen
+        let first = plan.options.first.map { option in
+            switch option {
+            case .reschedule: "reschedule"
+            case .homeWorkout: "home workout"
+            case .skip: "skip"
+            }
+        } ?? "none"
+        let labels = rescheduleChoices.map(\.label).joined(separator: " ")
+        Self.debugSkipsResult =
+            "\(prefix) · \"\(plan.heading)\" · first: \(first) · choices: \(labels.isEmpty ? "none" : labels)"
     }
 
     // MARK: - Alarm rules helpers

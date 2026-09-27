@@ -285,6 +285,14 @@ struct AlarmSettingsView: View {
                     .padding(.bottom, 18)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+
+            // PLACEHOLDER UI: designed in Step 3
+            ForEach(coordinator.pendingReschedules) { alarm in
+                rescheduleRow(alarm)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 18)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
         .frame(maxWidth: .infinity)
         .warmCard(radius: Theme.cardRadius)
@@ -333,6 +341,32 @@ struct AlarmSettingsView: View {
                 resyncAlarms()
             } label: {
                 Text("undo")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(Theme.surfaceMuted, in: .rect(cornerRadius: 12))
+    }
+
+    /// A pending reschedule, said plainly, with the way out next to it
+    /// (FLOW, Flow 4 edge cases).
+    private func rescheduleRow(_ alarm: OneOffAlarm) -> some View {
+        let day = Calendar.current.isDateInToday(alarm.fireDate)
+            ? "today"
+            : alarm.fireDate.formatted(.dateTime.weekday(.wide)).lowercased()
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("rescheduled: \(TimeOfDay(from: alarm.fireDate).displayString) \(day). that day runs like a gym day.")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button {
+                Haptics.tap()
+                coordinator.cancelReschedule(alarm.id)
+            } label: {
+                Text("cancel")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.ink)
             }

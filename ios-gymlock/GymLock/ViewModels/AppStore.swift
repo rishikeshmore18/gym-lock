@@ -416,10 +416,36 @@ final class AppStore {
     }
 
     #if DEBUG
-    /// Removes recent skips so the within-allowance branch can be exercised.
-    func debugClearSkips() {
-        let cutoff = Date().addingTimeInterval(-28 * 24 * 3600)
-        log.outcomes.removeAll { $0.date >= cutoff && $0.kind.usesSkipAllowance }
+    /// Drops in counted home workouts, spread over the last days of this
+    /// calendar month, so the monthly cap can be exercised.
+    func debugUseHomeWorkouts(_ count: Int, now: Date = Date()) {
+        let calendar = Calendar.current
+        var used = 0
+        for offset in 0..<(count * 3) {
+            guard used < count,
+                  let day = calendar.date(byAdding: .day, value: -offset, to: now),
+                  calendar.isDate(day, equalTo: now, toGranularity: .month)
+            else { continue }
+            log.record(
+                SessionOutcome(
+                    date: day,
+                    kind: .homeWorkout,
+                    minutes: 20,
+                    countsOn: calendar.startOfDay(for: day),
+                    proof: .photo
+                )
+            )
+            used += 1
+        }
+    }
+
+    /// Forgets this month's counted home workouts, so the cap resets.
+    func debugClearHomeWorkouts(now: Date = Date()) {
+        let calendar = Calendar.current
+        log.outcomes.removeAll {
+            $0.kind == .homeWorkout && $0.counts
+                && calendar.isDate($0.countingDay(calendar: calendar), equalTo: now, toGranularity: .month)
+        }
     }
 
     /// Drops in a plausible gym so arrival can be exercised without a map.
@@ -466,19 +492,6 @@ final class AppStore {
         updated.slots[index].days = days
         updated.slots[index].isEnabled = true
         plan = updated
-    }
-
-    /// Burns through the allowance so the over-allowance branch can be seen.
-    func debugExhaustSkips(count: Int) {
-        debugClearSkips()
-        for offset in 0..<count {
-            log.record(
-                SessionOutcome(
-                    date: Date().addingTimeInterval(-Double(offset + 1) * 24 * 3600),
-                    kind: .easySkip
-                )
-            )
-        }
     }
     #endif
 }

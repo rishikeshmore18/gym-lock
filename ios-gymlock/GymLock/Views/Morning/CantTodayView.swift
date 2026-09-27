@@ -1,128 +1,189 @@
 import SwiftUI
 
-/// The exit that is always available.
+/// The one skip screen (FLOW, Flow 4).
 ///
-/// "Can't today" is never removed, never hidden behind a confirmation maze, and
-/// never punished. Illness, injury, a child up all night, a shift that moved —
-/// these are not failures of discipline, and an app that treats them as such is
-/// one people lie to.
+/// The same screen appears whether they tapped "can't today" or slept through
+/// the alarm. The heading and the order of the three doors follow one
+/// question: can they still reach 3 this week with the planned days left?
+/// There is no skip budget and nothing is taken away.
 ///
-/// The only thing that changes past the allowance is how deliberate the decision
-/// has to be. One extra screen, three visible doors, no guilt language, and
-/// nothing blocked.
+/// PLACEHOLDER UI: designed in Step 3
 struct CantTodayView: View {
     let voice: SessionVoice
-    let hasEasySkipRemaining: Bool
-    let skipsUsed: Int
-    let allowance: Int
+    let plan: SkipScreenPlan
+    let choices: [ReschedulePlanner.Choice]
+    let defaultTimeFor: (Date) -> TimeOfDay
+    let isTimeAvailable: (Date, TimeOfDay) -> Bool
     let isComebackModeOn: Bool
-    let onReschedule: () -> Void
-    let onQuickWorkout: () -> Void
-    let onTakeTheDayOff: () -> Void
+    let onReschedule: (Date, TimeOfDay) -> Void
+    let onHomeWorkout: () -> Void
+    let onSkip: () -> Void
     let onBack: () -> Void
+
+    @State private var isPickingReschedule = false
+    @State private var chosenDay: Date?
+    @State private var chosenTime = Date()
+    @State private var timeNote: String?
 
     var body: some View {
         MorningScreen(trailingTitle: "Back", trailingAction: onBack) {
             VStack(spacing: 22) {
-                HaloedGlyph(
-                    systemName: hasEasySkipRemaining ? "heart.fill" : "arrow.triangle.branch",
-                    size: 82
-                )
-                .frame(height: 158)
+                HaloedGlyph(systemName: "heart.fill", size: 82)
+                    .frame(height: 158)
 
-                heading
+                VStack(spacing: 8) {
+                    Text(plan.heading)
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(Theme.ink)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-                actions
+                options
+
+                if let note = plan.rescheduleNote {
+                    Text(note)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.inkTertiary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if isComebackModeOn { comebackNote }
-
-                allowanceNote
             }
         } footer: {
             EmptyView()
         }
-    }
-
-    // MARK: - Copy
-
-    private var heading: some View {
-        VStack(spacing: 8) {
-            Text(hasEasySkipRemaining ? "life happens." : "want to keep some momentum today?")
-                .font(.system(size: 30, weight: .bold))
-                .foregroundStyle(Theme.ink)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text(
-                hasEasySkipRemaining
-                    ? "the next opportunity still counts."
-                    : "you've used your \(allowance == 1 ? "easy skip" : "\(allowance) easy skips") this month."
-            )
-            .font(.system(size: 16, weight: .medium))
-            .foregroundStyle(Theme.inkSecondary)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
+        .sheet(isPresented: $isPickingReschedule) {
+            rescheduleSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
-    /// All three options stay on screen in both branches. Past the allowance the
-    /// *order* changes — the home workout is promoted — but nothing is taken
-    /// away.
+    // MARK: - The three doors
+
     @ViewBuilder
-    private var actions: some View {
-        if hasEasySkipRemaining {
-            VStack(spacing: 12) {
-                MorningChoiceRow(
-                    title: "reschedule within 24h",
-                    subtitle: voice.rescheduleDetail,
-                    systemImage: "calendar.badge.clock"
-                ) {
-                    onReschedule()
-                }
+    private var options: some View {
+        VStack(spacing: 12) {
+            ForEach(Array(plan.options.enumerated()), id: \.element) { pair in
+                switch pair.element {
+                case .reschedule:
+                    MorningChoiceRow(
+                        title: "reschedule",
+                        subtitle: "a real alarm on a day you pick",
+                        systemImage: "calendar.badge.clock"
+                    ) {
+                        isPickingReschedule = true
+                    }
 
-                MorningChoiceRow(
-                    title: "quick workout",
-                    subtitle: "keeps your momentum",
-                    systemImage: "house.fill"
-                ) {
-                    onQuickWorkout()
-                }
+                case .homeWorkout:
+                    MorningChoiceRow(
+                        title: "home workout, 20 min",
+                        subtitle: "counts with apple health or a photo",
+                        systemImage: "house.fill"
+                    ) {
+                        onHomeWorkout()
+                    }
 
-                MorningChoiceRow(
-                    title: "take today off",
-                    subtitle: voice.dayOffDetail,
-                    systemImage: "moon.zzz.fill"
-                ) {
-                    onTakeTheDayOff()
-                }
-            }
-        } else {
-            VStack(spacing: 12) {
-                MorningPrimaryButton(
-                    title: "20-min workout at home",
-                    systemImage: "house.fill",
-                    trailingImage: nil
-                ) {
-                    onQuickWorkout()
-                }
-
-                MorningChoiceRow(
-                    title: "reschedule within 24h",
-                    subtitle: voice.rescheduleDetail,
-                    systemImage: "calendar.badge.clock"
-                ) {
-                    onReschedule()
-                }
-
-                MorningChoiceRow(
-                    title: "I really need today off",
-                    subtitle: "that's allowed too",
-                    systemImage: "moon.zzz.fill"
-                ) {
-                    onTakeTheDayOff()
+                case .skip:
+                    MorningChoiceRow(
+                        title: "skip",
+                        subtitle: voice.dayOffDetail,
+                        systemImage: "moon.zzz.fill"
+                    ) {
+                        onSkip()
+                    }
                 }
             }
         }
+    }
+
+    // MARK: - Reschedule picker
+
+    private var rescheduleSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    // PLACEHOLDER UI: designed in Step 3
+                    if let day = chosenDay {
+                        VStack(spacing: 10) {
+                            DatePicker(
+                                "alarm",
+                                selection: $chosenTime,
+                                displayedComponents: .hourAndMinute
+                            )
+                            .labelsHidden()
+
+                            if let timeNote {
+                                Text(timeNote)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Theme.accentWarm)
+                                    .multilineTextAlignment(.center)
+                            }
+
+                            MorningPrimaryButton(
+                                title: "set alarm",
+                                systemImage: "bell.badge.fill",
+                                trailingImage: nil
+                            ) {
+                                confirmReschedule(on: day)
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity)
+                        .background(Theme.surfaceMuted, in: .rect(cornerRadius: 16))
+                    }
+
+                    ForEach(choices, id: \.self) { choice in
+                        MorningChoiceRow(
+                            title: choice.label,
+                            subtitle: defaultTimeFor(choice.day).clockString,
+                            systemImage: choice.isLaterToday ? "clock.fill" : "calendar"
+                        ) {
+                            pick(choice)
+                        }
+                    }
+                }
+                .padding(.horizontal, Theme.pageMargin)
+                .padding(.vertical, 18)
+            }
+            .scrollIndicators(.hidden)
+            .background(Theme.canvas.ignoresSafeArea())
+            .navigationTitle("reschedule")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") { isPickingReschedule = false }
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+        }
+    }
+
+    private func pick(_ choice: ReschedulePlanner.Choice) {
+        chosenDay = choice.day
+        chosenTime = date(defaultTimeFor(choice.day), on: choice.day)
+        timeNote = nil
+        Haptics.tap()
+    }
+
+    private func confirmReschedule(on day: Date) {
+        let time = TimeOfDay(from: chosenTime)
+        guard isTimeAvailable(day, time) else {
+            timeNote = "that time is inside your sleep hours."
+            Haptics.soft()
+            return
+        }
+        isPickingReschedule = false
+        onReschedule(day, time)
+    }
+
+    // MARK: - Helpers
+
+    private func date(_ time: TimeOfDay, on day: Date) -> Date {
+        Calendar.current.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: day) ?? Date()
     }
 
     private var comebackNote: some View {
@@ -146,16 +207,5 @@ struct CantTodayView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.accent.opacity(0.07), in: .rect(cornerRadius: 16))
-    }
-
-    /// States the rule as what it is: a product decision about friction, not a
-    /// scientific threshold.
-    private var allowanceNote: some View {
-        Text("\(skipsUsed) of \(allowance) easy skips used in the last 28 days. this is just how GymLock paces things — not a rule about your body.")
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(Theme.inkTertiary)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 6)
     }
 }

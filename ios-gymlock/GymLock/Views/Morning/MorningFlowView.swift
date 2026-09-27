@@ -11,8 +11,8 @@ import SwiftUI
 struct MorningFlowView: View {
     @Environment(AppStore.self) private var store
     @Environment(GymSessionCoordinator.self) private var coordinator
+    @Environment(ProgressPhotoStore.self) private var photos: ProgressPhotoStore?
 
-    @State private var verifier: any WorkoutVerificationProviding = WorkoutVerificationFactory.make()
     /// Raised by the two success screens. The morning flow is itself a
     /// full-screen cover, so the editor is presented from here rather than
     /// from the tab shell underneath it, which is not on screen.
@@ -110,6 +110,8 @@ struct MorningFlowView: View {
 
         case .quickWorkoutPicker:
             QuickWorkoutView(
+                homeWorkoutsUsed: coordinator.homeWorkoutsUsedThisMonth,
+                isAtCap: coordinator.homeWorkoutCapReached,
                 onStart: { coordinator.startQuickWorkout(minutes: $0) },
                 onBack: { coordinator.leaveQuickWorkoutPicker() }
             )
@@ -117,8 +119,13 @@ struct MorningFlowView: View {
         case .quickWorkoutActive:
             QuickWorkoutActiveView(
                 session: session,
-                verifier: verifier,
                 onFinish: { coordinator.finishQuickWorkout(completed: $0) }
+            )
+
+        case .homeWorkoutProof:
+            HomeWorkoutProofView(
+                photos: photos,
+                onDone: { coordinator.acknowledgeResult() }
             )
 
         case .momentumSaved:
@@ -134,13 +141,14 @@ struct MorningFlowView: View {
         case .cantToday:
             CantTodayView(
                 voice: SessionVoice(session: session),
-                hasEasySkipRemaining: coordinator.hasEasySkipRemaining,
-                skipsUsed: coordinator.easySkipsUsed,
-                allowance: coordinator.easySkipAllowance,
+                plan: coordinator.skipScreen,
+                choices: coordinator.rescheduleChoices,
+                defaultTimeFor: { coordinator.rescheduleDefaultTime(for: $0) },
+                isTimeAvailable: { coordinator.isRescheduleTimeAvailable($1, on: $0) },
                 isComebackModeOn: store.profile.comebackModeEnabled,
-                onReschedule: { coordinator.resolveCantToday(.rescheduledWithin24h) },
-                onQuickWorkout: { coordinator.resolveCantToday(.quickWorkout) },
-                onTakeTheDayOff: { coordinator.resolveCantToday(.tookTheDayOff) },
+                onReschedule: { coordinator.reschedule(to: $0, at: $1) },
+                onHomeWorkout: { coordinator.resolveCantToday(.homeWorkout) },
+                onSkip: { coordinator.resolveCantToday(.skip) },
                 onBack: { coordinator.endSession() }
             )
 

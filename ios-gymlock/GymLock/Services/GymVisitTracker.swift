@@ -36,9 +36,10 @@ final class GymVisitTracker {
 
     // MARK: - Visits
 
-    /// The visit still running: arrived, not left, not closed.
+    /// The visit still running: arrived, not left, not closed. Home workouts
+    /// are followed separately and never block a gym visit.
     func openVisit(now: Date, calendar: Calendar) -> GymVisit? {
-        visits.last { $0.leftAt == nil && now < $0.closesAt(calendar: calendar) }
+        visits.last { !$0.isHome && $0.leftAt == nil && now < $0.closesAt(calendar: calendar) }
     }
 
     func begin(_ visit: GymVisit) {
@@ -46,9 +47,10 @@ final class GymVisitTracker {
         persist()
     }
 
-    /// The phone left the gym area. Only a candidate for 5 minutes.
+    /// The phone left the gym area. Only a candidate for 5 minutes. Home
+    /// workouts have no gym area to leave.
     func noteExit(at date: Date, now: Date, calendar: Calendar) {
-        guard let index = visits.lastIndex(where: { $0.leftAt == nil && now < $0.closesAt(calendar: calendar) }),
+        guard let index = visits.lastIndex(where: { !$0.isHome && $0.leftAt == nil && now < $0.closesAt(calendar: calendar) }),
               visits[index].pendingExitAt == nil,
               date >= visits[index].arrivedAt
         else { return }
@@ -59,7 +61,7 @@ final class GymVisitTracker {
     /// The phone came back. Within 5 minutes the trip didn't happen; later
     /// than that, they had really left.
     func noteEntry(at date: Date) {
-        guard let index = visits.lastIndex(where: { $0.leftAt == nil && $0.pendingExitAt != nil }),
+        guard let index = visits.lastIndex(where: { !$0.isHome && $0.leftAt == nil && $0.pendingExitAt != nil }),
               let exit = visits[index].pendingExitAt
         else { return }
         if date.timeIntervalSince(exit) >= WorkoutRules.shortTripGrace {

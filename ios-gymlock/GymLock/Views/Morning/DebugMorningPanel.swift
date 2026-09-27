@@ -22,6 +22,7 @@ struct DebugMorningPanel: View {
     @State private var sleepSummary = "none"
     @State private var alarmRulesSummary = "none"
     @State private var gymSummary = "none"
+    @State private var skipsSummary = "none"
 
     var body: some View {
         NavigationStack {
@@ -106,8 +107,9 @@ struct DebugMorningPanel: View {
             row("showed up", coordinator.session?.gymArrivalVerified == true ? "yes" : "no")
             row("workout detected", coordinator.session?.workoutDetected == true ? "yes" : "no")
             row("window", "\(store.plan.rhythm.windowMinutes) min")
-            row("planned / 28d", "\(store.plan.plannedSessionsPer28Days)")
-            row("skips", "\(coordinator.easySkipsUsed) of \(coordinator.easySkipAllowance)")
+            row("home workouts (month)", "\(coordinator.homeWorkoutsUsedThisMonth) of \(HomeWorkoutRules.monthlyLimit)")
+            row("pending reschedules", "\(coordinator.pendingReschedules.count)")
+            row("skips result", skipsSummary)
             row("momentum", "\(store.streak.weeks) weeks · \(store.streak.thisWeekLabel)")
             row("freezes", "\(store.streak.freezesAvailable)")
             row("gym visits (month)", "\(store.log.verifiedGymVisitsThisMonth)")
@@ -135,6 +137,7 @@ struct DebugMorningPanel: View {
         sleepSummary = GymSessionCoordinator.debugSleepResult
         alarmRulesSummary = GymSessionCoordinator.debugAlarmRulesResult
         gymSummary = GymSessionCoordinator.debugGymResult
+        skipsSummary = GymSessionCoordinator.debugSkipsResult
     }
 
     private var ringerLabel: String {
@@ -240,6 +243,9 @@ struct DebugMorningPanel: View {
             // workout-done notification dismisses, so Progress shows.
             .arriveStay20, .arriveLeaveAt12, .stepOutThreeMinutes, .healthWorkout22,
             .handTypedWorkout, .unplannedVisit, .visitInSleepHours, .imHereCameraPhoto,
+            // Skips are judged by the result reading, except the examples,
+            // which open the skip screen.
+            .use3HomeWorkouts, .homeWorkoutNoHealthPhoto, .cancelAReschedule,
             // Every sound step is judged by the readings above, not by a
             // screen change, so the panel stays put.
             .ringerStart, .ringerEscalated, .ringerStop, .ringerCeiling,
@@ -284,9 +290,9 @@ struct DebugMorningPanel: View {
             }
 
             Button {
-                store.debugClearSkips()
+                store.debugClearHomeWorkouts()
             } label: {
-                Text("clear recent skips")
+                Text("clear home workouts this month")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.inkSecondary)
                     .frame(maxWidth: .infinity)

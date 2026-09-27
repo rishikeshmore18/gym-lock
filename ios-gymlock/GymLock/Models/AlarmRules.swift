@@ -118,23 +118,29 @@ struct OneOffAlarm: Codable, Hashable, Identifiable {
     var fireDate: Date
     /// The rhythm in force for that one day (a next-alarm change only).
     var rhythm: MorningRhythm?
+    /// The day the workout was moved from, for a reschedule. Cancelling turns
+    /// the reschedule into a skip on that day (FLOW, Flow 4). Nil on older
+    /// one-offs and on every other kind.
+    var originDay: Date?
 
     init(
         id: UUID = UUID(),
         kind: Kind = .nextAlarmChange,
         slotID: UUID?,
         fireDate: Date,
-        rhythm: MorningRhythm? = nil
+        rhythm: MorningRhythm? = nil,
+        originDay: Date? = nil
     ) {
         self.id = id
         self.kind = kind
         self.slotID = slotID
         self.fireDate = fireDate
         self.rhythm = rhythm
+        self.originDay = originDay
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, slotID, fireDate, rhythm
+        case id, kind, slotID, fireDate, rhythm, originDay
     }
 
     /// A legacy `NextAlarmOverride` has no `kind`, so it is a next-alarm change.
@@ -145,6 +151,7 @@ struct OneOffAlarm: Codable, Hashable, Identifiable {
         slotID = try container.decodeIfPresent(UUID.self, forKey: .slotID)
         fireDate = try container.decode(Date.self, forKey: .fireDate)
         rhythm = try container.decodeIfPresent(MorningRhythm.self, forKey: .rhythm)
+        originDay = try container.decodeIfPresent(Date.self, forKey: .originDay)
     }
 
     /// Kept long enough for the day to be resumed, then dropped so the weekly

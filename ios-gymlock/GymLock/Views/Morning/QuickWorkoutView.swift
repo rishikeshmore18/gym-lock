@@ -7,13 +7,14 @@ import SwiftUI
 /// numbers meaningless, and the numbers are the only reason the streak has any
 /// weight.
 struct QuickWorkoutView: View {
+    let homeWorkoutsUsed: Int
+    let isAtCap: Bool
     let onStart: (Int) -> Void
     let onBack: () -> Void
 
-    /// 20 is the recommended middle: long enough to be a workout, short enough
-    /// that nobody talks themselves out of it.
-    private static let options = [15, 20, 30]
-    private static let recommended = 20
+    /// 20 is the default (FLOW, Flow 4); the 15-minute option is gone.
+    private static let options = HomeWorkoutRules.options
+    private static let recommended = HomeWorkoutRules.defaultMinutes
 
     @State private var selection = QuickWorkoutView.recommended
 
@@ -40,14 +41,26 @@ struct QuickWorkoutView: View {
 
                 options
 
+                capNote
+
                 honestyNote
             }
         } footer: {
-            MorningPrimaryButton(
-                title: "start quick workout",
-                systemImage: "play.fill"
-            ) {
-                onStart(selection)
+            // PLACEHOLDER UI: designed in Step 3
+            if isAtCap {
+                MorningPrimaryButton(
+                    title: HomeWorkoutRules.capMessage,
+                    systemImage: "house.fill",
+                    trailingImage: nil,
+                    isEnabled: false
+                ) {}
+            } else {
+                MorningPrimaryButton(
+                    title: "start home workout",
+                    systemImage: "play.fill"
+                ) {
+                    onStart(selection)
+                }
             }
         }
     }
@@ -159,6 +172,15 @@ struct QuickWorkoutView: View {
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
+    /// The monthly limit, said once, without apology.
+    private var capNote: some View {
+        Text("\(homeWorkoutsUsed) of \(HomeWorkoutRules.monthlyLimit) home workouts used this month.")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Theme.inkTertiary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     /// The distinction, stated plainly and without apology.
     private var honestyNote: some View {
         HStack(spacing: 12) {
@@ -168,7 +190,7 @@ struct QuickWorkoutView: View {
                 .frame(width: 28, height: 28)
                 .background(Theme.accent, in: .circle)
 
-            Text("gym visit won't count today, but your momentum will.")
+            Text("a home workout counts as a full workout once it's verified.")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.ink)
                 .fixedSize(horizontal: false, vertical: true)
@@ -186,14 +208,13 @@ struct QuickWorkoutView: View {
 /// The running home workout.
 ///
 /// Ending early is always allowed and is recorded honestly as unfinished — no
-/// credit, no guilt, no argument.
+/// credit, no guilt, no argument. The proof check happens after the timer, on
+/// the screen that follows.
 struct QuickWorkoutActiveView: View {
     let session: GymSession
-    let verifier: any WorkoutVerificationProviding
     let onFinish: (Bool) -> Void
 
     @State private var isConfirmingEnd = false
-    @State private var checkMessage: String?
 
     private var totalMinutes: Int { session.quickWorkoutMinutes ?? 20 }
 
@@ -271,14 +292,6 @@ struct QuickWorkoutActiveView: View {
                 .accessibilityLabel("Workout time remaining")
                 .accessibilityValue(GymWindowView.spokenClock(remaining))
 
-                if let checkMessage {
-                    Text(checkMessage)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.inkSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 8)
-                }
-
                 MorningPrimaryButton(
                     title: "I'm done",
                     systemImage: "checkmark",
@@ -288,7 +301,7 @@ struct QuickWorkoutActiveView: View {
                     finish(completed: true)
                 }
 
-                Text(verificationNote)
+                Text("when the timer ends, apple health or a progress photo counts it.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.inkTertiary)
                     .multilineTextAlignment(.center)
@@ -301,38 +314,7 @@ struct QuickWorkoutActiveView: View {
         .scrollIndicators(.hidden)
     }
 
-    /// States exactly how this workout is being confirmed. When no real
-    /// verification exists, it says so rather than implying a sensor is
-    /// watching.
-    private var verificationNote: String {
-        verifier.isAvailable
-            ? "checked by \(verifier.methodDescription)."
-            : "self-reported for now — workout verification is coming."
-    }
-
     private func finish(completed: Bool) {
-        guard completed else {
-            onFinish(false)
-            return
-        }
-
-        Task {
-            let started = session.quickWorkoutStartedAt ?? Date()
-            let outcome = await verifier.verifyWorkout(
-                startedAt: started,
-                minimumMinutes: totalMinutes
-            )
-
-            switch outcome {
-            case .verified, .unavailable:
-                // Unavailable means nobody is checking, so the user's own word
-                // stands. That is honest; inventing a sensor reading would not
-                // be.
-                onFinish(true)
-
-            case let .notEnoughEvidence(message):
-                checkMessage = message
-            }
-        }
+        onFinish(completed)
     }
 }

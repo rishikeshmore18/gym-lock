@@ -57,7 +57,11 @@ nonisolated enum WorkoutRules {
         calendar: Calendar
     ) -> WorkoutProof? {
         if visit.presenceQualifies(now: now) { return .timeAtGym }
-        if workouts.contains(where: { healthQualifies($0, arrivedAt: visit.healthAnchor) }) { return .health }
+        if workouts.contains(where: {
+            guard healthQualifies($0, arrivedAt: visit.healthAnchor) else { return false }
+            // A home workout checks Health on the same day only (FLOW, Flow 4).
+            return !visit.isHome || calendar.isDate($0.startedAt, inSameDayAs: visit.healthAnchor)
+        }) { return .health }
         if let manualAt = visit.manualAt,
            photos.contains(where: { PhotoProof.qualifies($0, takenAfter: manualAt, calendar: calendar) }) {
             return .photo
@@ -119,6 +123,10 @@ nonisolated struct GymVisit: Codable, Hashable, Identifiable {
     var previousLastLine: String?
     /// When the "you left after" notification is (or was) set to fire.
     var shortFireAt: Date?
+    /// A home workout, not a gym visit: no presence, no exits, and the Health
+    /// check runs on the timer's day only. Decoded as false for visits saved
+    /// before home workouts were followed.
+    var isHome: Bool
 
     init(
         id: UUID = UUID(),
@@ -128,7 +136,8 @@ nonisolated struct GymVisit: Codable, Hashable, Identifiable {
         arrivedAt: Date,
         timeCounts: Bool,
         manualAt: Date? = nil,
-        sleepBedtime: String? = nil
+        sleepBedtime: String? = nil,
+        isHome: Bool = false
     ) {
         self.id = id
         self.outcomeID = outcomeID
@@ -138,6 +147,36 @@ nonisolated struct GymVisit: Codable, Hashable, Identifiable {
         self.timeCounts = timeCounts
         self.manualAt = manualAt
         self.sleepBedtime = sleepBedtime
+        self.isHome = isHome
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, outcomeID, sessionID, countsOn, arrivedAt, timeCounts, manualAt, sleepBedtime
+        case pendingExitAt, leftAt, proof, countedAt, doneFireAt, doneLine, previousLastLine, shortFireAt
+        case isHome
+    }
+
+    /// `isHome` is missing on visits saved before home workouts were followed,
+    /// and reads as false.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        outcomeID = try container.decode(UUID.self, forKey: .outcomeID)
+        sessionID = try container.decodeIfPresent(UUID.self, forKey: .sessionID)
+        countsOn = try container.decode(Date.self, forKey: .countsOn)
+        arrivedAt = try container.decode(Date.self, forKey: .arrivedAt)
+        timeCounts = try container.decode(Bool.self, forKey: .timeCounts)
+        manualAt = try container.decodeIfPresent(Date.self, forKey: .manualAt)
+        sleepBedtime = try container.decodeIfPresent(String.self, forKey: .sleepBedtime)
+        pendingExitAt = try container.decodeIfPresent(Date.self, forKey: .pendingExitAt)
+        leftAt = try container.decodeIfPresent(Date.self, forKey: .leftAt)
+        proof = try container.decodeIfPresent(WorkoutProof.self, forKey: .proof)
+        countedAt = try container.decodeIfPresent(Date.self, forKey: .countedAt)
+        doneFireAt = try container.decodeIfPresent(Date.self, forKey: .doneFireAt)
+        doneLine = try container.decodeIfPresent(String.self, forKey: .doneLine)
+        previousLastLine = try container.decodeIfPresent(String.self, forKey: .previousLastLine)
+        shortFireAt = try container.decodeIfPresent(Date.self, forKey: .shortFireAt)
+        isHome = (try? container.decodeIfPresent(Bool.self, forKey: .isHome)) ?? false
     }
 
     var isCounted: Bool { countedAt != nil }
@@ -257,7 +296,9 @@ nonisolated enum WorkoutDoneLine {
         }
         guard let lastDay = earlier.keys.max(), let outcomes = earlier[lastDay] else { return false }
         guard !outcomes.contains(where: \.counts) else { return false }
-        return outcomes.contains { [.missed, .easySkip, .dayOff].contains($0.kind) }
+        // A skip counts in every shape it has ever had, and so does a
+        // reschedule: the day was given up either way.
+        return outcomes.contains { [.missed, .easySkip, .dayOff, .skipped, .rescheduled].contains($0.kind) }
     }
 
     /// Workouts counted this week (Monday to Sunday), each day once.

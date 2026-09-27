@@ -132,7 +132,7 @@ struct DayStatusIndex {
             // visit: real effort, not the verified mark (FLOW, Flow 3).
             case .showedUp:
                 return outcome.counts ? .verified : .attempted
-            case .missed, .easySkip:
+            case .missed, .easySkip, .skipped:
                 return .skipped
             // A home workout is real effort that GymLock could not verify at a
             // gym, and the app has never been willing to blur those two. It

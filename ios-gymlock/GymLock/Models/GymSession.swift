@@ -34,6 +34,9 @@ enum GymSessionState: String, Codable, Hashable {
     case arrivalTrouble
     case quickWorkoutOffered
     case quickWorkoutActive
+    /// Timer done, apps unlocked, waiting for Apple Health or a progress
+    /// photo to prove the workout (FLOW, Flow 4).
+    case homeWorkoutAwaitingProof
     case cantToday
     case rescheduled
     case homeWorkoutVerified
@@ -77,7 +80,6 @@ enum GymSessionState: String, Codable, Hashable {
             false
         }
     }
-
     /// Whether the selected apps should be shielded in this state.
     ///
     /// The whole product exists for the moment another app wins, so the shield
@@ -113,10 +115,21 @@ struct SessionAnchor: Codable, Hashable {
 }
 
 /// How a "can't today" was resolved.
+///
+/// The old `rescheduledWithin24h`, `quickWorkout` and `tookTheDayOff` values
+/// decode into the closest new one, so a session saved mid-morning by an
+/// older build still opens (FLOW, Flow 4: no 24h reschedule, no allowance).
 enum CantTodayResolution: String, Codable, Hashable {
-    case rescheduledWithin24h
-    case quickWorkout
-    case tookTheDayOff
+    case homeWorkout
+    case skip
+
+    init(from decoder: Decoder) throws {
+        let raw = (try? decoder.singleValueContainer().decode(String.self)) ?? ""
+        switch raw {
+        case "quickWorkout": self = .homeWorkout
+        default: self = .skip
+        }
+    }
 }
 
 /// One morning, from the alarm to whatever actually happened.

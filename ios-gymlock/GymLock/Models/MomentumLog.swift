@@ -9,22 +9,24 @@ enum SessionOutcomeKind: String, Codable, Hashable {
     /// Arrived at the gym. On its own this is a gym visit and does not count;
     /// it counts once the workout is done (`SessionOutcome.proof`).
     case showedUp
+    /// The 20-minute workout at home. Counts once Apple Health confirms it or
+    /// a camera progress photo lands (`SessionOutcome.proof`); records saved
+    /// before the check existed decode as `legacy` and keep counting.
     case homeWorkout
     case easySkip
     case dayOff
+    case skipped
     case rescheduled
     case missed
     /// Detection failed for technical reasons. Recorded so it can be
     /// investigated, but it neither credits nor punishes the user.
     case technicalFailure
 
-    /// Whether it draws down the easy-skip allowance.
-    var usesSkipAllowance: Bool {
-        switch self {
-        case .easySkip, .dayOff: true
-        default: false
-        }
-    }
+    /*
+     * The 28-day easy-skip allowance is gone (FLOW, Flow 4). `.easySkip` and
+     * `.dayOff` stay only so records saved by older builds still decode; new
+     * skips are all recorded as `.skipped`.
+     */
 }
 
 /// One recorded outcome.
@@ -94,14 +96,13 @@ struct SessionOutcome: Codable, Hashable, Identifiable {
         proof = (try? container.decodeIfPresent(WorkoutProof.self, forKey: .proof)) ?? Self.legacyProof(for: kind)
     }
 
-    /// The one answer to "does this count?" (FLOW, Flow 3). A gym arrival
-    /// counts once the workout is done; a home workout counts as it always
-    /// has.
+    /// The one answer to "does this count?" (FLOW, Flow 3 and Flow 4). A gym
+    /// arrival counts once the workout is done; a home workout counts once it
+    /// is verified.
     var counts: Bool {
         switch kind {
-        case .showedUp: proof != .unproven
-        case .homeWorkout: true
-        case .easySkip, .dayOff, .rescheduled, .missed, .technicalFailure: false
+        case .showedUp, .homeWorkout: proof != .unproven
+        case .easySkip, .dayOff, .skipped, .rescheduled, .missed, .technicalFailure: false
         }
     }
 
@@ -236,27 +237,6 @@ struct MomentumLog: Codable, Hashable {
         }
     }
 
-    // MARK: Easy skips
-
-    /// Skips used in the trailing 28 days.
-    func skipsUsedInLast28Days(now: Date = Date()) -> Int {
-        let cutoff = now.addingTimeInterval(-28 * 24 * 3600)
-        return outcomes.filter { $0.date >= cutoff && $0.kind.usesSkipAllowance }.count
-    }
-
-    /// How many no-questions-asked skips the user gets in a rolling 28 days.
-    ///
-    /// Roughly a fifth of what they planned, floored at one and capped at three.
-    /// This is a product rule about how much friction to add, not a claim about
-    /// physiology, and nothing in the UI presents it as one.
-    static func easySkipAllowance(plannedSessionsIn28Days planned: Int) -> Int {
-        min(3, max(1, Int((Double(planned) * 0.20).rounded(.down))))
-    }
-
-    /// Whether the user still has an easy skip left.
-    func hasEasySkipRemaining(plannedSessionsIn28Days planned: Int, now: Date = Date()) -> Bool {
-        skipsUsedInLast28Days(now: now) < Self.easySkipAllowance(plannedSessionsIn28Days: planned)
-    }
 }
 
 // MARK: - Departure messages
