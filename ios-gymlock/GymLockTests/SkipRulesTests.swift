@@ -465,10 +465,10 @@ struct SkipRulesTests {
 
     @Test func oldSkipKindsDecodeAndDoNotCount() throws {
         let json = #"""
-        [
+        {"outcomes": [
           {"id":"11111111-1111-1111-1111-111111111111","date":800000000,"kind":"easySkip","workoutDetected":false},
           {"id":"22222222-2222-2222-2222-222222222222","date":800003600,"kind":"dayOff","workoutDetected":false}
-        ]
+        ]}
         """#
         let log = try JSONDecoder().decode(MomentumLog.self, from: Data(json.utf8))
         #expect(log.outcomes.count == 2)

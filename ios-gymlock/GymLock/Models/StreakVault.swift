@@ -8,8 +8,6 @@ import Foundation
 nonisolated enum StreakPolicy {
     /// The most freezes a user can hold at once.
     static let maximumFreezes = 2
-    /// Consecutive kept weeks that earn one freeze.
-    static let weeksPerFreeze = 4
     /// Workouts a week needs to be kept. Whatever the plan says.
     static let defaultWeeklyGoal = 3
     /// Nobody can plan fewer gym days than this.
@@ -68,7 +66,8 @@ nonisolated struct StreakVault: Codable, Hashable {
     /// relaunch would walk the whole history again and spend today's freezes
     /// on a bad week from three months ago.
     var lastEvaluatedWeekStart: Date?
-    /// Consecutive kept weeks since the last freeze was awarded.
+    /// Left over from when a freeze was earned every 4 kept weeks. Nothing
+    /// reads or earns from it any more; it stays so old vaults round-trip.
     var kept4Counter: Int
     /// Each week's goal, keyed by the week's Monday, saved the first time the
     /// engine sees the week. After that it is the only thing that week is
@@ -78,10 +77,20 @@ nonisolated struct StreakVault: Codable, Hashable {
     /// moved: next Monday for a user who already had history when this rule
     /// arrived, their first week for everyone else.
     var threeDayRuleStart: Date?
+    /// How far the freeze calendar has been settled (FLOW, Flow 5): every
+    /// grant and every Dec 31 expiry up to this moment has been applied, and
+    /// none after it. Nil on vaults saved before the calendar existed; the
+    /// first evaluation sets it to "now", so nothing from the past is granted
+    /// and the freezes already held are kept.
+    var freezeClock: Date?
+    /// The calendar year the freezes held belong to. They expire when the
+    /// year ends.
+    var freezeYear: Int?
 
     enum CodingKeys: String, CodingKey {
         case freezesAvailable, frozenWeekStarts, preArmedWeekStart
         case lastEvaluatedWeekStart, kept4Counter, weekGoals, threeDayRuleStart
+        case freezeClock, freezeYear
     }
 
     static let empty = StreakVault(
@@ -123,9 +132,11 @@ extension StreakVault {
         frozenWeekStarts = try container.decode(Set<Date>.self, forKey: .frozenWeekStarts)
         preArmedWeekStart = try container.decodeIfPresent(Date.self, forKey: .preArmedWeekStart)
         lastEvaluatedWeekStart = try container.decodeIfPresent(Date.self, forKey: .lastEvaluatedWeekStart)
-        kept4Counter = try container.decode(Int.self, forKey: .kept4Counter)
+        kept4Counter = try container.decodeIfPresent(Int.self, forKey: .kept4Counter) ?? 0
         weekGoals = try container.decodeIfPresent([Date: Int].self, forKey: .weekGoals) ?? [:]
         threeDayRuleStart = try container.decodeIfPresent(Date.self, forKey: .threeDayRuleStart)
+        freezeClock = try container.decodeIfPresent(Date.self, forKey: .freezeClock)
+        freezeYear = try container.decodeIfPresent(Int.self, forKey: .freezeYear)
     }
 }
 

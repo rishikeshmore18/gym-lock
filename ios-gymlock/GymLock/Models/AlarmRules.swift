@@ -89,6 +89,33 @@ nonisolated enum WakeAlarmID {
     }
 }
 
+/// Ids for the gym alarms that bring a frozen week's plan back on Monday.
+///
+/// While a week is frozen the weekly gym alarms are taken off the OS, so the
+/// following week's gym days are held as dated alarms instead: they ring
+/// even if the app is not opened on Monday. Each id keeps its slot's bytes
+/// except a fixed "FRZ" prefix and the weekday, so the morning it starts
+/// finds its way back to the slot without anything being stored.
+enum PausedWeekAlarmID {
+    static func derive(slotID: UUID, weekday: Weekday) -> UUID {
+        var bytes = slotID.uuid
+        bytes.0 = 0x46
+        bytes.1 = 0x52
+        bytes.2 = 0x5A
+        bytes.3 = UInt8(weekday.rawValue)
+        return UUID(uuid: bytes)
+    }
+
+    /// The slot a derived id stands for, if it is one.
+    static func slotID(for id: UUID, among slotIDs: [UUID]) -> UUID? {
+        let bytes = id.uuid
+        guard bytes.0 == 0x46, bytes.1 == 0x52, bytes.2 == 0x5A,
+              let weekday = Weekday(rawValue: Int(bytes.3))
+        else { return nil }
+        return slotIDs.first { derive(slotID: $0, weekday: weekday) == id }
+    }
+}
+
 // MARK: - One-off alarms
 
 /// One alarm that rings once, at an exact moment.
@@ -189,7 +216,69 @@ struct PlannedAlarm: Hashable {
 /// Exactly one lock alarm per gym day. Pure: the coordinator adds the sound
 /// and sends the result to the OS.
 enum AlarmPlan {
-    static func alarms(for plan: MorningPlan, now: Date, calendar: Calendar) -> [PlannedAlarm] {
+    /// - Parameter pausedUntil: The end of a week frozen ahead of time (FLOW,
+    ///   Flow 5). Until then no gym lock alarm or reschedule rings; plain
+    ///   wake alarms keep going. The next week's gym days are held as dated
+    ///   alarms so everything comes back on Monday.
+    static func alarms(
+        for plan: MorningPlan,
+        now: Date,
+        calendar: Calendar,
+        pausedUntil: Date? = nil
+    ) -> [PlannedAlarm] {
+        guard let pausedUntil, pausedUntil > now else {
+            return unpausedAlarms(for: plan, now: now, calendar: calendar)
+        }
+
+        // One-offs before Monday are dropped first, so a rest day whose
+        // plain wake alarm a reschedule had replaced gets it back.
+        var withoutPausedOneOffs = plan
+        withoutPausedOneOffs.oneOffAlarms.removeAll { $0.fireDate < pausedUntil }
+        let all = unpausedAlarms(for: withoutPausedOneOffs, now: now, calendar: calendar)
+
+        // Every weekly lock alarm comes off, and every dated lock alarm
+        // before Monday. Plain wake alarms stay exactly as they were.
+        var kept = all.filter { alarm in
+            guard alarm.kind.locks else { return true }
+            guard let fireDate = alarm.fireDate else { return false }
+            return fireDate >= pausedUntil
+        }
+
+        // The week after: each slot's gym days as dated alarms.
+        let weekly = plan.rhythm
+        let mode = weekly.flowMode
+        let primaryID = plan.primaryAlarmSlot?.id
+        let replacedDays = Set(
+            plan.oneOffAlarms
+                .filter { $0.kind.replacesWeeklyRing && $0.fireDate >= pausedUntil }
+                .map { calendar.startOfDay(for: $0.fireDate) }
+        )
+        for offset in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: pausedUntil)),
+                  let weekday = Weekday(rawValue: calendar.component(.weekday, from: day)),
+                  !replacedDays.contains(day)
+            else { continue }
+            for slot in plan.enabledSlots where slot.days.contains(weekday) {
+                let time = slot.id == primaryID ? weekly.lockAlarmTime : slot.alarmTime
+                guard let fireDate = calendar.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: day),
+                      fireDate > now
+                else { continue }
+                kept.append(
+                    PlannedAlarm(
+                        id: PausedWeekAlarmID.derive(slotID: slot.id, weekday: weekday),
+                        kind: mode == .wakeAndGo ? .gym : .timeToGo,
+                        time: time,
+                        weekdays: [weekday],
+                        fireDate: fireDate,
+                        allowsSnooze: plan.snoozeEnabled && mode == .wakeAndGo
+                    )
+                )
+            }
+        }
+        return kept
+    }
+
+    private static func unpausedAlarms(for plan: MorningPlan, now: Date, calendar: Calendar) -> [PlannedAlarm] {
         let weekly = plan.rhythm
         let mode = weekly.flowMode
         let primaryID = plan.primaryAlarmSlot?.id

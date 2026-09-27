@@ -19,6 +19,10 @@ struct CantTodayView: View {
     let onHomeWorkout: () -> Void
     let onSkip: () -> Void
     let onBack: () -> Void
+    /// Opened from the Home banner's "reschedule for today": the picker
+    /// comes up straight away.
+    var startsOnPicker = false
+    var onPickerShown: () -> Void = {}
 
     @State private var isPickingReschedule = false
     @State private var chosenDay: Date?
@@ -53,6 +57,11 @@ struct CantTodayView: View {
             }
         } footer: {
             EmptyView()
+        }
+        .onAppear {
+            guard startsOnPicker else { return }
+            isPickingReschedule = true
+            onPickerShown()
         }
         .sheet(isPresented: $isPickingReschedule) {
             rescheduleSheet

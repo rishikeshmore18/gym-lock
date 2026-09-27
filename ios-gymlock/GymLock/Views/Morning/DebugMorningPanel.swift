@@ -23,6 +23,7 @@ struct DebugMorningPanel: View {
     @State private var alarmRulesSummary = "none"
     @State private var gymSummary = "none"
     @State private var skipsSummary = "none"
+    @State private var freezeSummary = "none"
 
     var body: some View {
         NavigationStack {
@@ -112,6 +113,10 @@ struct DebugMorningPanel: View {
             row("skips result", skipsSummary)
             row("momentum", "\(store.streak.weeks) weeks · \(store.streak.thisWeekLabel)")
             row("freezes", "\(store.streak.freezesAvailable)")
+            row("joined", store.joinedAt.formatted(date: .abbreviated, time: .omitted))
+            row("gym alarms paused until", store.frozenWeekEnd?.formatted(date: .abbreviated, time: .omitted) ?? "not paused")
+            row("at-risk banner", coordinator.streakRiskBanner?.line ?? "quiet")
+            row("freezes and at risk result", freezeSummary)
             row("gym visits (month)", "\(store.log.verifiedGymVisitsThisMonth)")
         }
         .padding(16)
@@ -138,6 +143,7 @@ struct DebugMorningPanel: View {
         alarmRulesSummary = GymSessionCoordinator.debugAlarmRulesResult
         gymSummary = GymSessionCoordinator.debugGymResult
         skipsSummary = GymSessionCoordinator.debugSkipsResult
+        freezeSummary = GymSessionCoordinator.debugFreezeResult
     }
 
     private var ringerLabel: String {
@@ -246,6 +252,9 @@ struct DebugMorningPanel: View {
             // Skips are judged by the result reading, except the examples,
             // which open the skip screen.
             .use3HomeWorkouts, .homeWorkoutNoHealthPhoto, .cancelAReschedule,
+            // Freezes and at risk are judged by their result reading.
+            .jumpTwoMonthsAfterJoining, .jumpToJuly1, .newYearFreezesExpire,
+            .planFreezeThisWeek, .atRiskThursday, .atRiskSunday, .atRiskHomeWorkoutsUsedUp,
             // Every sound step is judged by the readings above, not by a
             // screen change, so the panel stays put.
             .ringerStart, .ringerEscalated, .ringerStop, .ringerCeiling,

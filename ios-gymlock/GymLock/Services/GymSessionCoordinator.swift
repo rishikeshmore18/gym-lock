@@ -66,7 +66,24 @@ final class GymSessionCoordinator {
         /// The day the workout-done notification was tapped for, until the
         /// Progress spotlight (Step 3) shows it.
         static let spotlightDay = "gymlock.progress.pendingSpotlightDay"
+        /// The day the "make it up" screen was last shown. The at-risk
+        /// notification stays quiet that day (FLOW, Flow 6).
+        static let sawMakeUpDay = "gymlock.streak.sawMakeUpDay"
+        /// When the pending at-risk notification is due, so a second one
+        /// is never sent the same day (FLOW, Flow 6).
+        static let atRiskFireDate = "gymlock.streak.atRiskFireDate"
     }
+
+    /// Coalesces the at-risk and freeze notices after a burst of changes.
+    private var streakNoticeTask: Task<Void, Never>?
+    /// The pause last pushed to the OS, so alarms are only re-synced when a
+    /// planned freeze starts, is refunded, or its week ends.
+    private var lastPausedUntil: Date??
+    /// What was last handed to the OS for the freeze notices.
+    private var freezeNoticeSignature: [FreezeNotice.Planned]?
+    /// Set by the Home banner's "reschedule for today", so the skip screen
+    /// opens straight on the picker. Not persisted.
+    private(set) var wantsReschedulePicker = false
 
     /// Set while an ignored alarm is being closed, so ending the session
     /// does not cancel the "pick a day" notice it just made sure of.
@@ -155,6 +172,7 @@ final class GymSessionCoordinator {
         enforceShieldFailsafe()
 
         restore()
+        store.onStreakRefreshed = { [weak self] in self?.streakDidRefresh() }
         wireGymEvents()
         armArrivalIfPossible()
         evaluateVisits()
@@ -168,6 +186,7 @@ final class GymSessionCoordinator {
         reconcileWindDown()
         openPendingSkipScreenIfNeeded()
         offerMissedGymDayIfNeeded()
+        streakDidRefresh()
     }
 
     /// Only the store, without any of the system wiring `attach(to:)` does.
@@ -398,6 +417,8 @@ final class GymSessionCoordinator {
         evaluateVisits()
         openPendingSkipScreenIfNeeded()
         offerMissedGymDayIfNeeded()
+        // A day change or a grant date passing while the app was away.
+        store?.refreshStreak()
         Task { await health.fetchNewWorkouts() }
     }
 
@@ -411,6 +432,14 @@ final class GymSessionCoordinator {
     /// begun.
     func resumeSessionIfDue(at now: Date = Date()) {
         guard let store else { return }
+
+        // A week frozen ahead of time: nothing rings or locks until Monday
+        // (FLOW, Flow 5). A stray note from an alarm that rang before the
+        // freeze was planned is dropped.
+        if let end = store.frozenWeekEnd, now < end {
+            if AlarmHandoff.peek(now: now) != nil { AlarmHandoff.clear() }
+            return
+        }
 
         // An open skip screen for a past day never holds up a real alarm.
         let isLive = (session?.state.isLive ?? false) && session?.isMakeUpOffer != true
@@ -656,7 +685,14 @@ final class GymSessionCoordinator {
         // gym alarm or the time to go, the plain wake alarm, and every
         // one-off. The alert is built by the system long before the app runs,
         // so whether it snoozes travels with the request.
-        let requests = AlarmPlan.alarms(for: plan, now: Date(), calendar: .current).map { alarm in
+        let pausedUntil = store.frozenWeekEnd
+        lastPausedUntil = .some(pausedUntil)
+        let requests = AlarmPlan.alarms(
+            for: plan,
+            now: Date(),
+            calendar: .current,
+            pausedUntil: pausedUntil
+        ).map { alarm in
             GymAlarmRequest(
                 slotID: alarm.id,
                 time: alarm.time,
@@ -1312,7 +1348,7 @@ final class GymSessionCoordinator {
     /// "pick a day" notice, or after a gym day the phone was off for. Until
     /// the skip screen is rebuilt this is the existing "can't today" screen.
     /// Nothing is recorded unless the user picks something there.
-    func openSkipScreen(for day: Date) {
+    func openSkipScreen(for day: Date, fromBanner: Bool = false) {
         guard let store, !isSessionLive else { return }
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: day)
@@ -1334,6 +1370,7 @@ final class GymSessionCoordinator {
         session = offer
         persist()
         store.record(.cantToday, sessionID: offer.id, detail: "skip screen offered")
+        if !fromBanner { noteSkipScreenShown() }
     }
 
     /// Acts on a tapped non-alarm notification: "pick a day" and "you left
@@ -1345,6 +1382,13 @@ final class GymSessionCoordinator {
         case let .workoutDone(day):
             _ = store.takePendingNotificationRoute()
             openProgressSpotlight(for: day)
+        case .streakAtRisk, .freezeEarned:
+            // Both open Home, where the banner and the freeze count live.
+            _ = store.takePendingNotificationRoute()
+            if let current = session, current.state.isResolved, current.isMakeUpOffer != true {
+                endSession()
+            }
+            requestedTab = .home
         case let .missed(day), let .leftEarly(day):
             // A finished morning still on screen gives way.
             if let current = session, current.state.isResolved, current.isMakeUpOffer != true {
@@ -1366,6 +1410,8 @@ final class GymSessionCoordinator {
         guard let store, !isSessionLive,
               store.stage == .home, store.plan.hasBeenReviewed
         else { return nil }
+        // Nothing rang on a frozen week, and nothing was meant to.
+        if let end = store.frozenWeekEnd, now < end { return nil }
 
         let calendar = Calendar.current
         let since: Date
@@ -1699,6 +1745,7 @@ final class GymSessionCoordinator {
         let day = current.day
         Task { [notifier] in await notifier.cancelMissedNotice(day: day) }
         clearRunningLateAlarm(for: current)
+        noteSkipScreenShown()
     }
 
     // MARK: - The skip screen (FLOW, Flow 4)
@@ -1822,6 +1869,126 @@ final class GymSessionCoordinator {
             scheduleComebackIfEnabled()
             endSession(clearingAnchor: true)
         }
+    }
+
+    // MARK: - Freezes and streak at risk (FLOW, Flows 5 and 6)
+
+    /// Runs after every streak evaluation: a workout counted, a reschedule
+    /// set or cancelled, a plan change, a foreground, a day change.
+    ///
+    /// Pauses or restores the gym alarms when a planned freeze starts, is
+    /// refunded, or its week ends, and moves the at-risk and freeze notices.
+    /// The app can't run at 10:00 to check, so the next at-risk notice is
+    /// predicted now and withdrawn the moment the week is safe.
+    func streakDidRefresh(now: Date = Date()) {
+        guard let store else { return }
+
+        // Only once alarms have been pushed at least once; the launch sync
+        // does the first push.
+        if let last = lastPausedUntil, last != store.frozenWeekEnd {
+            lastPausedUntil = .some(store.frozenWeekEnd)
+            Task { await syncAlarms() }
+        }
+
+        let calendar = Calendar.current
+        let stored = defaults.object(forKey: Key.atRiskFireDate) as? Date
+        let sentToday = stored.map { $0 <= now && calendar.isDate($0, inSameDayAs: now) } ?? false
+        let notice = StreakRisk.nextNotice(
+            log: store.log,
+            plan: store.plan,
+            streakWeeks: store.streak.weeks,
+            weeklyGoal: store.streak.weeklyGoal,
+            isWeekFrozen: store.streak.isLiveWeekPreArmed,
+            freezesHeld: store.streak.freezesAvailable,
+            sawMakeUpToday: sawMakeUpToday(now: now),
+            alreadySentToday: sentToday,
+            todayInProgress: isTodayInProgress(now: now),
+            now: now,
+            calendar: calendar
+        )
+        if let notice {
+            defaults.set(notice.fireDate, forKey: Key.atRiskFireDate)
+        } else if !sentToday {
+            defaults.removeObject(forKey: Key.atRiskFireDate)
+        }
+
+        let freezeNotices = FreezeNotice.upcoming(joined: store.joinedAt, plan: store.plan, now: now, calendar: calendar)
+        let freezeChanged = freezeNotices != freezeNoticeSignature
+        freezeNoticeSignature = freezeNotices
+
+        streakNoticeTask?.cancel()
+        streakNoticeTask = Task { [notifier] in
+            if let notice {
+                await notifier.scheduleStreakAtRisk(at: notice.fireDate, body: notice.body)
+            } else {
+                await notifier.cancelStreakAtRisk()
+            }
+            if freezeChanged {
+                await notifier.replaceFreezeNotices(freezeNotices)
+            }
+        }
+    }
+
+    /// Records that the "make it up" screen was shown today, which quiets
+    /// the at-risk notification for the rest of the day.
+    private func noteSkipScreenShown(now: Date = Date()) {
+        guard skipScreen.isMakeItUp else { return }
+        defaults.set(Calendar.current.startOfDay(for: now), forKey: Key.sawMakeUpDay)
+        streakDidRefresh(now: now)
+    }
+
+    private func sawMakeUpToday(now: Date) -> Bool {
+        guard let day = defaults.object(forKey: Key.sawMakeUpDay) as? Date else { return false }
+        return Calendar.current.isDate(day, inSameDayAs: now)
+    }
+
+    /// A morning under way or a gym visit still open: today is still a
+    /// chance, whatever the clock says.
+    private func isTodayInProgress(now: Date) -> Bool {
+        if let current = session, current.state.isLive, current.isMakeUpOffer != true,
+           Calendar.current.isDate(current.day, inSameDayAs: now) {
+            return true
+        }
+        return visits.openVisit(now: now, calendar: .current) != nil
+    }
+
+    /// The Home banner, while the streak is at risk (FLOW, Flow 6).
+    var streakRiskBanner: StreakRiskBanner? {
+        guard let store else { return nil }
+        let now = Date()
+        return StreakRisk.banner(
+            log: store.log,
+            plan: store.plan,
+            streakWeeks: store.streak.weeks,
+            weeklyGoal: store.streak.weeklyGoal,
+            isWeekFrozen: store.streak.isLiveWeekPreArmed,
+            freezesHeld: store.streak.freezesAvailable,
+            homeWorkoutsUsed: HomeWorkoutRules.usedThisMonth(log: store.log, now: now),
+            sawMakeUpToday: sawMakeUpToday(now: now),
+            todayInProgress: isTodayInProgress(now: now),
+            now: now,
+            calendar: .current
+        )
+    }
+
+    /// "reschedule for today": the skip screen for today, straight on the
+    /// reschedule picker.
+    func rescheduleForTodayFromBanner() {
+        guard !isSessionLive else { return }
+        openSkipScreen(for: Date(), fromBanner: true)
+        wantsReschedulePicker = isSessionLive
+    }
+
+    /// "home workout · N left this month": the home workout picker for today.
+    func homeWorkoutFromBanner() {
+        guard !isSessionLive, !homeWorkoutCapReached else { return }
+        openSkipScreen(for: Date(), fromBanner: true)
+        guard isSessionLive else { return }
+        resolveCantToday(.homeWorkout)
+    }
+
+    func consumeReschedulePicker() {
+        wantsReschedulePicker = false
     }
 
     private func scheduleComebackIfEnabled() {

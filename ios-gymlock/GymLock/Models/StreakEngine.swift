@@ -14,23 +14,36 @@ import Foundation
 /// week the Progress chart and the schedule selector use. There is no second
 /// definition of a week anywhere in the app.
 enum StreakEngine {
-    /// Evaluates the streak up to `now`, spending and awarding freezes for any
-    /// weeks that have completed since the vault last ruled on one.
+    /// Evaluates the streak up to `now`, spending freezes for any weeks that
+    /// have completed since the vault last ruled on one, and applying the
+    /// freeze calendar (FLOW, Flow 5) when `joined` is given.
     ///
     /// Completed weeks are walked oldest to newest so a freeze is spent on the
     /// first unkept week it can save, not the last: three weeks away with two
-    /// freezes banked leaves two frozen and one broken, in that order.
+    /// freezes banked leaves two frozen and one broken, in that order. Before
+    /// a week is ruled on, the freeze calendar is settled up to the moment
+    /// that week ended, so a freeze granted on May 10 can save the week after
+    /// it but not the week before, and one that expired on Dec 31 saves
+    /// nothing in January.
     static func evaluate(
         log: MomentumLog,
         plan: MorningPlan,
         schedule: GymSchedule,
         vault: inout StreakVault,
         now: Date,
+        joined: Date? = nil,
         calendar: Calendar = .current
     ) -> StreakSnapshot {
         let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
         guard let liveWeekStart = weekStart(containing: now, weekCalendar: weekCalendar) else {
             return .empty
+        }
+
+        // A vault seeing the freeze calendar for the first time starts its
+        // clock now: the freezes it holds are kept, and nothing from the
+        // past is granted.
+        if let joined, vault.freezeClock == nil {
+            FreezeCalendar.settle(&vault, joined: joined, upTo: now, calendar: calendar)
         }
 
         let plannedDays = plan.effectiveTrainingDays(fallback: schedule).count
@@ -68,9 +81,7 @@ enum StreakEngine {
             return goal
         }
 
-        // The first launch on the week-based logic has nothing to spend and
-        // must not award from history either — the migration grant below is
-        // the only freeze the past is allowed to produce.
+        // The first launch on the week-based logic has nothing to spend.
         let isMigrating = vault.needsMigration
         let previouslyEvaluated = vault.lastEvaluatedWeekStart
 
@@ -82,6 +93,13 @@ enum StreakEngine {
                 let sessions = sessionDays[cursor] ?? 0
                 let isKept = sessions >= goal(forWeekStarting: cursor)
                 let isNew = isMigrating || previouslyEvaluated.map { cursor > $0 } ?? true
+                let weekEnd = weekCalendar.date(byAdding: .weekOfYear, value: 1, to: cursor) ?? cursor
+
+                // Grants and expiries up to Sunday midnight, before the week
+                // is ruled on.
+                if isNew, let joined, weekEnd <= now {
+                    FreezeCalendar.settle(&vault, joined: joined, upTo: weekEnd, calendar: calendar)
+                }
 
                 if isKept {
                     streak += 1
@@ -91,9 +109,6 @@ enum StreakEngine {
                         // anyway: they never needed the freeze, so it goes back.
                         if vault.isPreArmed(weekStarting: cursor, calendar: calendar) {
                             vault.preArmedWeekStart = nil
-                            vault.freezesAvailable = min(vault.freezesAvailable + 1, StreakPolicy.maximumFreezes)
-                        }
-                        if !isMigrating, streak % StreakPolicy.weeksPerFreeze == 0 {
                             vault.freezesAvailable = min(vault.freezesAvailable + 1, StreakPolicy.maximumFreezes)
                         }
                     }
@@ -118,6 +133,11 @@ enum StreakEngine {
             }
         }
 
+        // Anything granted or expired since the last completed week.
+        if let joined {
+            FreezeCalendar.settle(&vault, joined: joined, upTo: now, calendar: calendar)
+        }
+
         // The live week counts only once it is kept, and can never break.
         let liveGoal = goal(forWeekStarting: liveWeekStart)
         let thisWeekSessions = sessionDays[liveWeekStart] ?? 0
@@ -139,15 +159,6 @@ enum StreakEngine {
            !calendar.isDate(armed, inSameDayAs: liveWeekStart) {
             vault.preArmedWeekStart = nil
         }
-
-        if isMigrating {
-            vault.freezesAvailable = weeks >= StreakPolicy.weeksPerFreeze ? 1 : 0
-        }
-
-        // Kept in step with the derived count rather than incremented on its
-        // own, so a changed plan cannot leave it pointing at a streak that no
-        // longer exists.
-        vault.kept4Counter = streak % StreakPolicy.weeksPerFreeze
 
         let previousWeekStart = weekCalendar.date(byAdding: .weekOfYear, value: -1, to: liveWeekStart)
             .flatMap { weekStart(containing: $0, weekCalendar: weekCalendar) }

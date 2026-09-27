@@ -454,9 +454,9 @@ How one is earned, held and spent.
       └─ gym alarms PAUSE that week (the night lock KEEPS going)
 ```
 
-**Change:** today a freeze is earned every 4 kept weeks in a row (max 2 held), and nothing tells the user when they get one.
+**Built (`2026-09-27`):** today a freeze is earned every 4 kept weeks in a row (max 2 held), and nothing tells the user when they get one.
 
-**Change:** today the gym alarm still rings and locks you on a frozen week.
+**Built (`2026-09-27`):** today the gym alarm still rings and locks you on a frozen week.
 
 Using a freeze automatically, planning one ahead, and the refund are already built.
 
@@ -496,7 +496,7 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 - It stops the moment the week is safe.
 - If home workouts are used up for the month, only the reschedule button shows.
 
-**Change:** new. Nothing like this exists today.
+**Built (`2026-09-27`):** new. Nothing like this exists today.
 
 ## Skip, Reschedule, Home Workout and Freeze Edge Cases
 
@@ -557,8 +557,8 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 18. 3 is the minimum everywhere: onboarding picker 3–7, and the streak always needs 3. **(Built: `2026-09-26`)**
 19. Save each week's rule when the week starts, so plan changes never rewrite past weeks. **(Built: `2026-09-26`)**
 20. Count a visit on the day the alarm rang, and let unplanned days count.
-21. Freezes: 2 per calendar year (at 2 and 6 months of use; Mar 1 and Jul 1 in later years). They expire Dec 31, with a notification when one is earned. A planned freeze pauses that week's gym alarms.
-22. Streak-at-risk notification plus a banner on Home.
+21. Freezes: 2 per calendar year (at 2 and 6 months of use; Mar 1 and Jul 1 in later years). They expire Dec 31, with a notification when one is earned. A planned freeze pauses that week's gym alarms. **(Built: `2026-09-27`)**
+22. Streak-at-risk notification plus a banner on Home. **(Built: `2026-09-27`)**
 
 ## Risks to Know About
 

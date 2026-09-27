@@ -49,6 +49,10 @@ enum NotificationRoute: Codable, Hashable {
     /// "you left after N min. 20 minutes makes it count." Opens the skip
     /// screen for that day.
     case leftEarly(day: Date)
+    /// "1 workout keeps your 6-week streak." Opens Home (FLOW, Flow 6).
+    case streakAtRisk
+    /// "you earned a freeze." Opens Home (FLOW, Flow 5).
+    case freezeEarned
     case unknown
 
     /// Every identifier `MorningNotifier` sends, in one place, so the sender
@@ -70,6 +74,11 @@ enum NotificationRoute: Codable, Hashable {
         /// fire after the session that started the visit has ended.
         static let workoutDonePrefix = "gymlock.done."
         static let leftEarlyPrefix = "gymlock.left."
+        /// One pending at a time, moved by scheduling again (FLOW, Flow 6).
+        /// Not session-scoped.
+        static let streakAtRisk = "gymlock.streak.atRisk"
+        /// Followed by the grant's day key (FLOW, Flow 5). Not session-scoped.
+        static let freezePrefix = "gymlock.freeze."
 
         static func workoutDone(day: Date, visitID: UUID, calendar: Calendar = .current) -> String {
             "\(workoutDonePrefix)\(SessionResume.dayKey(for: day, calendar: calendar)).\(visitID.uuidString)"
@@ -96,6 +105,11 @@ enum NotificationRoute: Codable, Hashable {
             return
         }
 
+        if identifier.hasPrefix(ID.freezePrefix) {
+            self = .freezeEarned
+            return
+        }
+
         for (prefix, make) in [
             (ID.missedPrefix, NotificationRoute.missed(day:)),
             (ID.workoutDonePrefix, NotificationRoute.workoutDone(day:)),
@@ -112,6 +126,8 @@ enum NotificationRoute: Codable, Hashable {
             self = .snoozeRefire
         case ID.windDown:
             self = .windDown
+        case ID.streakAtRisk:
+            self = .streakAtRisk
         default:
             if let kind = SessionKind.allCases.first(where: { $0.identifier == identifier }) {
                 self = .session(kind)

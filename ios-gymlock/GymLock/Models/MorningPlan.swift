@@ -382,15 +382,26 @@ struct MorningPlan: Hashable {
         if let slot = enabledSlots.first(where: { $0.id == id }) ?? slots.first(where: { $0.id == id }) {
             return slot
         }
-        guard let oneOff = oneOffAlarms.first(where: { $0.id == id }) else { return nil }
-        return enabledSlots.first { $0.id == oneOff.slotID } ?? slots.first { $0.id == oneOff.slotID }
+        if let oneOff = oneOffAlarms.first(where: { $0.id == id }) {
+            return enabledSlots.first { $0.id == oneOff.slotID } ?? slots.first { $0.id == oneOff.slotID }
+        }
+        // A gym alarm holding the week after a frozen week (FLOW, Flow 5).
+        guard let slotID = PausedWeekAlarmID.slotID(for: id, among: slots.map(\.id)) else { return nil }
+        return slots.first { $0.id == slotID }
     }
 
     /// One-off alarm ids mapped to the slot each stands for.
     var oneOffSlotIDs: [UUID: UUID] {
-        oneOffAlarms.reduce(into: [:]) { map, alarm in
+        var map: [UUID: UUID] = oneOffAlarms.reduce(into: [:]) { map, alarm in
             if let slotID = alarm.slotID { map[alarm.id] = slotID }
         }
+        // The dated alarms that bring gym days back after a frozen week.
+        for slot in slots {
+            for weekday in Weekday.allCases {
+                map[PausedWeekAlarmID.derive(slotID: slot.id, weekday: weekday)] = slot.id
+            }
+        }
+        return map
     }
 
     /// The alarms that ring each week.

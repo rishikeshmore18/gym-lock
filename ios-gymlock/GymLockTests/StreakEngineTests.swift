@@ -188,8 +188,8 @@ struct StreakEngineTests {
         #expect(vault.freezesAvailable == 0)
     }
 
-    @Test("A freeze is awarded at four consecutive kept weeks and capped at two")
-    func awardAndCap() {
+    @Test("Kept weeks no longer earn freezes (FLOW, Flow 5: the calendar does)")
+    func keptWeeksEarnNothing() {
         var vault = StreakVault.empty
         vault.lastEvaluatedWeekStart = day(-63) // Not migrating; everything after is new.
 
@@ -201,19 +201,7 @@ struct StreakEngineTests {
         }
         let snapshot = evaluate(MomentumLog(outcomes: outcomes), vault: &vault)
         #expect(snapshot.weeks == 8)
-        #expect(vault.freezesAvailable == 2)
-
-        // Twelve kept weeks would earn a third; the bank stays at two.
-        var vault12 = StreakVault.empty
-        vault12.lastEvaluatedWeekStart = day(-91)
-        var twelve: [SessionOutcome] = []
-        for week in 1...12 {
-            for weekday in [0, 2, 4] {
-                twelve.append(SessionOutcome(date: day(-7 * week + weekday), kind: .showedUp))
-            }
-        }
-        _ = evaluate(MomentumLog(outcomes: twelve), vault: &vault12)
-        #expect(vault12.freezesAvailable == StreakPolicy.maximumFreezes)
+        #expect(vault.freezesAvailable == 0)
     }
 
     @Test("A pre-armed live week that is kept refunds the freeze")
@@ -255,20 +243,17 @@ struct StreakEngineTests {
 
     // MARK: Migration
 
-    @Test("First evaluation grants one freeze at four weeks or more, else none")
-    func migrationGrant() {
+    @Test("First evaluation keeps the freezes held and grants nothing from history")
+    func migrationKeepsHeld() {
         var four = StreakVault.empty
         _ = evaluate(log(keptWeeksBefore: 4), vault: &four)
-        #expect(four.freezesAvailable == 1)
+        #expect(four.freezesAvailable == 0)
         #expect(four.needsMigration == false)
 
-        var three = StreakVault.empty
-        _ = evaluate(log(keptWeeksBefore: 3), vault: &three)
-        #expect(three.freezesAvailable == 0)
-
-        // A second run awards nothing extra from history.
-        _ = evaluate(log(keptWeeksBefore: 4), vault: &four)
-        #expect(four.freezesAvailable == 1)
+        var holding = StreakVault.empty
+        holding.freezesAvailable = 2
+        _ = evaluate(log(keptWeeksBefore: 8), vault: &holding)
+        #expect(holding.freezesAvailable == 2)
     }
 
     // MARK: Boundaries

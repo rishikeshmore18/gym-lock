@@ -79,6 +79,14 @@ struct TodayHomeView: View {
                             onSelect: select
                         )
 
+                        if let banner = coordinator.streakRiskBanner {
+                            StreakRiskBannerView(
+                                banner: banner,
+                                onReschedule: { coordinator.rescheduleForTodayFromBanner() },
+                                onHomeWorkout: { coordinator.homeWorkoutFromBanner() }
+                            )
+                        }
+
                         HeroCardView(stage: cards.hero)
 
                         MiniCardsRow(

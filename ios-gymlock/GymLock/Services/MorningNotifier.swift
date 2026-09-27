@@ -222,6 +222,38 @@ final class MorningNotifier {
         )
     }
 
+    // MARK: - Streak at risk (FLOW, Flow 6)
+
+    /// The one pending at-risk notification, moved by scheduling again under
+    /// the same id. Only when notifications are already allowed: this is
+    /// recomputed quietly on every change and must never raise the prompt.
+    func scheduleStreakAtRisk(at date: Date, body: String) async {
+        await deliverIfAuthorized(
+            id: NotificationRoute.ID.streakAtRisk,
+            body: body,
+            after: date.timeIntervalSinceNow
+        )
+    }
+
+    /// Withdrawn the moment the week is safe.
+    func cancelStreakAtRisk() async {
+        await cancel(NotificationRoute.ID.streakAtRisk)
+    }
+
+    // MARK: - Freezes (FLOW, Flow 5)
+
+    /// Replaces every pending "you earned a freeze." notice with `planned`.
+    func replaceFreezeNotices(_ planned: [FreezeNotice.Planned]) async {
+        let prefix = NotificationRoute.ID.freezePrefix
+        let stale = await center.pendingNotificationRequests()
+            .map(\.identifier)
+            .filter { $0.hasPrefix(prefix) }
+        center.removePendingNotificationRequests(withIdentifiers: stale)
+        for notice in planned {
+            await deliverIfAuthorized(id: notice.id, body: notice.body, after: notice.fireDate.timeIntervalSinceNow)
+        }
+    }
+
     // MARK: - Cleanup
 
     /// Clears everything session-scoped. Called whenever a morning ends, so a
@@ -258,6 +290,22 @@ final class MorningNotifier {
         try? await center.add(
             UNNotificationRequest(identifier: id, content: content, trigger: trigger)
         )
+    }
+
+    private func deliverIfAuthorized(id: String, body: String, after interval: TimeInterval) async {
+        guard interval > 1 else { return }
+        let status = await center.notificationSettings().authorizationStatus
+        guard status == .authorized || status == .provisional || status == .ephemeral else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "gymlock"
+        content.body = body
+        content.sound = .default
+        content.interruptionLevel = .active
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        await cancel(id)
+        try? await center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
     }
 
     private func cancel(_ id: String) async {

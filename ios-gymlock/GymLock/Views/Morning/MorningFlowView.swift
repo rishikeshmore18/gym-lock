@@ -149,7 +149,9 @@ struct MorningFlowView: View {
                 onReschedule: { coordinator.reschedule(to: $0, at: $1) },
                 onHomeWorkout: { coordinator.resolveCantToday(.homeWorkout) },
                 onSkip: { coordinator.resolveCantToday(.skip) },
-                onBack: { coordinator.endSession() }
+                onBack: { coordinator.endSession() },
+                startsOnPicker: coordinator.wantsReschedulePicker,
+                onPickerShown: { coordinator.consumeReschedulePicker() }
             )
 
         case .confirmingArrival:

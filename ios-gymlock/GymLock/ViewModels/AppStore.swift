@@ -86,6 +86,11 @@ final class AppStore {
     /// evaluation can *spend* a freeze, and a side effect belongs in one place.
     private(set) var streak: StreakSnapshot = .empty
 
+    /// Called after every streak evaluation, so the coordinator can move the
+    /// streak-at-risk and freeze notifications and pause or restore the gym
+    /// alarms. Not persisted.
+    @ObservationIgnored var onStreakRefreshed: (() -> Void)?
+
     /// The gym the user actually goes to.
     ///
     /// The one extra thing they configure for automatic arrival detection, set
@@ -218,10 +223,24 @@ final class AppStore {
             plan: plan,
             schedule: schedule,
             vault: &vault,
-            now: now
+            now: now,
+            joined: joinedAt
         )
         if vault != streakVault { streakVault = vault }
         if snapshot != streak { streak = snapshot }
+        onStreakRefreshed?()
+    }
+
+    /// The day the user joined, which times their first year's freezes
+    /// (FLOW, Flow 5).
+    var joinedAt: Date { AppInstallDate.resolve(defaults) }
+
+    /// When the live week ends, if it was frozen ahead of time. Until then
+    /// the gym alarms are paused (FLOW, Flow 5).
+    var frozenWeekEnd: Date? {
+        guard streak.isLiveWeekPreArmed else { return nil }
+        let weekCalendar = ProgressAnalytics.displayCalendar(.current)
+        return weekCalendar.date(byAdding: .weekOfYear, value: 1, to: streak.liveWeekStart)
     }
 
     /// Spends one banked freeze on the current week, ahead of time.
@@ -416,6 +435,34 @@ final class AppStore {
     }
 
     #if DEBUG
+    /// Runs the freeze calendar from just before `grantDay` to `moment`, then
+    /// puts the clock back to now, so a grant or an expiry can be watched
+    /// without waiting for the date. Returns the freezes held afterwards.
+    @discardableResult
+    func debugRunFreezeCalendar(from start: Date, to moment: Date, holding: Int? = nil) -> Int {
+        let calendar = Calendar.current
+        var vault = streakVault
+        if let holding { vault.freezesAvailable = holding }
+        vault.freezeClock = start
+        vault.freezeYear = calendar.component(.year, from: start)
+        FreezeCalendar.settle(&vault, joined: joinedAt, upTo: moment, calendar: calendar)
+        let held = vault.freezesAvailable
+        vault.freezeClock = Date()
+        vault.freezeYear = calendar.component(.year, from: Date())
+        streakVault = vault
+        refreshStreak()
+        return held
+    }
+
+    /// Makes sure at least one freeze is held, for the planned-freeze step.
+    func debugEnsureFreeze() {
+        guard streakVault.freezesAvailable == 0 else { return }
+        var vault = streakVault
+        vault.freezesAvailable = 1
+        streakVault = vault
+        refreshStreak()
+    }
+
     /// Drops in counted home workouts, spread over the last days of this
     /// calendar month, so the monthly cap can be exercised.
     func debugUseHomeWorkouts(_ count: Int, now: Date = Date()) {

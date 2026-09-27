@@ -113,6 +113,15 @@ extension GymSessionCoordinator {
         case cancelAReschedule
         case skipOnSunday
 
+        // Freezes and streak at risk (FLOW items 21, 22).
+        case jumpTwoMonthsAfterJoining
+        case jumpToJuly1
+        case newYearFreezesExpire
+        case planFreezeThisWeek
+        case atRiskThursday
+        case atRiskSunday
+        case atRiskHomeWorkoutsUsedUp
+
         // Sound: the ringer and the fallback chain.
         case ringerStart
         case ringerEscalated
@@ -170,6 +179,9 @@ extension GymSessionCoordinator {
                  .use3HomeWorkouts, .homeWorkoutNoHealthPhoto,
                  .cancelAReschedule, .skipOnSunday:
                 "skips"
+            case .jumpTwoMonthsAfterJoining, .jumpToJuly1, .newYearFreezesExpire,
+                 .planFreezeThisWeek, .atRiskThursday, .atRiskSunday, .atRiskHomeWorkoutsUsedUp:
+                "freezes and at risk"
             case .ringerStart, .ringerEscalated, .ringerStop,
                  .ringerCeiling, .customSongMissing, .customSongProtected:
                 "sound"
@@ -254,6 +266,13 @@ extension GymSessionCoordinator {
             case .homeWorkoutNoHealthPhoto: "home workout, no Health, add photo"
             case .cancelAReschedule: "cancel a reschedule"
             case .skipOnSunday: "skip on Sunday"
+            case .jumpTwoMonthsAfterJoining: "jump to 2 months after joining"
+            case .jumpToJuly1: "jump to July 1"
+            case .newYearFreezesExpire: "new year: freezes expire"
+            case .planFreezeThisWeek: "plan a freeze this week"
+            case .atRiskThursday: "at risk on Thursday"
+            case .atRiskSunday: "at risk on Sunday"
+            case .atRiskHomeWorkoutsUsedUp: "at risk, home workouts used up"
             case .ringerStart: "ringer: start"
             case .ringerEscalated: "ringer: jump to full volume"
             case .ringerStop: "ringer: stop"
@@ -264,7 +283,7 @@ extension GymSessionCoordinator {
         }
 
         static var sections: [String] {
-            ["skips", "at the gym", "alarm rules", "sleep and night lock", "week rules", "notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
+            ["freezes and at risk", "skips", "at the gym", "alarm rules", "sleep and night lock", "week rules", "notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
         }
     }
 
@@ -1034,6 +1053,83 @@ extension GymSessionCoordinator {
             debugOpenSkipScreen(dayOffset: 6)
             debugReportSkipScreen("sunday")
 
+        // MARK: Freezes and at risk
+
+        case .jumpTwoMonthsAfterJoining:
+            guard let store = debugStore else { return }
+            let calendar = Calendar.current
+            let joined = store.joinedAt
+            let year = calendar.component(.year, from: joined)
+            guard let grant = FreezeCalendar.grants(inYear: year, joined: joined, calendar: calendar).first,
+                  grant.ordinal == 1,
+                  calendar.date(byAdding: .month, value: 2, to: calendar.startOfDay(for: joined)) == grant.date
+            else {
+                Self.debugFreezeResult = "joined \(joined.formatted(date: .abbreviated, time: .omitted)): 2 months lands next year · no freeze this year · first is Mar 1"
+                return
+            }
+            let held = store.debugRunFreezeCalendar(
+                from: grant.date.addingTimeInterval(-60),
+                to: grant.date.addingTimeInterval(12 * 3600),
+                holding: 0
+            )
+            Self.debugFreezeResult = debugGrantReading(grant, held: held)
+
+        case .jumpToJuly1:
+            guard let store = debugStore else { return }
+            let calendar = Calendar.current
+            let joined = store.joinedAt
+            let year = max(calendar.component(.year, from: Date()), calendar.component(.year, from: joined) + 1)
+            guard let grant = FreezeCalendar.grants(inYear: year, joined: joined, calendar: calendar).last else {
+                Self.debugFreezeResult = "NO JULY 1 GRANT"
+                return
+            }
+            // Mar 1 already granted, as it would be by July.
+            let held = store.debugRunFreezeCalendar(
+                from: grant.date.addingTimeInterval(-60),
+                to: grant.date.addingTimeInterval(12 * 3600),
+                holding: 1
+            )
+            Self.debugFreezeResult = debugGrantReading(grant, held: held)
+
+        case .newYearFreezesExpire:
+            guard let store = debugStore else { return }
+            let calendar = Calendar.current
+            let year = calendar.component(.year, from: Date())
+            guard let dec31 = calendar.date(from: DateComponents(year: year, month: 12, day: 31, hour: 12)),
+                  let jan1 = calendar.date(from: DateComponents(year: year + 1, month: 1, day: 1, hour: 0, minute: 1))
+            else { return }
+            let held = store.debugRunFreezeCalendar(from: dec31, to: jan1, holding: 2)
+            Self.debugFreezeResult = "held 2 on Dec 31 · Jan 1: \(held) held (expect 0)"
+
+        case .planFreezeThisWeek:
+            guard let store = debugStore else { return }
+            endSession()
+            let days = store.plan.gymDays.isEmpty ? Set<Weekday>([.monday, .wednesday, .friday]) : store.plan.gymDays
+            debugSetupWeek(days: days, outcomes: [])
+            store.debugEnsureFreeze()
+            guard store.armFreezeForThisWeek() else {
+                Self.debugFreezeResult = "COULD NOT PLAN A FREEZE"
+                return
+            }
+            let now = Date()
+            let alarms = AlarmPlan.alarms(for: store.plan, now: now, calendar: .current, pausedUntil: store.frozenWeekEnd)
+            let end = store.frozenWeekEnd ?? now
+            let gymThisWeek = alarms.filter { $0.kind.locks && ($0.fireDate.map { $0 < end } ?? true) }.count
+            let gymMonday = alarms.filter { $0.kind.locks && ($0.fireDate.map { $0 >= end } ?? false) }.count
+            let wake = alarms.contains { $0.kind == .plainWake }
+            let night = store.plan.nextNightLockStart(after: now, calendar: .current) != nil
+            Self.debugFreezeResult =
+                "gym alarms this week: \(gymThisWeek) (expect 0) · back from Monday: \(gymMonday) · wake alarms \(wake ? "on" : "off") · night lock \(night ? "on" : "OFF") · freezes left \(store.streak.freezesAvailable)"
+
+        case .atRiskThursday:
+            debugReportAtRisk(counted: [0], simulatedDay: 3, homeWorkoutsUsed: nil)
+
+        case .atRiskSunday:
+            debugReportAtRisk(counted: [0, 2], simulatedDay: 6, homeWorkoutsUsed: nil)
+
+        case .atRiskHomeWorkoutsUsedUp:
+            debugReportAtRisk(counted: [0], simulatedDay: 3, homeWorkoutsUsed: HomeWorkoutRules.monthlyLimit)
+
         // MARK: Sound
 
         case .ringerStart:
@@ -1200,6 +1296,76 @@ extension GymSessionCoordinator {
         let labels = rescheduleChoices.map(\.label).joined(separator: " ")
         Self.debugSkipsResult =
             "\(prefix) · \"\(plan.heading)\" · first: \(first) · choices: \(labels.isEmpty ? "none" : labels)"
+    }
+
+    // MARK: - Freezes and at risk helpers
+
+    /// The last freezes-and-at-risk result, shown in the panel.
+    static var debugFreezeResult = "none"
+
+    private func debugGrantReading(_ grant: FreezeCalendar.Grant, held: Int) -> String {
+        guard let store = debugStore else { return "none" }
+        let fire = NoticeTime.fireDate(on: grant.date, plan: store.plan, calendar: .current)
+        let when = fire.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "?"
+        return "\(grant.date.formatted(date: .abbreviated, time: .omitted)): \(held) held · notice \"\(grant.line)\" at \(when)"
+    }
+
+    /// A kept week last week (so the streak is at least 1), Mon/Wed/Fri gym
+    /// days, `counted` days of this week done, then the banner and next
+    /// notice as they would read at 09:00 on `simulatedDay` (0 = Monday).
+    private func debugReportAtRisk(counted: [Int], simulatedDay: Int, homeWorkoutsUsed: Int?) {
+        guard let store = debugStore else { return }
+        endSession()
+        debugSetupWeek(days: [.monday, .wednesday, .friday], outcomes: counted.map { ($0, .showedUp) })
+
+        let calendar = Calendar.current
+        let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
+        guard let monday = StreakEngine.weekStart(containing: Date(), weekCalendar: weekCalendar) else { return }
+        for offset in [-7, -5, -3] {
+            let day = monday.addingTimeInterval(Double(offset) * 24 * 3600)
+            store.log.record(SessionOutcome(date: day.addingTimeInterval(7 * 3600), kind: .showedUp, countsOn: day, proof: .photo))
+        }
+        store.refreshStreak()
+
+        let dayStart = monday.addingTimeInterval(Double(simulatedDay) * 24 * 3600)
+        let at = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: dayStart) ?? dayStart
+        let used = homeWorkoutsUsed ?? HomeWorkoutRules.usedThisMonth(log: store.log, now: at, calendar: calendar)
+        let banner = StreakRisk.banner(
+            log: store.log,
+            plan: store.plan,
+            streakWeeks: max(store.streak.weeks, 1),
+            weeklyGoal: store.streak.weeklyGoal,
+            isWeekFrozen: store.streak.isLiveWeekPreArmed,
+            freezesHeld: store.streak.freezesAvailable,
+            homeWorkoutsUsed: used,
+            sawMakeUpToday: false,
+            todayInProgress: false,
+            now: at,
+            calendar: calendar
+        )
+        let notice = StreakRisk.nextNotice(
+            log: store.log,
+            plan: store.plan,
+            streakWeeks: max(store.streak.weeks, 1),
+            weeklyGoal: store.streak.weeklyGoal,
+            isWeekFrozen: store.streak.isLiveWeekPreArmed,
+            freezesHeld: store.streak.freezesAvailable,
+            sawMakeUpToday: false,
+            alreadySentToday: false,
+            todayInProgress: false,
+            now: calendar.date(bySettingHour: 8, minute: 0, second: 0, of: dayStart) ?? at,
+            calendar: calendar
+        )
+        guard let banner else {
+            Self.debugFreezeResult = "QUIET (not at risk)"
+            return
+        }
+        let buttons = banner.showsHomeWorkout
+            ? "[\(StreakRiskBanner.rescheduleLabel)] [\(banner.homeWorkoutLabel)]"
+            : "[\(StreakRiskBanner.rescheduleLabel)] only"
+        let freeze = banner.freezeLine.map { " \"\($0)\"" } ?? ""
+        let when = notice.map { TimeOfDay(from: $0.fireDate).clockString } ?? "none"
+        Self.debugFreezeResult = "\"\(banner.line)\"\(freeze) · \(buttons) · notice at \(when)"
     }
 
     // MARK: - Alarm rules helpers
