@@ -162,7 +162,9 @@ enum HomeCardDeriver {
         // 2. How today resolved, if it did.
         if let outcome = store.log.outcome(on: now, calendar: calendar) {
             switch outcome.kind {
-            case .showedUp, .homeWorkout:
+            // Only once the workout counts. A gym visit still being proved
+            // falls through to the ordinary stages.
+            case .showedUp where outcome.counts, .homeWorkout where outcome.counts:
                 return resolvedModel(
                     streak: store.streak.weeks,
                     store: store, coordinator: coordinator, now: now, calendar: calendar
@@ -517,7 +519,7 @@ enum HomeCardDeriver {
 
         guard let week = calendar.dateInterval(of: .weekOfYear, for: now) else { return nil }
         let done = store.log.outcomes.filter {
-            week.contains($0.countingDay(calendar: calendar)) && $0.kind.preservesMomentum
+            week.contains($0.countingDay(calendar: calendar)) && $0.counts
         }.count
 
         guard done > 0 else { return nil }
@@ -542,7 +544,7 @@ enum HomeCardDeriver {
     /// Multi-week weekday histogram. Only shown once there is a genuine pattern
     /// to see — several sessions across more than one week — never faked.
     private static func patternStage(store: AppStore, coordinator: GymSessionCoordinator, now: Date, calendar: Calendar) -> HomeCardModel? {
-        let visits = store.log.outcomes.filter { $0.kind.isVerifiedGymVisit }
+        let visits = store.log.outcomes.filter { $0.isVerifiedWorkout }
         guard visits.count >= 6 else { return nil }
 
         var weeks = Set<Int>()
@@ -576,7 +578,7 @@ enum HomeCardDeriver {
 
         func verified(in interval: DateInterval) -> Int {
             store.log.outcomes.filter {
-                interval.contains($0.countingDay(calendar: calendar)) && $0.kind.isVerifiedGymVisit
+                interval.contains($0.countingDay(calendar: calendar)) && $0.isVerifiedWorkout
             }.count
         }
 

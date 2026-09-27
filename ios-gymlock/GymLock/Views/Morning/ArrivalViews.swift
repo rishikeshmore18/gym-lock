@@ -399,7 +399,7 @@ struct GymArrivedView: View {
     private var statsRow: some View {
         HStack(spacing: 12) {
             statTile(value: "\(momentumWeeks)", label: "week streak", icon: "flame.fill")
-            statTile(value: "\(gymVisitsThisMonth)", label: "gym visits", icon: "dumbbell.fill")
+            statTile(value: "\(gymVisitsThisMonth)", label: "gym workouts", icon: "dumbbell.fill")
         }
         .opacity(hasAppeared ? 1 : 0)
         .offset(y: hasAppeared || reduceMotion ? 0 : 20)

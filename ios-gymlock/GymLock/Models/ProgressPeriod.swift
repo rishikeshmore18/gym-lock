@@ -533,7 +533,8 @@ struct ProgressAnalytics {
         outcomes: [SessionOutcome]?
     ) -> ProgressDayStatus {
         if let outcomes, !outcomes.isEmpty {
-            if outcomes.contains(where: { $0.kind == .showedUp }) { return .gymVerified }
+            // Verified means the workout was done; a gym visit alone is not.
+            if outcomes.contains(where: \.isVerifiedWorkout) { return .gymVerified }
             if outcomes.contains(where: { $0.kind == .homeWorkout }) { return .quickWorkoutVerified }
             if outcomes.contains(where: { $0.kind == .missed }) { return .missed }
             return .excused

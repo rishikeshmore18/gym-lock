@@ -6,12 +6,8 @@ import Foundation
 /// this type: one of them is a gym visit and one of them is not, and the app is
 /// not allowed to blur that even though both protect momentum.
 enum SessionOutcomeKind: String, Codable, Hashable {
-    /// Confirmed physical arrival at the configured gym.
-    ///
-    /// Named for exactly what it means. It is not a claim that the user
-    /// exercised — GymLock cannot know that and does not pretend to. It means
-    /// they got themselves there, which is the behaviour the product exists to
-    /// change.
+    /// Arrived at the gym. On its own this is a gym visit and does not count;
+    /// it counts once the workout is done (`SessionOutcome.proof`).
     case showedUp
     case homeWorkout
     case easySkip
@@ -21,20 +17,6 @@ enum SessionOutcomeKind: String, Codable, Hashable {
     /// Detection failed for technical reasons. Recorded so it can be
     /// investigated, but it neither credits nor punishes the user.
     case technicalFailure
-
-    /// Whether this keeps the momentum streak alive.
-    ///
-    /// A technical failure does not preserve momentum, but it is also not a
-    /// miss: it sits outside the streak rather than breaking it.
-    var preservesMomentum: Bool {
-        switch self {
-        case .showedUp, .homeWorkout: true
-        case .easySkip, .dayOff, .rescheduled, .missed, .technicalFailure: false
-        }
-    }
-
-    /// Whether this counts as a visit to the gym.
-    var isVerifiedGymVisit: Bool { self == .showedUp }
 
     /// Whether it draws down the easy-skip allowance.
     var usesSkipAllowance: Bool {
@@ -64,7 +46,14 @@ struct SessionOutcome: Codable, Hashable, Identifiable {
     /// at 00:20 counts on Sunday. Nil on records saved before this existed,
     /// which count on the day they were recorded, exactly as before.
     var countsOn: Date?
+    /// Why it counts. A gym arrival starts `unproven` and counts once the
+    /// workout is done. Records saved before this existed decode as `legacy`
+    /// (arrivals and home workouts), so every past week keeps its result.
+    var proof: WorkoutProof
 
+    /// `proof` left out means `legacy` for arrivals and home workouts, which
+    /// is what every record built before this change meant. The session code
+    /// passes `unproven` for a new arrival.
     init(
         id: UUID = UUID(),
         date: Date = Date(),
@@ -72,7 +61,8 @@ struct SessionOutcome: Codable, Hashable, Identifiable {
         minutes: Int? = nil,
         sessionID: UUID? = nil,
         workoutDetected: Bool = false,
-        countsOn: Date? = nil
+        countsOn: Date? = nil,
+        proof: WorkoutProof? = nil
     ) {
         self.id = id
         self.date = date
@@ -81,7 +71,46 @@ struct SessionOutcome: Codable, Hashable, Identifiable {
         self.sessionID = sessionID
         self.workoutDetected = workoutDetected
         self.countsOn = countsOn
+        self.proof = proof ?? Self.legacyProof(for: kind)
     }
+
+    private static func legacyProof(for kind: SessionOutcomeKind) -> WorkoutProof {
+        kind == .showedUp || kind == .homeWorkout ? .legacy : .unproven
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, kind, minutes, sessionID, workoutDetected, countsOn, proof
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        date = try container.decode(Date.self, forKey: .date)
+        kind = try container.decode(SessionOutcomeKind.self, forKey: .kind)
+        minutes = try container.decodeIfPresent(Int.self, forKey: .minutes)
+        sessionID = try container.decodeIfPresent(UUID.self, forKey: .sessionID)
+        workoutDetected = try container.decodeIfPresent(Bool.self, forKey: .workoutDetected) ?? false
+        countsOn = try container.decodeIfPresent(Date.self, forKey: .countsOn)
+        proof = (try? container.decodeIfPresent(WorkoutProof.self, forKey: .proof)) ?? Self.legacyProof(for: kind)
+    }
+
+    /// The one answer to "does this count?" (FLOW, Flow 3). A gym arrival
+    /// counts once the workout is done; a home workout counts as it always
+    /// has.
+    var counts: Bool {
+        switch kind {
+        case .showedUp: proof != .unproven
+        case .homeWorkout: true
+        case .easySkip, .dayOff, .rescheduled, .missed, .technicalFailure: false
+        }
+    }
+
+    /// "Verified": a gym workout that was done. A GPS arrival alone is only
+    /// a gym visit.
+    var isVerifiedWorkout: Bool { kind == .showedUp && counts }
+
+    /// An arrival whose workout isn't done (yet).
+    var isGymVisitOnly: Bool { kind == .showedUp && !counts }
 
     /// The one definition of which day this outcome counts on.
     ///
@@ -125,23 +154,47 @@ struct MomentumLog: Codable, Hashable {
 
     // MARK: Momentum
 
-    /// Verified gym visits inside the current calendar month.
+    /// Verified gym workouts inside the current calendar month.
     var verifiedGymVisitsThisMonth: Int {
         let calendar = Calendar.current
         let now = Date()
         return outcomes.filter {
-            $0.kind.isVerifiedGymVisit
+            $0.isVerifiedWorkout
                 && calendar.isDate($0.countingDay(calendar: calendar), equalTo: now, toGranularity: .month)
         }.count
     }
 
     var totalVerifiedGymVisits: Int {
-        outcomes.filter(\.kind.isVerifiedGymVisit).count
+        outcomes.filter(\.isVerifiedWorkout).count
     }
 
-    /// The outcome that counts on a given day, if the morning already resolved.
+    /// Marks a recorded gym visit counted, with its proof. Returns whether
+    /// anything changed.
+    @discardableResult
+    mutating func markCounted(outcomeID: UUID, proof: WorkoutProof) -> Bool {
+        guard let index = outcomes.lastIndex(where: { $0.id == outcomeID }),
+              outcomes[index].proof == .unproven
+        else { return false }
+        outcomes[index].proof = proof
+        if proof == .health { outcomes[index].workoutDetected = true }
+        return true
+    }
+
+    /// Notes that Apple Health saw a qualifying workout for this outcome.
+    @discardableResult
+    mutating func markWorkoutDetected(outcomeID: UUID) -> Bool {
+        guard let index = outcomes.lastIndex(where: { $0.id == outcomeID }),
+              !outcomes[index].workoutDetected
+        else { return false }
+        outcomes[index].workoutDetected = true
+        return true
+    }
+
+    /// The outcome that stands for a given day. A counted one wins over a
+    /// gym visit that didn't count, so a second visit can't hide the first.
     func outcome(on day: Date = Date(), calendar: Calendar = .current) -> SessionOutcome? {
-        outcomes.last { calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) }
+        let onDay = outcomes.filter { calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) }
+        return onDay.last(where: \.counts) ?? onDay.last
     }
 
     /// The last outcome *written* on a given calendar day, whatever day it
@@ -178,7 +231,7 @@ struct MomentumLog: Codable, Hashable {
                 return false
             }
             return outcomes.contains {
-                calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) && $0.kind.preservesMomentum
+                calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) && $0.counts
             }
         }
     }

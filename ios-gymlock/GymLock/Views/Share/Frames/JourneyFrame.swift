@@ -2,7 +2,7 @@ import SwiftUI
 
 /// `DAY 30`, with what the days added up to.
 ///
-/// The number is the coral. Facts are the verified visits and, when there is
+/// The number is the coral. Facts are the verified workouts and, when there is
 /// an honest denominator, the percentage of due sessions the user showed up
 /// for. The optional inset is the before-picture with a hairline border and a
 /// one-word caption — no arrows, no handwriting.
@@ -47,7 +47,7 @@ struct JourneyFrame: View {
 
     private var factLines: [String] {
         guard let journey = context.journey else { return [] }
-        var lines = ["\(journey.verifiedVisits) verified \(journey.verifiedVisits == 1 ? "visit" : "visits")"]
+        var lines = ["\(journey.verifiedVisits) verified \(journey.verifiedVisits == 1 ? "workout" : "workouts")"]
         if let percent = journey.percentText { lines.append(percent) }
         return lines
     }

@@ -35,6 +35,10 @@ final class ProgressPhotoStore {
     let installDate: Date
 
     private let defaults: UserDefaults
+    /// Told about every photo the moment it is saved. There is one store for
+    /// the whole app, so "I'm here" (and, later, home workouts) can be
+    /// proved by a camera photo taken in the Progress tab.
+    private var saveObservers: [(ProgressPhoto) -> Void] = []
     private static let storageKey = "gymlock.progressPhotos"
     private static let dayZeroImportKey = "gymlock.progressPhotos.day0Imported"
     /// Longest edge of the stored thumbnail, in pixels.
@@ -57,6 +61,11 @@ final class ProgressPhotoStore {
         installDate = AppInstallDate.resolve(defaults)
         load()
         reconcile()
+    }
+
+    /// Registers a handler for every saved photo (source and date included).
+    func addSaveObserver(_ handler: @escaping (ProgressPhoto) -> Void) {
+        saveObservers.append(handler)
     }
 
     // MARK: - Reading
@@ -368,6 +377,7 @@ final class ProgressPhotoStore {
         // The one success haptic for a save. The Story editor's "saved" toast
         // deliberately does not fire its own — this is the same event.
         Haptics.commit()
+        for observer in saveObservers { observer(photo) }
         return photo
     }
 

@@ -172,12 +172,7 @@ final class HealthWorkoutObserver {
         let samples = await runAnchoredQuery()
 
         for workout in samples {
-            let detected = DetectedWorkout(
-                activityName: workout.workoutActivityType.displayName,
-                startedAt: workout.startDate,
-                endedAt: workout.endDate,
-                source: workout.sourceRevision.source.name
-            )
+            let detected = Self.detected(from: workout)
 
             // A workout GymLock itself somehow wrote would be circular
             // evidence. Nothing in this app writes to Health, but guarding
@@ -206,14 +201,7 @@ final class HealthWorkoutObserver {
                 limit: 20,
                 sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)]
             ) { _, samples, _ in
-                let workouts = (samples as? [HKWorkout] ?? []).map { workout in
-                    DetectedWorkout(
-                        activityName: workout.workoutActivityType.displayName,
-                        startedAt: workout.startDate,
-                        endedAt: workout.endDate,
-                        source: workout.sourceRevision.source.name
-                    )
-                }
+                let workouts = (samples as? [HKWorkout] ?? []).map(Self.detected(from:))
                 continuation.resume(returning: workouts)
             }
 
@@ -222,6 +210,18 @@ final class HealthWorkoutObserver {
     }
 
     // MARK: - Private
+
+    /// What GymLock keeps of a workout, including whether it was typed in by
+    /// hand, which never proves a workout (FLOW, Flow 3).
+    nonisolated private static func detected(from workout: HKWorkout) -> DetectedWorkout {
+        DetectedWorkout(
+            activityName: workout.workoutActivityType.displayName,
+            startedAt: workout.startDate,
+            endedAt: workout.endDate,
+            source: workout.sourceRevision.source.name,
+            wasUserEntered: (workout.metadata?[HKMetadataKeyWasUserEntered] as? Bool) == true
+        )
+    }
 
     /// An anchored query, so each workout is only ever handed over once.
     ///
@@ -264,12 +264,17 @@ final class HealthWorkoutObserver {
     #if DEBUG
     /// Debug hooks. Compiled out of release entirely.
     func debugEmitWorkout() {
-        let detected = DetectedWorkout(
-            activityName: "Traditional Strength Training",
-            startedAt: Date().addingTimeInterval(-45 * 60),
-            endedAt: Date(),
-            source: "Apple Watch"
+        debugEmit(
+            DetectedWorkout(
+                activityName: "Traditional Strength Training",
+                startedAt: Date().addingTimeInterval(-45 * 60),
+                endedAt: Date(),
+                source: "Apple Watch"
+            )
         )
+    }
+
+    func debugEmit(_ detected: DetectedWorkout) {
         lastDetected = detected
         onWorkout?(detected)
     }

@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import Observation
 import UIKit
@@ -61,6 +62,9 @@ final class GymSessionCoordinator {
         /// When the phone-off check first ran. Days before it are never
         /// offered, so an update never reaches back into old weeks.
         static let missedCheckSince = "gymlock.alarm.missedCheckSince"
+        /// The day the workout-done notification was tapped for, until the
+        /// Progress spotlight (Step 3) shows it.
+        static let spotlightDay = "gymlock.progress.pendingSpotlightDay"
     }
 
     /// Set while an ignored alarm is being closed, so ending the session
@@ -82,6 +86,16 @@ final class GymSessionCoordinator {
     let shield: any AppShielding
     let arrival: GymArrivalMonitor
     let health: HealthWorkoutObserver
+    /// Every gym visit, from arrival until the workout is done or the visit
+    /// closes (FLOW, Flow 3). Outlives the session on purpose.
+    let visits: GymVisitTracker
+    /// The one app-level photo store, so a camera photo can prove "I'm here".
+    private(set) var photos: ProgressPhotoStore?
+    /// A tab a notification tap asked for. The tab shell switches and clears it.
+    private(set) var requestedTab: RootTab?
+    /// The day the Progress spotlight is pending for. Nothing shows it until
+    /// Step 3 builds the overlay; the tap already lands on Progress.
+    private(set) var pendingSpotlightDay: Date?
 
     private var ticker: Task<Void, Never>?
     /// The long-lived observers, held somewhere that can clean itself up.
@@ -115,6 +129,15 @@ final class GymSessionCoordinator {
         self.shield = shield ?? AppShieldingFactory.make(defaults: defaults)
         self.arrival = arrival ?? GymArrivalMonitor()
         self.health = health ?? HealthWorkoutObserver(defaults: defaults)
+        self.visits = GymVisitTracker(defaults: defaults, notifier: self.notifier)
+        pendingSpotlightDay = defaults.object(forKey: Key.spotlightDay) as? Date
+    }
+
+    /// Hands over the app's photo store and listens for saved photos.
+    func attach(photos: ProgressPhotoStore) {
+        guard self.photos == nil else { return }
+        self.photos = photos
+        photos.addSaveObserver { [weak self] _ in self?.evaluateVisits() }
     }
 
     // MARK: - Wiring
@@ -131,7 +154,9 @@ final class GymSessionCoordinator {
         enforceShieldFailsafe()
 
         restore()
+        wireGymEvents()
         armArrivalIfPossible()
+        evaluateVisits()
         startHealthObservation()
         observeAlarmFiring()
         observeHandoffNotifications()
@@ -148,6 +173,144 @@ final class GymSessionCoordinator {
     /// For tests of the session rules.
     func bindStoreOnly(_ store: AppStore) {
         self.store = store
+    }
+
+    // MARK: - At the gym
+
+    /// Region crossings after arrival, and arrivals with no alarm running.
+    /// Set once; they outlive every session.
+    private func wireGymEvents() {
+        arrival.onRegionExit = { [weak self] date in self?.noteGymExit(at: date) }
+        arrival.onRegionEntry = { [weak self] date in self?.noteGymEntry(at: date) }
+        arrival.onUnscheduledArrival = { [weak self] fromStateCheck in
+            self?.recordUnscheduledVisit(fromStateCheck: fromStateCheck)
+        }
+    }
+
+    /// Settles every open visit against the clock, Health and photos.
+    @discardableResult
+    func evaluateVisits(now: Date = Date(), extraPhotos: [ProgressPhoto] = []) -> [GymVisit] {
+        guard let store else { return [] }
+        return visits.evaluate(
+            now: now,
+            store: store,
+            photos: (photos?.photos ?? []) + extraPhotos,
+            calendar: .current
+        )
+    }
+
+    func noteGymExit(at date: Date, now: Date = Date()) {
+        visits.noteExit(at: date, now: now, calendar: .current)
+        evaluateVisits(now: now)
+    }
+
+    func noteGymEntry(at date: Date, now: Date = Date()) {
+        visits.noteEntry(at: date)
+        evaluateVisits(now: now)
+    }
+
+    /// A gym visit with no alarm running (FLOW, Flow 3 edge cases): the same
+    /// dwell check already passed, there is no lock to lift, and the same
+    /// workout rules decide whether it counts, on the arrival day. Time at
+    /// the gym only counts when the app saw them come in.
+    @discardableResult
+    func recordUnscheduledVisit(fromStateCheck: Bool, at arrivedAt: Date = Date()) -> GymVisit? {
+        guard let store else { return nil }
+        if let current = session, current.state.isLive, current.isMakeUpOffer != true { return nil }
+        guard visits.openVisit(now: arrivedAt, calendar: .current) == nil else { return nil }
+
+        let day = Calendar.current.startOfDay(for: arrivedAt)
+        let outcome = SessionOutcome(date: arrivedAt, kind: .showedUp, countsOn: day, proof: .unproven)
+        store.log.record(outcome)
+        store.record(.gymArrivalVerified, detail: "no alarm")
+        return beginVisit(
+            outcomeID: outcome.id,
+            sessionID: nil,
+            countsOn: day,
+            arrivedAt: arrivedAt,
+            timeCounts: !fromStateCheck
+        )
+    }
+
+    /// Starts following a visit: the "you're in" line, the Health check, and
+    /// the workout-done notification at 30 minutes (scheduled by `evaluate`).
+    @discardableResult
+    private func beginVisit(
+        outcomeID: UUID,
+        sessionID: UUID?,
+        countsOn: Date,
+        arrivedAt: Date,
+        timeCounts: Bool,
+        manualAt: Date? = nil
+    ) -> GymVisit {
+        // Inside tonight's sleep window: the night lock stays on, and the
+        // done line says what it cost (FLOW, the night lock).
+        let night = store?.plan.nightLockWindow(at: arrivedAt, calendar: .current)
+        let visit = GymVisit(
+            outcomeID: outcomeID,
+            sessionID: sessionID,
+            countsOn: countsOn,
+            arrivedAt: arrivedAt,
+            timeCounts: timeCounts,
+            manualAt: manualAt,
+            sleepBedtime: night.map { TimeOfDay(from: $0.start).clockString }
+        )
+        visits.begin(visit)
+
+        Task { [notifier] in await notifier.sendArrival() }
+        fetchWorkouts(around: manualAt ?? arrivedAt)
+        evaluateVisits()
+        return visit
+    }
+
+    /// Workouts already in Health for this visit's window.
+    private func fetchWorkouts(around anchor: Date) {
+        guard health.isUsable else { return }
+        let interval = DateInterval(
+            start: anchor.addingTimeInterval(-WorkoutRules.healthEarliestBeforeArrival),
+            end: anchor.addingTimeInterval(WorkoutRules.healthWindowAfterArrival)
+        )
+        Task {
+            let found = await health.workouts(in: interval)
+            visits.add(found, now: Date())
+            evaluateVisits()
+        }
+    }
+
+    /// Home inside the gym area: time only counts once the app saw them leave
+    /// home (FLOW, Flow 3 edge cases).
+    private func homeIsInsideGym(_ session: GymSession) -> Bool {
+        guard session.departedAt == nil,
+              let anchor = session.anchor,
+              let gym = store?.primaryGym
+        else { return false }
+        let start = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
+        return gym.distance(from: start) <= gym.radius
+    }
+
+    /// Lands on Progress with the spotlight pending for `day`. Never starts
+    /// a session.
+    func openProgressSpotlight(for day: Date) {
+        let start = Calendar.current.startOfDay(for: day)
+        pendingSpotlightDay = start
+        defaults.set(start, forKey: Key.spotlightDay)
+        // The success screen sits on top of the tabs; it is done anyway.
+        if let current = session, current.state.isResolved, current.isMakeUpOffer != true {
+            endSession()
+        }
+        requestedTab = .progress
+    }
+
+    func consumeRequestedTab() {
+        requestedTab = nil
+    }
+
+    /// Reads and clears the pending spotlight. For the Step 3 overlay.
+    func takePendingSpotlightDay() -> Date? {
+        let day = pendingSpotlightDay
+        pendingSpotlightDay = nil
+        defaults.removeObject(forKey: Key.spotlightDay)
+        return day
     }
 
     /// The second belt on door one.
@@ -218,6 +381,7 @@ final class GymSessionCoordinator {
         resumeSessionIfDue()
         // Door four, in effect: the evening lock catches up with the clock.
         reconcileWindDown()
+        evaluateVisits()
         openPendingSkipScreenIfNeeded()
         offerMissedGymDayIfNeeded()
         Task { await health.fetchNewWorkouts() }
@@ -600,43 +764,50 @@ final class GymSessionCoordinator {
         store?.record(.gymArrivalCandidate, sessionID: current.id)
     }
 
-    /// Confirmed. This is the moment the whole product exists to reach.
+    /// Arrived. The apps come back without the user touching anything.
     ///
-    /// Everything happens without the user touching anything: the visit is
-    /// recorded, the apps come back, and one notification says so. No "tap to
-    /// unlock", no reopening GymLock, no proving anything further.
-    func confirmArrival() {
+    /// Arriving is a gym visit, not the workout: the day counts once the
+    /// workout is done (FLOW, Flow 3), which the visit tracker settles. The
+    /// arrival is recorded now as a visit that does not count yet.
+    ///
+    /// `manual` is "I'm here": time at the gym can't be measured, so only
+    /// Apple Health or a camera photo taken after it can count the day.
+    func confirmArrival(manual: Bool = false, at now: Date = Date()) {
         guard var current = session, current.state.isLive else { return }
         guard !current.gymArrivalVerified else { return }
 
-        let now = Date()
+        let timeCounts = !manual && !homeIsInsideGym(current)
         current.arrivedAt = now
         current.gymArrivalVerified = true
         current.hadArrivalTrouble = false
         current.state = .arrived
         session = current
 
-        // Showing up is the outcome. A workout, if Health ever reports one,
-        // attaches to this same record later rather than creating a second one.
-        store?.log.record(
-            SessionOutcome(date: now, kind: .showedUp, sessionID: current.id, countsOn: current.day)
+        let outcome = SessionOutcome(
+            date: now, kind: .showedUp, sessionID: current.id, countsOn: current.day, proof: .unproven
         )
-        store?.record(.gymArrivalVerified, sessionID: current.id)
+        store?.log.record(outcome)
+        store?.record(.gymArrivalVerified, sessionID: current.id, detail: manual ? "I'm here" : nil)
 
         releaseShield(sessionID: current.id)
+        // A visit never lifts a night lock: if tonight's window is open, it
+        // takes the shield straight back (FLOW, the night lock).
+        reconcileWindDown(now: now)
         location.endSession()
 
         Haptics.commit()
         persist()
 
-        Task { [notifier] in
-            await notifier.cancelDeadlineReminder()
-            await notifier.sendArrival()
-        }
+        Task { [notifier] in await notifier.cancelDeadlineReminder() }
 
-        // A workout may already be sitting in Health from an earlier arrival
-        // this morning; check once rather than waiting for the observer.
-        Task { await matchWorkoutForCurrentSession() }
+        beginVisit(
+            outcomeID: outcome.id,
+            sessionID: current.id,
+            countsOn: current.day,
+            arrivedAt: now,
+            timeCounts: timeCounts,
+            manualAt: manual ? now : nil
+        )
     }
 
     /// Detection failed for technical reasons.
@@ -675,8 +846,9 @@ final class GymSessionCoordinator {
     /// while standing in their gym must have a way forward that does not depend
     /// on satellite reception.
     func confirmArrivalManually() {
+        // First, so the monitor's own callback finds the arrival already made.
+        confirmArrival(manual: true)
         arrival.acceptManualConfirmation()
-        confirmArrival()
     }
 
     /// Gives up on confirming and releases the apps without crediting a visit.
@@ -733,12 +905,19 @@ final class GymSessionCoordinator {
     private func attach(_ workout: DetectedWorkout) {
         guard let store else { return }
 
+        // A gym visit decides for itself whether this proves the workout.
+        visits.add([workout], now: Date())
+        evaluateVisits()
+
         // The live session first, then today's completed one. Nothing older is
         // considered: a workout from three days ago is not evidence about today.
         if var current = session,
            let window = current.workoutMatchWindow,
            window.contains(workout.startedAt) || window.contains(workout.endedAt) {
             guard !current.workoutDetected else { return }
+            // At the gym, only a workout that proves it is shown as detected.
+            if let arrivedAt = current.arrivedAt,
+               !WorkoutRules.healthQualifies(workout, arrivedAt: arrivedAt) { return }
 
             current.workoutDetected = true
             current.detectedWorkout = workout
@@ -753,7 +932,9 @@ final class GymSessionCoordinator {
         // A session that already closed this morning.
         // Found by when it was written, not the day it counts on: a visit
         // after midnight still belongs to the workout that follows it.
+        // Gym visits were settled above; this is for home workouts.
         guard let todays = store.log.outcome(recordedOn: workout.startedAt),
+              todays.kind != .showedUp,
               !todays.workoutDetected,
               let sessionID = todays.sessionID
         else { return }
@@ -1139,14 +1320,26 @@ final class GymSessionCoordinator {
         store.record(.cantToday, sessionID: offer.id, detail: "skip screen offered")
     }
 
-    /// Acts on a tapped "pick a day" notice.
+    /// Acts on a tapped non-alarm notification: "pick a day" and "you left
+    /// after" open the skip screen for their day; the workout-done line lands
+    /// on Progress. None of them ever starts a session.
     func openPendingSkipScreenIfNeeded() {
-        guard let store, !isSessionLive,
-              let entry = store.pendingNotificationRoute,
-              case let .missed(day) = entry.route
-        else { return }
-        _ = store.takePendingNotificationRoute()
-        openSkipScreen(for: day)
+        guard let store, let entry = store.pendingNotificationRoute else { return }
+        switch entry.route {
+        case let .workoutDone(day):
+            _ = store.takePendingNotificationRoute()
+            openProgressSpotlight(for: day)
+        case let .missed(day), let .leftEarly(day):
+            // A finished morning still on screen gives way.
+            if let current = session, current.state.isResolved, current.isMakeUpOffer != true {
+                endSession()
+            }
+            guard !isSessionLive else { return }
+            _ = store.takePendingNotificationRoute()
+            openSkipScreen(for: day)
+        default:
+            break
+        }
     }
 
     /// The phone was off and the alarm never rang (FLOW, Flow 1 edge cases):
@@ -1535,6 +1728,8 @@ final class GymSessionCoordinator {
     func endSession(clearingAnchor: Bool = true, keepingReminders: Bool = false) {
         ticker?.cancel()
         ticker = nil
+        // A later arrival is then a visit with no alarm.
+        arrival.endWatching()
 
         // No morning ends with the alarm still going.
         ringer.stop()
@@ -1660,6 +1855,7 @@ final class GymSessionCoordinator {
     }
 
     private func tick() {
+        evaluateVisits()
         guard var current = session else {
             ticker?.cancel()
             ticker = nil
@@ -1751,6 +1947,24 @@ final class GymSessionCoordinator {
 
     /// Forgets which days were offered after the phone was off, and starts
     /// the check from `since`.
+    func debugBeginVisit(
+        arrivedAt: Date,
+        countsOn: Date,
+        timeCounts: Bool = true,
+        manualAt: Date? = nil
+    ) -> GymVisit {
+        let outcome = SessionOutcome(date: arrivedAt, kind: .showedUp, countsOn: countsOn, proof: .unproven)
+        store?.log.record(outcome)
+        return beginVisit(
+            outcomeID: outcome.id,
+            sessionID: nil,
+            countsOn: countsOn,
+            arrivedAt: arrivedAt,
+            timeCounts: timeCounts,
+            manualAt: manualAt
+        )
+    }
+
     func debugResetMissedDayCheck(since: Date) {
         defaults.removeObject(forKey: Key.offeredMissedDays)
         defaults.set(since, forKey: Key.missedCheckSince)

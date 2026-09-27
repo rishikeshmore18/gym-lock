@@ -94,6 +94,17 @@ extension GymSessionCoordinator {
         case runningLateTwice
         case phoneWasOffOnGymDay
 
+        // At the gym (FLOW items 3, 10, 11, 13, 14, 20).
+        case arriveStay20
+        case arriveLeaveAt12
+        case stepOutThreeMinutes
+        case healthWorkout22
+        case handTypedWorkout
+        case unplannedVisit
+        case visitInSleepHours
+        case imHereCameraPhoto
+        case tapWorkoutDoneNotification
+
         // Sound: the ringer and the fallback chain.
         case ringerStart
         case ringerEscalated
@@ -143,6 +154,10 @@ extension GymSessionCoordinator {
                  .ignoreAlarmUntilDeadline, .runningLate30, .runningLateNearBedtime,
                  .runningLateTwice, .phoneWasOffOnGymDay:
                 "alarm rules"
+            case .arriveStay20, .arriveLeaveAt12, .stepOutThreeMinutes, .healthWorkout22,
+                 .handTypedWorkout, .unplannedVisit, .visitInSleepHours,
+                 .imHereCameraPhoto, .tapWorkoutDoneNotification:
+                "at the gym"
             case .ringerStart, .ringerEscalated, .ringerStop,
                  .ringerCeiling, .customSongMissing, .customSongProtected:
                 "sound"
@@ -212,6 +227,15 @@ extension GymSessionCoordinator {
             case .runningLateNearBedtime: "running late near bedtime"
             case .runningLateTwice: "running late twice"
             case .phoneWasOffOnGymDay: "phone was off on a gym day"
+            case .arriveStay20: "arrive, stay 20 min"
+            case .arriveLeaveAt12: "arrive, leave at 12 min"
+            case .stepOutThreeMinutes: "step out for 3 min"
+            case .healthWorkout22: "Health workout 22 min"
+            case .handTypedWorkout: "hand-typed workout"
+            case .unplannedVisit: "unplanned Saturday visit"
+            case .visitInSleepHours: "visit at 23:30 in sleep hours"
+            case .imHereCameraPhoto: "I'm here + camera photo"
+            case .tapWorkoutDoneNotification: "tap the workout-done notification"
             case .ringerStart: "ringer: start"
             case .ringerEscalated: "ringer: jump to full volume"
             case .ringerStop: "ringer: stop"
@@ -222,7 +246,7 @@ extension GymSessionCoordinator {
         }
 
         static var sections: [String] {
-            ["alarm rules", "sleep and night lock", "week rules", "notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
+            ["at the gym", "alarm rules", "sleep and night lock", "week rules", "notification taps", "doors", "locks", "sound", "flow", "screen time", "arrival", "health", "fallbacks"]
         }
     }
 
@@ -822,6 +846,97 @@ extension GymSessionCoordinator {
             Self.debugAlarmRulesResult =
                 "first open: \(first.map { _ in screen } ?? "NOT OFFERED") · second open: \(second == nil ? "nothing" : "OFFERED AGAIN") · recorded \(recorded)"
 
+        // MARK: At the gym
+        //
+        // Each step backdates an arrival and runs the real settling, so the
+        // result line says what the rules decided. All of them add to your
+        // real log.
+
+        case .arriveStay20:
+            let visit = debugFreshVisit(minutesAgo: 21)
+            debugReportVisit(visit.id, prefix: "21 min, no exit")
+
+        case .arriveLeaveAt12:
+            let visit = debugFreshVisit(minutesAgo: 20)
+            noteGymExit(at: visit.arrivedAt.addingTimeInterval(12 * 60))
+            debugReportVisit(visit.id, prefix: "left at 12 min")
+
+        case .stepOutThreeMinutes:
+            let visit = debugFreshVisit(minutesAgo: 25)
+            noteGymExit(at: visit.arrivedAt.addingTimeInterval(10 * 60))
+            noteGymEntry(at: visit.arrivedAt.addingTimeInterval(13 * 60))
+            debugReportVisit(visit.id, prefix: "out 10 to 13 min")
+
+        case .healthWorkout22:
+            // 8 minutes at the gym, not enough on its own, plus a 22 minute
+            // watch workout that started at the gym.
+            let visit = debugFreshVisit(minutesAgo: 30)
+            noteGymExit(at: visit.arrivedAt.addingTimeInterval(8 * 60))
+            debugEmitWorkout(start: visit.arrivedAt.addingTimeInterval(2 * 60), minutes: 22, handTyped: false)
+            debugReportVisit(visit.id, prefix: "8 min + 22 min in Health")
+
+        case .handTypedWorkout:
+            let visit = debugFreshVisit(minutesAgo: 30)
+            noteGymExit(at: visit.arrivedAt.addingTimeInterval(8 * 60))
+            debugEmitWorkout(start: visit.arrivedAt.addingTimeInterval(2 * 60), minutes: 45, handTyped: true)
+            debugReportVisit(visit.id, prefix: "8 min + 45 min typed by hand")
+
+        case .unplannedVisit:
+            // A visit with no alarm running, the way the permanent gym area
+            // reports it. Counts on the arrival day, planned or not.
+            endSession()
+            visits.debugClear()
+            let arrived = Date().addingTimeInterval(-21 * 60)
+            guard let visit = recordUnscheduledVisit(fromStateCheck: false, at: arrived) else {
+                Self.debugGymResult = "NOT RECORDED"
+                return
+            }
+            evaluateVisits()
+            let weekday = Weekday(rawValue: Calendar.current.component(.weekday, from: arrived))
+            let planned = weekday.map { debugStore?.plan.gymDays.contains($0) ?? false } ?? false
+            debugReportVisit(visit.id, prefix: "no alarm · \(weekday?.shortLabel ?? "?") \(planned ? "planned" : "unplanned")")
+
+        case .visitInSleepHours:
+            // A sleep window open right now, then a visit inside it.
+            endSession()
+            visits.debugClear()
+            debugEnsureShieldSelection()
+            debugSetWindDownWindow(startMinutesAgo: 30, endMinutesFromNow: 8 * 60)
+            debugReconcileWindDown()
+            let visit = debugBeginVisit(
+                arrivedAt: Date().addingTimeInterval(-21 * 60),
+                countsOn: Calendar.current.startOfDay(for: Date())
+            )
+            evaluateVisits()
+            let lock = shield.owner == .windDown && shield.isShielded ? "night lock on" : "NIGHT LOCK OFF"
+            debugReportVisit(visit.id, prefix: lock)
+
+        case .imHereCameraPhoto:
+            endSession()
+            visits.debugClear()
+            let tapped = Date().addingTimeInterval(-5 * 60)
+            let visit = debugBeginVisit(
+                arrivedAt: tapped,
+                countsOn: Calendar.current.startOfDay(for: tapped),
+                timeCounts: false,
+                manualAt: tapped
+            )
+            evaluateVisits(extraPhotos: [debugPhoto(source: .library)])
+            let afterLibrary = visits.visits.first { $0.id == visit.id }?.isCounted == true
+            evaluateVisits(extraPhotos: [debugPhoto(source: .camera)])
+            debugReportVisit(visit.id, prefix: "library photo \(afterLibrary ? "COUNTED" : "ignored")")
+
+        case .tapWorkoutDoneNotification:
+            // Through the delegate's real routing, then the same check a
+            // foreground runs. It must land on Progress and never start a
+            // session.
+            AlarmHandoff.clear()
+            let day = Calendar.current.startOfDay(for: Date())
+            let wrote = debugTap(NotificationRoute.ID.workoutDone(day: day, visitID: UUID()))
+            openPendingSkipScreenIfNeeded()
+            Self.debugGymResult =
+                "handoff \(wrote ? "WRITTEN" : "none") · tab \(requestedTab == .progress ? "progress" : "NOT PROGRESS") · spotlight \(pendingSpotlightDay == nil ? "NOT SET" : "pending") · session \(session?.state.rawValue ?? "none")"
+
         // MARK: Sound
 
         case .ringerStart:
@@ -881,6 +996,59 @@ extension GymSessionCoordinator {
                 detail: "protected track: rang \(ringer.playingSound?.label ?? "nothing")"
             )
         }
+    }
+
+    // MARK: - At the gym helpers
+
+    /// The last at-the-gym result, shown in the panel.
+    static var debugGymResult = "none"
+
+    /// A visit that arrived `minutesAgo`, with time at the gym counting.
+    private func debugFreshVisit(minutesAgo: Int) -> GymVisit {
+        endSession()
+        visits.debugClear()
+        let arrived = Date().addingTimeInterval(-Double(minutesAgo) * 60)
+        let visit = debugBeginVisit(arrivedAt: arrived, countsOn: Calendar.current.startOfDay(for: arrived))
+        evaluateVisits()
+        return visit
+    }
+
+    private func debugEmitWorkout(start: Date, minutes: Int, handTyped: Bool) {
+        let workout = DetectedWorkout(
+            activityName: "Strength Training",
+            startedAt: start,
+            endedAt: start.addingTimeInterval(Double(minutes) * 60),
+            source: handTyped ? "Health" : "Apple Watch",
+            wasUserEntered: handTyped
+        )
+        visits.add([workout], now: Date())
+        evaluateVisits()
+    }
+
+    /// A photo that only lives in memory, for the proof check.
+    private func debugPhoto(source: ProgressPhotoSource) -> ProgressPhoto {
+        ProgressPhoto(
+            id: UUID(),
+            createdAt: Date(),
+            fileName: "debug.jpg",
+            thumbnailName: "debug-thumb.jpg",
+            source: source
+        )
+    }
+
+    private func debugReportVisit(_ id: UUID, prefix: String) {
+        guard let visit = visits.visits.first(where: { $0.id == id }) else {
+            Self.debugGymResult = "\(prefix) · visit gone"
+            return
+        }
+        let counted = visit.proof.map { "counts (\($0.rawValue))" } ?? "does NOT count"
+        var notice = "no notice"
+        if let line = visit.doneLine, let at = visit.doneFireAt {
+            notice = "\"\(line)\" at \(TimeOfDay(from: at).clockString)"
+        } else if visit.shortFireAt != nil {
+            notice = "\"\(WorkoutDoneLine.shortVisit(minutes: visit.minutesBeforeLeaving))\""
+        }
+        Self.debugGymResult = "\(prefix) · \(counted) · \(notice)"
     }
 
     // MARK: - Alarm rules helpers

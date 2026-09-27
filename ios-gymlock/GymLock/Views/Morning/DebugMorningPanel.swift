@@ -21,6 +21,7 @@ struct DebugMorningPanel: View {
     @State private var weekRulesSummary = "none"
     @State private var sleepSummary = "none"
     @State private var alarmRulesSummary = "none"
+    @State private var gymSummary = "none"
 
     var body: some View {
         NavigationStack {
@@ -71,6 +72,9 @@ struct DebugMorningPanel: View {
             row("next alarm", nextAlarmLabel)
             row("handoff pending", handoffSummary)
             row("resolved today", resolvedSummary)
+            row("open gym visit", coordinator.visits.openVisit(now: Date(), calendar: .current).map { "\($0.minutesAtGym(now: Date())) min" } ?? "none")
+            row("last done line", coordinator.visits.lastLine ?? "none")
+            row("at the gym result", gymSummary)
             row("flow", store.plan.rhythm.flowMode.label)
             row("lock alarm", store.plan.rhythm.lockAlarmTime.clockString)
             row("plain wake alarm", store.plan.plainWakeAlarmEnabled ? "on" : "off")
@@ -130,6 +134,7 @@ struct DebugMorningPanel: View {
         weekRulesSummary = GymSessionCoordinator.debugWeekRulesResult
         sleepSummary = GymSessionCoordinator.debugSleepResult
         alarmRulesSummary = GymSessionCoordinator.debugAlarmRulesResult
+        gymSummary = GymSessionCoordinator.debugGymResult
     }
 
     private var ringerLabel: String {
@@ -231,6 +236,10 @@ struct DebugMorningPanel: View {
             .wakeAndGoGymDay, .goLaterGymDay, .plainWakeAlarmRings,
             .ignoreAlarmUntilDeadline, .runningLateNearBedtime,
             .runningLateTwice, .phoneWasOffOnGymDay,
+            // At the gym is judged by its result reading. Tapping the
+            // workout-done notification dismisses, so Progress shows.
+            .arriveStay20, .arriveLeaveAt12, .stepOutThreeMinutes, .healthWorkout22,
+            .handTypedWorkout, .unplannedVisit, .visitInSleepHours, .imHereCameraPhoto,
             // Every sound step is judged by the readings above, not by a
             // screen change, so the panel stays put.
             .ringerStart, .ringerEscalated, .ringerStop, .ringerCeiling,

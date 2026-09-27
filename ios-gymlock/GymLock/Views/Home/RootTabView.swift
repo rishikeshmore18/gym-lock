@@ -50,6 +50,13 @@ struct RootTabView: View {
             // a running flame, or a close button floating over it.
             if tab != .home { intro.normalizeImmediately() }
         }
+        // A notification tap asked for a tab (the workout-done line lands on
+        // Progress). The spotlight itself is a Step 3 screen.
+        .onChange(of: coordinator.requestedTab) { _, tab in
+            guard let tab else { return }
+            selection = tab
+            coordinator.consumeRequestedTab()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 // A week may have ended while the app was away; rule on it

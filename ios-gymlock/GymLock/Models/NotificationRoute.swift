@@ -43,6 +43,12 @@ enum NotificationRoute: Codable, Hashable {
     case missed(day: Date)
     /// A plain wake alarm (no lock, no session). Never an alarm route.
     case plainWake
+    /// The workout-done line (FLOW, Flow 3). Opens Progress with the
+    /// spotlight pending for that day.
+    case workoutDone(day: Date)
+    /// "you left after N min. 20 minutes makes it count." Opens the skip
+    /// screen for that day.
+    case leftEarly(day: Date)
     case unknown
 
     /// Every identifier `MorningNotifier` sends, in one place, so the sender
@@ -60,6 +66,18 @@ enum NotificationRoute: Codable, Hashable {
         /// Followed by the day key. Not session-scoped: it has to fire after
         /// the session that scheduled it has ended.
         static let missedPrefix = "gymlock.missed."
+        /// Followed by the day key and the visit id. Not session-scoped: they
+        /// fire after the session that started the visit has ended.
+        static let workoutDonePrefix = "gymlock.done."
+        static let leftEarlyPrefix = "gymlock.left."
+
+        static func workoutDone(day: Date, visitID: UUID, calendar: Calendar = .current) -> String {
+            "\(workoutDonePrefix)\(SessionResume.dayKey(for: day, calendar: calendar)).\(visitID.uuidString)"
+        }
+
+        static func leftEarly(day: Date, visitID: UUID, calendar: Calendar = .current) -> String {
+            "\(leftEarlyPrefix)\(SessionResume.dayKey(for: day, calendar: calendar)).\(visitID.uuidString)"
+        }
 
         static let sessionScoped = [departure, deadline, comeback, arrival, snooze]
     }
@@ -78,13 +96,14 @@ enum NotificationRoute: Codable, Hashable {
             return
         }
 
-        if identifier.hasPrefix(ID.missedPrefix) {
-            let key = String(identifier.dropFirst(ID.missedPrefix.count))
-            if let day = Self.day(fromKey: key) {
-                self = .missed(day: day)
-            } else {
-                self = .unknown
-            }
+        for (prefix, make) in [
+            (ID.missedPrefix, NotificationRoute.missed(day:)),
+            (ID.workoutDonePrefix, NotificationRoute.workoutDone(day:)),
+            (ID.leftEarlyPrefix, NotificationRoute.leftEarly(day:)),
+        ] where identifier.hasPrefix(prefix) {
+            // The day key is the first 10 characters after the prefix.
+            let key = String(identifier.dropFirst(prefix.count).prefix(10))
+            self = Self.day(fromKey: key).map(make) ?? .unknown
             return
         }
 

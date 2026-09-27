@@ -18,6 +18,8 @@ enum SessionEventKind: String, Codable, Hashable, CaseIterable {
     case gymArrivalCandidate
     case gymArrivalVerified
     case workoutDetected
+    /// The workout was done, so the day counts (FLOW, Flow 3).
+    case workoutCounted
     case quickWorkoutCompleted
     case rescheduled
     case cantToday
@@ -38,6 +40,7 @@ enum SessionEventKind: String, Codable, Hashable, CaseIterable {
         case .gymArrivalCandidate: "near the gym"
         case .gymArrivalVerified: "arrived at the gym"
         case .workoutDetected: "workout detected"
+        case .workoutCounted: "workout counted"
         case .quickWorkoutCompleted: "quick workout completed"
         case .rescheduled: "rescheduled"
         case .cantToday: "can't today"
@@ -117,6 +120,31 @@ struct DetectedWorkout: Codable, Hashable {
     var endedAt: Date
     /// Which app or device wrote the sample, e.g. "Apple Watch".
     var source: String
+    /// True when the workout was typed in by hand in the Health app
+    /// (`HKMetadataKeyWasUserEntered`). Never proves a workout (FLOW, Flow 3).
+    var wasUserEntered: Bool = false
+
+    init(activityName: String, startedAt: Date, endedAt: Date, source: String, wasUserEntered: Bool = false) {
+        self.activityName = activityName
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.source = source
+        self.wasUserEntered = wasUserEntered
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case activityName, startedAt, endedAt, source, wasUserEntered
+    }
+
+    /// Sessions saved before the flag existed still decode.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        activityName = try container.decode(String.self, forKey: .activityName)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decode(Date.self, forKey: .endedAt)
+        source = try container.decode(String.self, forKey: .source)
+        wasUserEntered = try container.decodeIfPresent(Bool.self, forKey: .wasUserEntered) ?? false
+    }
 
     var durationMinutes: Int {
         max(1, Int(endedAt.timeIntervalSince(startedAt) / 60))

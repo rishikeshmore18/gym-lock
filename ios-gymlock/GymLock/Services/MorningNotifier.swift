@@ -65,20 +65,28 @@ final class MorningNotifier {
 
     // MARK: - Arrival
 
-    /// The one message sent when the user is confirmed at the gym.
-    ///
-    /// This is the payoff notification, and it is exactly one line long. The
-    /// user is standing in a gym holding their phone; the correct thing for an
-    /// app to do at that moment is tell them their apps are back and then be
-    /// quiet. Five celebratory buzzes would be five reasons to keep looking at
-    /// the screen instead of training.
+    /// The one message sent when the user is confirmed at the gym. Arriving
+    /// is not the workout, so it says what makes the day count (FLOW, Flow 3).
     func sendArrival() async {
         await deliver(
             id: ID.arrival,
-            title: "you're here. \u{1F525}",
-            body: "apps unlocked. go train.",
+            title: "",
+            body: WorkoutDoneLine.arrival,
             after: 1
         )
+    }
+
+    // MARK: - At the gym
+
+    /// The workout-done line and "you left after", scheduled ahead because
+    /// iOS won't run the app on a timer. Moved by scheduling again under the
+    /// same id, withdrawn by cancelling it.
+    func scheduleGymNotice(id: String, at date: Date, body: String) async {
+        await deliver(id: id, title: "", body: body, after: max(1, date.timeIntervalSinceNow))
+    }
+
+    func cancelGymNotice(id: String) async {
+        await cancel(id)
     }
 
     // MARK: - Deadline

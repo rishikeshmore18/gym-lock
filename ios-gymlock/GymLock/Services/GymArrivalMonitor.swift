@@ -61,6 +61,17 @@ final class GymArrivalMonitor: NSObject {
     private var onCandidate: (() -> Void)?
     private var onTrouble: ((String) -> Void)?
 
+    /// Arrival with no session watching: a gym visit with no alarm (FLOW,
+    /// Flow 3). Carries whether it began from a state check (already inside
+    /// when monitoring started) rather than a real entry.
+    var onUnscheduledArrival: ((_ fromStateCheck: Bool) -> Void)?
+    /// Every region crossing after arrival, so time at the gym and leaving
+    /// can be worked out. Set once, for the life of the app.
+    var onRegionExit: ((Date) -> Void)?
+    var onRegionEntry: ((Date) -> Void)?
+    /// Whether the candidate being confirmed came from a state check.
+    private(set) var candidateFromStateCheck = false
+
     private var dwellTask: Task<Void, Never>?
     private var startedConfirmingAt: Date?
     private var confirmationDeadline: Date?
@@ -124,6 +135,10 @@ final class GymArrivalMonitor: NSObject {
 
         guard canDetectArrival else { return }
 
+        // The dwell check has to run in the background for a visit with no
+        // alarm, which the location background mode allows with Always.
+        manager.allowsBackgroundLocationUpdates = canDetectInBackground
+
         // Replace rather than add, so changing gym cannot leave the old fence
         // running and unlocking apps at a place the user no longer trains.
         disarmRegions()
@@ -163,6 +178,9 @@ final class GymArrivalMonitor: NSObject {
         self.onArrival = onArrival
         self.onTrouble = onTrouble
 
+        // An arrival noticed earlier with nobody watching must not stop this
+        // session from confirming its own.
+        if case .arrived = phase { phase = .armed }
         arm(for: gym)
 
         // The user may already be standing in the gym — they might have opened
@@ -171,6 +189,14 @@ final class GymArrivalMonitor: NSObject {
         // notice somebody who is already inside.
         manager.requestState(for: gym.region())
         manager.startUpdatingLocation()
+    }
+
+    /// Drops the session's callbacks when its morning ends, so a later
+    /// arrival is treated as a visit with no alarm. The region stays armed.
+    func endWatching() {
+        onCandidate = nil
+        onArrival = nil
+        onTrouble = nil
     }
 
     /// Restores confirmation after a relaunch that happened mid-dwell.
@@ -185,11 +211,14 @@ final class GymArrivalMonitor: NSObject {
 
     // MARK: - Confirmation
 
-    private func noteCandidate() {
+    private func noteCandidate(fromStateCheck: Bool = false) {
         guard gym != nil else { return }
         guard startedConfirmingAt == nil else { return }
+        // Already confirmed and not left since: nothing new to confirm.
+        if case .arrived = phase { return }
 
         let now = Date()
+        candidateFromStateCheck = fromStateCheck
         startedConfirmingAt = now
         confirmationDeadline = now.addingTimeInterval(ArrivalTuning.confirmationTimeout)
         phase = .confirming(since: now)
@@ -255,7 +284,11 @@ final class GymArrivalMonitor: NSObject {
         phase = .arrived
         startedConfirmingAt = nil
         confirmationDeadline = nil
-        onArrival?()
+        if let onArrival {
+            onArrival()
+        } else {
+            onUnscheduledArrival?(candidateFromStateCheck)
+        }
     }
 
     private func resetToArmed() {
@@ -293,6 +326,8 @@ final class GymArrivalMonitor: NSObject {
     #if DEBUG
     /// Debug hooks. Compiled out of release entirely.
     func debugSimulateRegionEntry() { noteCandidate() }
+    func debugSimulateExit(at date: Date = Date()) { handleExit(at: date) }
+    func debugSimulateEntry(at date: Date = Date()) { onRegionEntry?(date) }
     func debugSimulateArrival() { confirmArrival() }
     func debugSimulateDriveBy() { noteCandidate(); resetToArmed() }
     func debugSimulateTrouble() { fail("GymLock couldn't confirm your location.") }
@@ -308,7 +343,12 @@ extension GymArrivalMonitor: CLLocationManagerDelegate {
         didEnterRegion region: CLRegion
     ) {
         guard region.identifier.hasPrefix("gymlock.gym.") else { return }
-        Task { @MainActor in noteCandidate() }
+        let now = Date()
+        Task { @MainActor in
+            // A quick trip back in after arrival: the visit carries on.
+            onRegionEntry?(now)
+            noteCandidate()
+        }
     }
 
     nonisolated func locationManager(
@@ -316,9 +356,21 @@ extension GymArrivalMonitor: CLLocationManagerDelegate {
         didExitRegion region: CLRegion
     ) {
         guard region.identifier.hasPrefix("gymlock.gym.") else { return }
-        Task { @MainActor in
-            // Leaving before the dwell completed is the drive-by case.
-            if case .confirming = phase { resetToArmed() }
+        let now = Date()
+        Task { @MainActor in handleExit(at: now) }
+    }
+
+    /// Leaving before the dwell completed is the drive-by case. Leaving after
+    /// arrival is reported, so the visit can tell how long they stayed.
+    private func handleExit(at date: Date) {
+        switch phase {
+        case .confirming:
+            resetToArmed()
+        case .arrived:
+            phase = .armed
+            onRegionExit?(date)
+        default:
+            onRegionExit?(date)
         }
     }
 
@@ -329,7 +381,7 @@ extension GymArrivalMonitor: CLLocationManagerDelegate {
         for region: CLRegion
     ) {
         guard region.identifier.hasPrefix("gymlock.gym."), state == .inside else { return }
-        Task { @MainActor in noteCandidate() }
+        Task { @MainActor in noteCandidate(fromStateCheck: true) }
     }
 
     nonisolated func locationManager(

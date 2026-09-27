@@ -105,10 +105,10 @@ struct FrameAvailabilityTests {
 
     @Test("Milestone names the next uncrossed threshold")
     func milestoneNextThreshold() {
-        #expect(ShareFrameAvailability.milestoneLock(verifiedVisits: 0).requirement == "unlocks at your first verified visit")
-        #expect(ShareFrameAvailability.milestoneLock(verifiedVisits: 3).requirement == "unlocks at 5 verified visits")
+        #expect(ShareFrameAvailability.milestoneLock(verifiedVisits: 0).requirement == "unlocks at your first verified workout")
+        #expect(ShareFrameAvailability.milestoneLock(verifiedVisits: 3).requirement == "unlocks at 5 verified workouts")
         #expect(ShareFrameAvailability.milestoneLock(verifiedVisits: 3).progress == "3 of 5")
-        #expect(ShareFrameAvailability.milestoneLock(verifiedVisits: 7).requirement == "unlocks at 10 verified visits")
+        #expect(ShareFrameAvailability.milestoneLock(verifiedVisits: 7).requirement == "unlocks at 10 verified workouts")
         #expect(ShareFrameAvailability.milestoneLock(verifiedVisits: 7).progress == "7 of 10")
     }
 

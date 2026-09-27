@@ -37,7 +37,9 @@ enum ShareFrameAvailability {
 
         if hasPhoto { offered.insert(.clean) }
 
-        switch context.outcome?.kind {
+        // A gym visit that didn't count yet shares like a day with no session.
+        let kind = context.outcome.flatMap { $0.counts ? $0.kind : nil }
+        switch kind {
         case .showedUp:
             offered.insert(.showedUp)
             if context.receipt != nil { offered.insert(.receipt) }
@@ -114,7 +116,7 @@ enum ShareFrameAvailability {
         case .showedUp:
             guard !history.hasVerifiedVisit else { return nil }
             return FrameLock(
-                requirement: "unlocks the first morning GymLock verifies you at the gym",
+                requirement: "unlocks the first time GymLock verifies a workout at the gym",
                 progress: nil,
                 closeness: 0
             )
@@ -180,8 +182,8 @@ enum ShareFrameAvailability {
     static func milestoneLock(verifiedVisits: Int) -> FrameLock {
         let next = Milestone.visitThresholds.first { $0 > verifiedVisits } ?? Milestone.visitThresholds.last ?? 1
         let requirement = next == 1
-            ? "unlocks at your first verified visit"
-            : "unlocks at \(next) verified visits"
+            ? "unlocks at your first verified workout"
+            : "unlocks at \(next) verified workouts"
         return FrameLock(
             requirement: requirement,
             progress: "\(verifiedVisits) of \(next)",

@@ -49,7 +49,7 @@ struct TrainingDay: Identifiable, Hashable {
 /// GymLock was recording anything stays `neutral` — marking it as a skip would
 /// be inventing a failure that no part of the app ever witnessed.
 struct DayStatusIndex {
-    private let outcomeKinds: [Date: SessionOutcomeKind]
+    private let outcomeKinds: [Date: SessionOutcome]
     private let effortDays: Set<Date>
     private let trainingDays: Set<Weekday>
     private let today: Date
@@ -76,11 +76,11 @@ struct DayStatusIndex {
         self.trainingDays = trainingDays
         today = calendar.startOfDay(for: now)
 
-        // Later outcomes win, matching `MomentumLog.outcome(on:)`, so the two
-        // can never disagree about the same day.
-        var kinds: [Date: SessionOutcomeKind] = [:]
-        for outcome in log.outcomes {
-            kinds[outcome.countingDay(calendar: calendar)] = outcome.kind
+        // Same rule as `MomentumLog.outcome(on:)`: a counted outcome wins,
+        // otherwise the latest, so the two can never disagree about a day.
+        var kinds: [Date: SessionOutcome] = [:]
+        for day in Set(log.outcomes.map { $0.countingDay(calendar: calendar) }) {
+            kinds[day] = log.outcome(on: day, calendar: calendar)
         }
         outcomeKinds = kinds
 
@@ -126,10 +126,12 @@ struct DayStatusIndex {
     private func status(for start: Date) -> WorkoutDayStatus {
         if start > today { return .future }
 
-        if let kind = outcomeKinds[start] {
-            switch kind {
+        if let outcome = outcomeKinds[start] {
+            switch outcome.kind {
+            // Verified means the workout was done. An arrival alone is a gym
+            // visit: real effort, not the verified mark (FLOW, Flow 3).
             case .showedUp:
-                return .verified
+                return outcome.counts ? .verified : .attempted
             case .missed, .easySkip:
                 return .skipped
             // A home workout is real effort that GymLock could not verify at a

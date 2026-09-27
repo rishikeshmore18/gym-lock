@@ -134,7 +134,7 @@ This is already built, except:
           aim to be home by 23:00."
 ```
 
-**Change:** new. Today a gym visit with no alarm running isn't noticed or counted.
+**Built (`2026-09-27`):** new. Today a gym visit with no alarm running isn't noticed or counted.
 
 - **Change:** today the night lock has an on/off switch, and it starts on only if the user said in onboarding that they scroll at night. Remove the switch: it always runs on the sleep schedule's nights.
 - **Change:** today only those users are asked for a bedtime. Ask everyone for a bedtime and a wake time.
@@ -291,12 +291,12 @@ GYM DAY
    shown once per workout day, only from that notification
 ```
 
-- **Change:** today the day counts the moment you arrive. Count it when the workout is done.
-- **Change:** today any Health workout counts, even 1 minute or typed in by hand. Set a 20-minute minimum and ignore hand-typed ones.
-- **Change:** today the app stops watching the gym area once arrival is confirmed. It can't tell how long you stayed or when you left. Track both.
+- **Built (`2026-09-27`):** today the day counts the moment you arrive. Count it when the workout is done.
+- **Built (`2026-09-27`):** today any Health workout counts, even 1 minute or typed in by hand. Set a 20-minute minimum and ignore hand-typed ones.
+- **Built (`2026-09-27`):** today the app stops watching the gym area once arrival is confirmed. It can't tell how long you stayed or when you left. Track both.
 - **Change:** today the only gym notification is "you're here. 🔥 apps unlocked. go train." The workout-done notification and the spotlight are new.
 - **Built (`2026-09-26`), bug:** today tapping ANY GymLock notification counts as "I'm up" on an alarm. After a gym visit, that can lock the apps again for up to 2 hours. Only alarm notifications may start a session. The gym notification opens Progress.
-- **Change:** today "verified" in the share stickers means a GPS visit. It now means the workout was done. GPS arrivals alone become "gym visits."
+- **Built (`2026-09-27`):** today "verified" in the share stickers means a GPS visit. It now means the workout was done. GPS arrivals alone become "gym visits."
 
 ### Edge cases
 
@@ -527,7 +527,7 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 
 1. The night lock is always on for the sleep schedule's nights. Remove the on/off switch and the custom window. Ask everyone for a bedtime and wake time. Add the background Screen Time extension. A new bedtime starts tomorrow night. Sleep must be at least 5 hours.
 2. Gym and sleep never overlap on the dial. Dragging the gym into the night slides the night later, keeping its length, with travel time (≥30 min) in between, plus a short note. **(Built: `2026-09-26`)**
-3. A gym visit during sleep hours: the night lock stays on, the visit counts, and a "cost you sleep" notification is sent.
+3. A gym visit during sleep hours: the night lock stays on, the visit counts, and a "cost you sleep" notification is sent. **(Built: `2026-09-27`)**
 4. Day card: 3 gym days minimum. The night that ends on a gym morning is protected even when bedtime is after midnight. **(Built: `2026-09-26`)**
 
 **Alarms**
@@ -540,11 +540,11 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 
 **At the gym**
 
-10. The day counts when the workout is done, not on arrival: an Apple Health workout of 20+ min (not typed by hand, started at the gym), or 20 min at the gym. Keep checking Apple Health for 5 hours. Track time at the gym and when they leave.
+10. The day counts when the workout is done, not on arrival: an Apple Health workout of 20+ min (not typed by hand, started at the gym), or 20 min at the gym. Keep checking Apple Health for 5 hours. Track time at the gym and when they leave. **(Built: `2026-09-27`)**
 11. On arrival: "20 minutes and today counts." When the workout is done, a notification at 30 min or on leaving, built from their real numbers, which opens the Progress spotlight.
 12. Fix the bug: only alarm notifications may start a session. **(Built: `2026-09-26`)**
-13. The "verified" sticker means the workout was done. GPS arrivals alone become "gym visits."
-14. "I'm here" (GPS failed): the day counts with Apple Health or a progress photo.
+13. The "verified" sticker means the workout was done. GPS arrivals alone become "gym visits." **(Built: `2026-09-27`)**
+14. "I'm here" (GPS failed): the day counts with Apple Health or a progress photo. **(Built: `2026-09-27`)**
 
 **Skips, reschedules, home workouts**
 

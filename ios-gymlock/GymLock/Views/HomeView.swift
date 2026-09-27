@@ -248,7 +248,7 @@ struct HomeView: View {
     /// telling people off for their choice of hardware.
     @ViewBuilder
     private var thisMorningCard: some View {
-        if let outcome = store.log.outcome(), outcome.kind.preservesMomentum {
+        if let outcome = store.log.outcome(), outcome.counts {
             VStack(alignment: .leading, spacing: 14) {
                 Text("this morning")
                     .font(.system(size: 13, weight: .heavy))
@@ -417,7 +417,7 @@ struct HomeView: View {
                     .monospacedDigit()
                     .foregroundStyle(Theme.ink)
 
-                Text("gym visits this month")
+                Text("gym workouts this month")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.inkSecondary)
                     .multilineTextAlignment(.center)

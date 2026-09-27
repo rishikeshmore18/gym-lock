@@ -15,6 +15,9 @@ struct GymLockApp: App {
     /// survives the user moving between screens.
     @State private var coordinator = GymSessionCoordinator()
     @State private var alarmPlayer = AlarmSoundPlayer()
+    /// One photo store for the whole app: the Progress tab shows it, and the
+    /// gym flow listens for camera photos that prove a workout.
+    @State private var photos = ProgressPhotoStore()
 
     /// Held for the lifetime of the app: `UNUserNotificationCenter` keeps only
     /// a weak reference to its delegate.
@@ -36,7 +39,9 @@ struct GymLockApp: App {
                 .environment(store)
                 .environment(coordinator)
                 .environment(alarmPlayer)
+                .environment(photos)
                 .task {
+                    coordinator.attach(photos: photos)
                     coordinator.attach(to: store)
                     await coordinator.syncAlarms()
                 }

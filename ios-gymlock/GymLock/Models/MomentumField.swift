@@ -176,7 +176,8 @@ struct MomentumField: Equatable {
 
     /// The best thing a single day can honestly be said to have been.
     private static func dominantMark(_ outcomes: [SessionOutcome]) -> MomentumMark {
-        if outcomes.contains(where: { $0.kind == .showedUp }) { return .verified }
+        // Verified means the workout was done; a gym visit alone is not.
+        if outcomes.contains(where: \.isVerifiedWorkout) { return .verified }
         if outcomes.contains(where: { $0.kind == .homeWorkout }) { return .preserved }
         if outcomes.contains(where: { $0.kind == .missed }) { return .missed }
         return .excused

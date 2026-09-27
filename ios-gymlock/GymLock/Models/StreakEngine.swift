@@ -203,7 +203,7 @@ enum StreakEngine {
         let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
         var days: Set<Date> = []
 
-        for outcome in log.outcomes where outcome.kind.preservesMomentum {
+        for outcome in log.outcomes where outcome.counts {
             let day = outcome.countingDay(calendar: calendar)
             guard let week = weekStart(containing: day, weekCalendar: weekCalendar),
                   calendar.isDate(week, inSameDayAs: start)
@@ -223,7 +223,7 @@ enum StreakEngine {
         var daysSeen: Set<Date> = []
         var counts: [Date: Int] = [:]
 
-        for outcome in log.outcomes where outcome.kind.preservesMomentum {
+        for outcome in log.outcomes where outcome.counts {
             let day = outcome.countingDay(calendar: calendar)
             guard daysSeen.insert(day).inserted,
                   let week = weekStart(containing: day, weekCalendar: weekCalendar)

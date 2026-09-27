@@ -20,7 +20,7 @@ struct Milestone: Hashable {
     var title: String {
         switch kind {
         case let .verifiedVisits(count):
-            "\(count) VERIFIED \(count == 1 ? "VISIT" : "VISITS")"
+            "\(count) VERIFIED \(count == 1 ? "WORKOUT" : "WORKOUTS")"
         case .firstKeptWeek:
             "FIRST WEEK KEPT"
         case let .streakWeeks(weeks):
@@ -42,7 +42,7 @@ struct Milestone: Hashable {
     /// The words that follow the number, or the whole statement.
     var label: String {
         switch kind {
-        case let .verifiedVisits(count): count == 1 ? "VERIFIED VISIT" : "VERIFIED VISITS"
+        case let .verifiedVisits(count): count == 1 ? "VERIFIED WORKOUT" : "VERIFIED WORKOUTS"
         case .firstKeptWeek: "FIRST WEEK KEPT"
         case let .streakWeeks(weeks): weeks == 4 ? "FIRST MONTH" : "WEEKS STRONG"
         case .firstComeback: "FIRST COMEBACK"
@@ -87,7 +87,7 @@ struct Milestone: Hashable {
         log: MomentumLog,
         calendar: Calendar
     ) -> Milestone? {
-        let visits = log.outcomes.filter(\.kind.isVerifiedGymVisit).sorted { $0.date < $1.date }
+        let visits = log.outcomes.filter(\.isVerifiedWorkout).sorted { $0.date < $1.date }
         for threshold in visitThresholds where visits.count >= threshold {
             let reaching = visits[threshold - 1]
             if calendar.isDate(reaching.countingDay(calendar: calendar), inSameDayAs: referenceDay) {

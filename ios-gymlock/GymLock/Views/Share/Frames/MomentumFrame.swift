@@ -65,7 +65,7 @@ struct MomentumFrame: View {
         }
         if context.verifiedVisitsThisWeek >= 1 {
             let count = context.verifiedVisitsThisWeek
-            return "\(count) gym \(count == 1 ? "visit" : "visits") this week"
+            return "\(count) gym \(count == 1 ? "workout" : "workouts") this week"
         }
         return context.dateFact
     }

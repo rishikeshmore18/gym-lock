@@ -32,7 +32,7 @@ enum ShareContextBuilder {
             ?? calendar.startOfDay(for: referenceDay)
         let sessionDays = StreakEngine.sessionDays(in: log, weekStarting: weekStart, calendar: calendar)
         let verifiedThisWeek = distinctDays(in: log, weekStarting: weekStart, calendar: calendar) {
-            $0.kind.isVerifiedGymVisit
+            $0.isVerifiedWorkout
         }
         let quick20ThisWeek = distinctDays(in: log, weekStarting: weekStart, calendar: calendar) {
             $0.kind == .homeWorkout
@@ -43,7 +43,7 @@ enum ShareContextBuilder {
         let dayStart = calendar.startOfDay(for: referenceDay)
         let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? referenceDay
         let verifiedTotal = log.outcomes.filter {
-            $0.kind.isVerifiedGymVisit && $0.countingDay(calendar: calendar) < dayEnd
+            $0.isVerifiedWorkout && $0.countingDay(calendar: calendar) < dayEnd
         }.count
 
         let comeback = comeback(on: referenceDay, log: log, calendar: calendar)
@@ -95,7 +95,7 @@ enum ShareContextBuilder {
         weeklyGoal: Int,
         calendar: Calendar
     ) -> FrameHistory {
-        let verified = log.outcomes.filter(\.kind.isVerifiedGymVisit).count
+        let verified = log.outcomes.filter(\.isVerifiedWorkout).count
         return FrameHistory(
             hasVerifiedVisit: verified > 0,
             hasReceipt: hasEverHadReceipt(events: events, calendar: calendar),
@@ -127,7 +127,7 @@ enum ShareContextBuilder {
     static func hasEverKeptWeek(log: MomentumLog, weeklyGoal: Int, calendar: Calendar) -> Bool {
         let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
         var daysByWeek: [Date: Set<Date>] = [:]
-        for outcome in log.outcomes where outcome.kind.preservesMomentum {
+        for outcome in log.outcomes where outcome.counts {
             let day = outcome.countingDay(calendar: calendar)
             guard let week = StreakEngine.weekStart(containing: day, weekCalendar: weekCalendar) else { continue }
             daysByWeek[week, default: []].insert(day)
@@ -213,7 +213,7 @@ enum ShareContextBuilder {
 
     static func preservesMomentum(on day: Date, log: MomentumLog, calendar: Calendar) -> Bool {
         log.outcomes.contains {
-            calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) && $0.kind.preservesMomentum
+            calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) && $0.counts
         }
     }
 
@@ -222,7 +222,7 @@ enum ShareContextBuilder {
     /// workout the same evening is not a miss.
     static func isMiss(on day: Date, log: MomentumLog, calendar: Calendar) -> Bool {
         let outcomes = log.outcomes.filter { calendar.isDate($0.countingDay(calendar: calendar), inSameDayAs: day) }
-        guard !outcomes.contains(where: \.kind.preservesMomentum) else { return false }
+        guard !outcomes.contains(where: \.counts) else { return false }
         return outcomes.contains { $0.kind == .missed || $0.kind == .technicalFailure }
     }
 
@@ -256,7 +256,7 @@ enum ShareContextBuilder {
         )
 
         let verified = store.log.outcomes.filter {
-            $0.kind.isVerifiedGymVisit && $0.countingDay(calendar: calendar) < windowEnd
+            $0.isVerifiedWorkout && $0.countingDay(calendar: calendar) < windowEnd
         }.count
 
         // The before-picture is only worth an inset when it is not the very
