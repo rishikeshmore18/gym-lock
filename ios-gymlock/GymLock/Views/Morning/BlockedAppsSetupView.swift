@@ -55,6 +55,7 @@ struct BlockedAppsSetupView: View {
             guard let real = shield as? FamilyControlsShieldService else { return }
             real.updateSelection(new)
             store.hasConfiguredBlockedApps = real.hasSelection
+            coordinator.reconcileWindDown()
         }
         #endif
     }

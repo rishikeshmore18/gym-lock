@@ -7,10 +7,59 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A40000000000000000000001 /* GymLockScreenTimeShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* GymLockScreenTimeShared.swift */; };
+		A40000000000000000000002 /* GymLockFamilySelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* GymLockFamilySelection.swift */; };
+		A40000000000000000000003 /* GymLockScreenTimeShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* GymLockScreenTimeShared.swift */; };
+		A40000000000000000000004 /* GymLockFamilySelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* GymLockFamilySelection.swift */; };
+		A40000000000000000000005 /* GymLockNightMonitorExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000003 /* GymLockNightMonitorExtension.swift */; };
+		A40000000000000000000006 /* GymLockScreenTimeShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* GymLockScreenTimeShared.swift */; };
+		A40000000000000000000007 /* GymLockShieldActionExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000006 /* GymLockShieldActionExtension.swift */; };
+		A40000000000000000000008 /* GymLockScreenTimeShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* GymLockScreenTimeShared.swift */; };
+		A40000000000000000000009 /* GymLockShieldConfigExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000009 /* GymLockShieldConfigExtension.swift */; };
+		A4000000000000000000000A /* GymLockNightMonitor.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* GymLockNightMonitor.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
+		A4000000000000000000000B /* GymLockShieldAction.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* GymLockShieldAction.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
+		A4000000000000000000000C /* GymLockShieldConfig.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* GymLockShieldConfig.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
 		XXC41916AC08E635BA2E2DXX /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = XX30BBD55DD0E71B396877XX /* Lottie */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		A5000000000000000000000A /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A4000000000000000000000A /* GymLockNightMonitor.appex in Embed App Extensions */,
+				A4000000000000000000000B /* GymLockShieldAction.appex in Embed App Extensions */,
+				A4000000000000000000000C /* GymLockShieldConfig.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXContainerItemProxy section */
+		A90000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A60000000000000000000001;
+			remoteInfo = GymLockNightMonitor;
+		};
+		A90000000000000000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A60000000000000000000002;
+			remoteInfo = GymLockShieldAction;
+		};
+		A90000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A60000000000000000000003;
+			remoteInfo = GymLockShieldConfig;
+		};
 		105FC58A2E9EAD3200EA8BCF /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
@@ -28,6 +77,20 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A10000000000000000000001 /* GymLockNightMonitor.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GymLockNightMonitor.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000002 /* GymLockShieldAction.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GymLockShieldAction.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000003 /* GymLockShieldConfig.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GymLockShieldConfig.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A30000000000000000000001 /* GymLockScreenTimeShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymLockScreenTimeShared.swift; sourceTree = "<group>"; };
+		A30000000000000000000002 /* GymLockFamilySelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymLockFamilySelection.swift; sourceTree = "<group>"; };
+		A30000000000000000000003 /* GymLockNightMonitorExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymLockNightMonitorExtension.swift; sourceTree = "<group>"; };
+		A30000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A30000000000000000000005 /* GymLockNightMonitor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GymLockNightMonitor.entitlements; sourceTree = "<group>"; };
+		A30000000000000000000006 /* GymLockShieldActionExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymLockShieldActionExtension.swift; sourceTree = "<group>"; };
+		A30000000000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A30000000000000000000008 /* GymLockShieldAction.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GymLockShieldAction.entitlements; sourceTree = "<group>"; };
+		A30000000000000000000009 /* GymLockShieldConfigExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymLockShieldConfigExtension.swift; sourceTree = "<group>"; };
+		A3000000000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A3000000000000000000000B /* GymLockShieldConfig.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GymLockShieldConfig.entitlements; sourceTree = "<group>"; };
 		105FC57A2E9EAD3100EA8BCF /* GymLock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GymLock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5892E9EAD3200EA8BCF /* GymLockTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GymLockTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5932E9EAD3200EA8BCF /* GymLockUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GymLockUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -52,6 +115,27 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A50000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000008 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		105FC5772E9EAD3100EA8BCF /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -77,10 +161,53 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		A20000000000000000000001 /* ScreenTimeShared */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000001 /* GymLockScreenTimeShared.swift */,
+				A30000000000000000000002 /* GymLockFamilySelection.swift */,
+			);
+			path = ScreenTimeShared;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000002 /* GymLockNightMonitor */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000003 /* GymLockNightMonitorExtension.swift */,
+				A30000000000000000000004 /* Info.plist */,
+				A30000000000000000000005 /* GymLockNightMonitor.entitlements */,
+			);
+			path = GymLockNightMonitor;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000003 /* GymLockShieldAction */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000006 /* GymLockShieldActionExtension.swift */,
+				A30000000000000000000007 /* Info.plist */,
+				A30000000000000000000008 /* GymLockShieldAction.entitlements */,
+			);
+			path = GymLockShieldAction;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000004 /* GymLockShieldConfig */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000009 /* GymLockShieldConfigExtension.swift */,
+				A3000000000000000000000A /* Info.plist */,
+				A3000000000000000000000B /* GymLockShieldConfig.entitlements */,
+			);
+			path = GymLockShieldConfig;
+			sourceTree = "<group>";
+		};
 		105FC5712E9EAD3100EA8BCF = {
 			isa = PBXGroup;
 			children = (
 				105FC57C2E9EAD3100EA8BCF /* GymLock */,
+				A20000000000000000000001 /* ScreenTimeShared */,
+				A20000000000000000000002 /* GymLockNightMonitor */,
+				A20000000000000000000003 /* GymLockShieldAction */,
+				A20000000000000000000004 /* GymLockShieldConfig */,
 				105FC58C2E9EAD3200EA8BCF /* GymLockTests */,
 				105FC5962E9EAD3200EA8BCF /* GymLockUITests */,
 				105FC57B2E9EAD3100EA8BCF /* Products */,
@@ -91,6 +218,9 @@
 			isa = PBXGroup;
 			children = (
 				105FC57A2E9EAD3100EA8BCF /* GymLock.app */,
+				A10000000000000000000001 /* GymLockNightMonitor.appex */,
+				A10000000000000000000002 /* GymLockShieldAction.appex */,
+				A10000000000000000000003 /* GymLockShieldConfig.appex */,
 				105FC5892E9EAD3200EA8BCF /* GymLockTests.xctest */,
 				105FC5932E9EAD3200EA8BCF /* GymLockUITests.xctest */,
 			);
@@ -100,6 +230,63 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A60000000000000000000001 /* GymLockNightMonitor */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000001 /* Build configuration list for PBXNativeTarget "GymLockNightMonitor" */;
+			buildPhases = (
+				A50000000000000000000001 /* Sources */,
+				A50000000000000000000002 /* Frameworks */,
+				A50000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GymLockNightMonitor;
+			packageProductDependencies = (
+			);
+			productName = GymLockNightMonitor;
+			productReference = A10000000000000000000001 /* GymLockNightMonitor.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		A60000000000000000000002 /* GymLockShieldAction */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000002 /* Build configuration list for PBXNativeTarget "GymLockShieldAction" */;
+			buildPhases = (
+				A50000000000000000000004 /* Sources */,
+				A50000000000000000000005 /* Frameworks */,
+				A50000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GymLockShieldAction;
+			packageProductDependencies = (
+			);
+			productName = GymLockShieldAction;
+			productReference = A10000000000000000000002 /* GymLockShieldAction.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		A60000000000000000000003 /* GymLockShieldConfig */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000003 /* Build configuration list for PBXNativeTarget "GymLockShieldConfig" */;
+			buildPhases = (
+				A50000000000000000000007 /* Sources */,
+				A50000000000000000000008 /* Frameworks */,
+				A50000000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GymLockShieldConfig;
+			packageProductDependencies = (
+			);
+			productName = GymLockShieldConfig;
+			productReference = A10000000000000000000003 /* GymLockShieldConfig.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		105FC5792E9EAD3100EA8BCF /* GymLock */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 105FC59D2E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "GymLock" */;
@@ -107,10 +294,14 @@
 				105FC5762E9EAD3100EA8BCF /* Sources */,
 				105FC5772E9EAD3100EA8BCF /* Frameworks */,
 				105FC5782E9EAD3100EA8BCF /* Resources */,
+				A5000000000000000000000A /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AA0000000000000000000001 /* PBXTargetDependency */,
+				AA0000000000000000000002 /* PBXTargetDependency */,
+				AA0000000000000000000003 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				105FC57C2E9EAD3100EA8BCF /* GymLock */,
@@ -179,8 +370,21 @@
 				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					A60000000000000000000001 = {
+						CreatedOnToolsVersion = 27.0;
+						ProvisioningStyle = Automatic;
+					};
+					A60000000000000000000002 = {
+						CreatedOnToolsVersion = 27.0;
+						ProvisioningStyle = Automatic;
+					};
+					A60000000000000000000003 = {
+						CreatedOnToolsVersion = 27.0;
+						ProvisioningStyle = Automatic;
+					};
 					105FC5792E9EAD3100EA8BCF = {
 						CreatedOnToolsVersion = 26.0;
+						ProvisioningStyle = Automatic;
 					};
 					105FC5882E9EAD3200EA8BCF = {
 						CreatedOnToolsVersion = 26.0;
@@ -207,6 +411,9 @@
 			projectRoot = "";
 			targets = (
 				105FC5792E9EAD3100EA8BCF /* GymLock */,
+				A60000000000000000000001 /* GymLockNightMonitor */,
+				A60000000000000000000002 /* GymLockShieldAction */,
+				A60000000000000000000003 /* GymLockShieldConfig */,
 				105FC5882E9EAD3200EA8BCF /* GymLockTests */,
 				105FC5922E9EAD3200EA8BCF /* GymLockUITests */,
 			);
@@ -217,6 +424,27 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A50000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		105FC5782E9EAD3100EA8BCF /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -241,10 +469,40 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A50000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40000000000000000000003 /* GymLockScreenTimeShared.swift in Sources */,
+				A40000000000000000000004 /* GymLockFamilySelection.swift in Sources */,
+				A40000000000000000000005 /* GymLockNightMonitorExtension.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40000000000000000000006 /* GymLockScreenTimeShared.swift in Sources */,
+				A40000000000000000000007 /* GymLockShieldActionExtension.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40000000000000000000008 /* GymLockScreenTimeShared.swift in Sources */,
+				A40000000000000000000009 /* GymLockShieldConfigExtension.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		105FC5762E9EAD3100EA8BCF /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A40000000000000000000001 /* GymLockScreenTimeShared.swift in Sources */,
+				A40000000000000000000002 /* GymLockFamilySelection.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -265,6 +523,21 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		AA0000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A60000000000000000000001 /* GymLockNightMonitor */;
+			targetProxy = A90000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		AA0000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A60000000000000000000002 /* GymLockShieldAction */;
+			targetProxy = A90000000000000000000002 /* PBXContainerItemProxy */;
+		};
+		AA0000000000000000000003 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A60000000000000000000003 /* GymLockShieldConfig */;
+			targetProxy = A90000000000000000000003 /* PBXContainerItemProxy */;
+		};
 		105FC58B2E9EAD3200EA8BCF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 105FC5792E9EAD3100EA8BCF /* GymLock */;
@@ -278,6 +551,174 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		A70000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = GymLockNightMonitor/GymLockNightMonitor.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZSNCA283H6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GymLockNightMonitor/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.b0c3y2ngorbbs63iwva1i.GymLockNightMonitor;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A70000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = GymLockNightMonitor/GymLockNightMonitor.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZSNCA283H6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GymLockNightMonitor/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.b0c3y2ngorbbs63iwva1i.GymLockNightMonitor;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A70000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = GymLockShieldAction/GymLockShieldAction.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZSNCA283H6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GymLockShieldAction/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.b0c3y2ngorbbs63iwva1i.GymLockShieldAction;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A70000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = GymLockShieldAction/GymLockShieldAction.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZSNCA283H6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GymLockShieldAction/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.b0c3y2ngorbbs63iwva1i.GymLockShieldAction;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A70000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = GymLockShieldConfig/GymLockShieldConfig.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZSNCA283H6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GymLockShieldConfig/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.b0c3y2ngorbbs63iwva1i.GymLockShieldConfig;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A70000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = GymLockShieldConfig/GymLockShieldConfig.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZSNCA283H6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GymLockShieldConfig/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.b0c3y2ngorbbs63iwva1i.GymLockShieldConfig;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		105FC59B2E9EAD3200EA8BCF /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -313,7 +754,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = ZSNCA283H6;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -377,7 +818,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = ZSNCA283H6;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -407,7 +848,7 @@
 				CODE_SIGN_ENTITLEMENTS = GymLock/GymLock.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = ZSNCA283H6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
@@ -454,7 +895,7 @@
 				CODE_SIGN_ENTITLEMENTS = GymLock/GymLock.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = ZSNCA283H6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
@@ -580,6 +1021,33 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A80000000000000000000001 /* Build configuration list for PBXNativeTarget "GymLockNightMonitor" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A70000000000000000000001 /* Debug */,
+				A70000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A80000000000000000000002 /* Build configuration list for PBXNativeTarget "GymLockShieldAction" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A70000000000000000000003 /* Debug */,
+				A70000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A80000000000000000000003 /* Build configuration list for PBXNativeTarget "GymLockShieldConfig" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A70000000000000000000005 /* Debug */,
+				A70000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		105FC5752E9EAD3100EA8BCF /* Build configuration list for PBXProject "GymLock" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

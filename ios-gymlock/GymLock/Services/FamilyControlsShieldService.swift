@@ -38,21 +38,22 @@ final class FamilyControlsShieldService: AppShielding {
 
     private let ledgerStore: ShieldLedgerStore
     private let defaults: UserDefaults
-    private let selectionKey = "gymlock.familyActivitySelection"
 
     #if canImport(FamilyControls)
     /// A named store, so the same shield can be found and lifted by a future
     /// launch or by a monitor extension. The default unnamed store would be
     /// harder to reason about once an extension is added.
-    private let store = ManagedSettingsStore(named: .gymLock)
+    private let store = ManagedSettingsStore(named: GymLockScreenTime.storeName)
 
     /// The user's chosen apps and categories, as opaque tokens.
     private(set) var selection = FamilyActivitySelection()
     #endif
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults suppliedDefaults: UserDefaults? = nil) {
+        let defaults = suppliedDefaults ?? GymLockScreenTime.defaults
         self.defaults = defaults
         ledgerStore = ShieldLedgerStore(defaults: defaults)
+        migrateLegacyStateIfNeeded()
         loadSelection()
         isShielded = ledgerStore.current != nil
         refreshAuthorization()
@@ -64,17 +65,17 @@ final class FamilyControlsShieldService: AppShielding {
 
     func refreshAuthorization() {
         #if canImport(FamilyControls)
-        switch AuthorizationCenter.shared.authorizationStatus {
-        case .approved:
+        let status = AuthorizationCenter.shared.authorizationStatus
+        if status == .approved {
             authorization = .approved
-        case .denied:
+        } else if #available(iOS 26.4, *), status == .approvedWithDataAccess {
+            authorization = .approved
+        } else if status == .denied {
             // Denied after having been approved is a revocation, and the two
             // want different copy: one is a first refusal, the other is
             // something the user turned off in Settings and may not remember.
             authorization = hasSelection ? .revoked : .denied
-        case .notDetermined:
-            authorization = .notDetermined
-        @unknown default:
+        } else {
             authorization = .notDetermined
         }
         #else
@@ -116,9 +117,7 @@ final class FamilyControlsShieldService: AppShielding {
 
         // `FamilyActivitySelection` is Codable and the tokens stay opaque
         // through the round trip. They are never logged or transmitted.
-        if let data = try? JSONEncoder().encode(new) {
-            defaults.set(data, forKey: selectionKey)
-        }
+        GymLockFamilySelection.save(new, to: defaults)
 
         // A live shield should immediately reflect a changed list rather than
         // waiting for the next morning.
@@ -128,14 +127,8 @@ final class FamilyControlsShieldService: AppShielding {
 
     private func loadSelection() {
         #if canImport(FamilyControls)
-        guard let data = defaults.data(forKey: selectionKey),
-              let decoded = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data)
-        else { return }
-
-        selection = decoded
-        selectionCount = decoded.applicationTokens.count
-            + decoded.categoryTokens.count
-            + decoded.webDomainTokens.count
+        selection = GymLockFamilySelection.load(from: defaults)
+        selectionCount = GymLockFamilySelection.count(selection)
         #endif
     }
 
@@ -144,10 +137,12 @@ final class FamilyControlsShieldService: AppShielding {
     func apply(until deadline: Date, sessionID: UUID?, owner: ShieldOwner) {
         guard authorization == .approved, hasSelection else { return }
 
-        let capped = min(
-            deadline,
-            Date().addingTimeInterval(ShieldPolicy.absoluteMaximumHours * 3600)
-        )
+        let effectiveDeadline = owner == .gymSession
+            ? min(deadline, Date().addingTimeInterval(ShieldPolicy.absoluteMaximumHours * 3600))
+            : deadline
+        let activityName = owner == .gymSession
+            ? GymLockScreenTime.gymActivityName
+            : activeNightActivityName(at: Date())
 
         // The ledger is written *before* the shield goes on. If the process is
         // killed between the two, the failsafe still knows a lock exists and
@@ -156,14 +151,17 @@ final class FamilyControlsShieldService: AppShielding {
         ledgerStore.save(
             ShieldLedger(
                 appliedAt: Date(),
-                failsafeDeadline: capped,
+                failsafeDeadline: effectiveDeadline,
                 sessionID: sessionID,
-                owner: owner
+                owner: owner,
+                activityName: activityName
             )
         )
 
         applyTokens()
-        startMonitoringWindow(until: capped)
+        if owner == .gymSession {
+            startMonitoringWindow(until: effectiveDeadline)
+        }
         isShielded = true
     }
 
@@ -211,7 +209,8 @@ final class FamilyControlsShieldService: AppShielding {
                 appliedAt: ledger.appliedAt,
                 failsafeDeadline: Date().addingTimeInterval(-1),
                 sessionID: ledger.sessionID,
-                owner: ledger.owner
+                owner: ledger.owner,
+                activityName: ledger.activityName
             )
         )
     }
@@ -221,17 +220,7 @@ final class FamilyControlsShieldService: AppShielding {
 
     private func applyTokens() {
         #if canImport(FamilyControls)
-        store.shield.applications = selection.applicationTokens.isEmpty
-            ? nil
-            : selection.applicationTokens
-
-        store.shield.applicationCategories = selection.categoryTokens.isEmpty
-            ? nil
-            : .specific(selection.categoryTokens)
-
-        store.shield.webDomains = selection.webDomainTokens.isEmpty
-            ? nil
-            : selection.webDomainTokens
+        GymLockFamilySelection.apply(selection, to: store)
         #endif
     }
 
@@ -265,25 +254,130 @@ final class FamilyControlsShieldService: AppShielding {
         )
 
         let center = DeviceActivityCenter()
-        center.stopMonitoring([.gymWindow])
-        try? center.startMonitoring(.gymWindow, during: schedule)
+        let activity = DeviceActivityName(GymLockScreenTime.gymActivityName)
+        center.stopMonitoring([activity])
+        try? center.startMonitoring(activity, during: schedule)
         #endif
     }
 
     private func stopMonitoringWindow() {
         #if canImport(FamilyControls)
-        DeviceActivityCenter().stopMonitoring([.gymWindow])
+        DeviceActivityCenter().stopMonitoring([DeviceActivityName(GymLockScreenTime.gymActivityName)])
         #endif
     }
-}
 
-#if canImport(FamilyControls)
-extension ManagedSettingsStore.Name {
-    /// The single named store GymLock owns.
-    static let gymLock = Self("gymlock")
-}
+    func syncNightActivities(plan: MorningPlan, now: Date) {
+        #if canImport(FamilyControls)
+        guard authorization == .approved else { return }
 
-extension DeviceActivityName {
-    static let gymWindow = Self("gymlock.window")
+        let center = DeviceActivityCenter()
+        let calendar = Calendar.current
+        let rhythm = plan.scheduledRhythm
+        var desired = Set<DeviceActivityName>()
+
+        for night in plan.effectiveSleepDays(for: rhythm) {
+            let activity = DeviceActivityName(GymLockScreenTime.nightActivityName(for: night.rawValue))
+            let endDay = SleepSchedule.crossesMidnight(
+                bedtime: rhythm.bedtime,
+                wake: rhythm.wakeTime
+            ) ? night.next : night
+            let schedule = DeviceActivitySchedule(
+                intervalStart: components(
+                    weekday: night.rawValue,
+                    time: rhythm.bedtime,
+                    calendar: calendar
+                ),
+                intervalEnd: components(
+                    weekday: endDay.rawValue,
+                    time: rhythm.wakeTime,
+                    calendar: calendar
+                ),
+                repeats: true
+            )
+            try? center.startMonitoring(activity, during: schedule)
+            desired.insert(activity)
+        }
+
+        let pendingActivity = DeviceActivityName(GymLockScreenTime.pendingNightActivityName)
+        if let pending = plan.pendingBedtime, pending.startsAt > now {
+            defaults.set(pending.startsAt, forKey: GymLockScreenTime.pendingBedtimeCutoverKey)
+        } else {
+            defaults.removeObject(forKey: GymLockScreenTime.pendingBedtimeCutoverKey)
+        }
+
+        if let pending = plan.pendingBedtime,
+           let night = SleepRules.night(
+               endingOnMorningOf: pending.startsAt,
+               rhythm: plan.rhythm,
+               pending: nil,
+               calendar: calendar
+           ),
+           night.end > now,
+           plan.effectiveSleepDays().contains(night.weekday) {
+            let schedule = DeviceActivitySchedule(
+                intervalStart: components(for: night.start, calendar: calendar),
+                intervalEnd: components(for: night.end, calendar: calendar),
+                repeats: false
+            )
+            try? center.startMonitoring(pendingActivity, during: schedule)
+            desired.insert(pendingActivity)
+        }
+
+        let obsolete = center.activities.filter {
+            GymLockScreenTime.isNightActivity($0.rawValue) && !desired.contains($0)
+        }
+        if !obsolete.isEmpty { center.stopMonitoring(obsolete) }
+        #endif
+    }
+
+    private func migrateLegacyStateIfNeeded() {
+        let legacy = UserDefaults.standard
+        if defaults.data(forKey: GymLockScreenTime.selectionKey) == nil,
+           let selection = legacy.data(forKey: GymLockScreenTime.selectionKey) {
+            defaults.set(selection, forKey: GymLockScreenTime.selectionKey)
+        }
+        if defaults.data(forKey: GymLockScreenTime.ledgerKey) == nil,
+           let ledger = legacy.data(forKey: GymLockScreenTime.ledgerKey) {
+            defaults.set(ledger, forKey: GymLockScreenTime.ledgerKey)
+        }
+    }
+
+    #if canImport(FamilyControls)
+    private func activeNightActivityName(at now: Date) -> String? {
+        let center = DeviceActivityCenter()
+        let activities = center.activities.filter {
+            GymLockScreenTime.isNightActivity($0.rawValue)
+        }
+        if let pending = activities.first(where: {
+            $0.rawValue == GymLockScreenTime.pendingNightActivityName
+                && center.schedule(for: $0)?.nextInterval?.contains(now) == true
+        }) {
+            return pending.rawValue
+        }
+        return activities.first {
+            center.schedule(for: $0)?.nextInterval?.contains(now) == true
+        }?.rawValue
+    }
+
+    private func components(
+        weekday: Int,
+        time: TimeOfDay,
+        calendar: Calendar
+    ) -> DateComponents {
+        var result = DateComponents()
+        result.calendar = calendar
+        result.timeZone = calendar.timeZone
+        result.weekday = weekday
+        result.hour = time.hour
+        result.minute = time.minute
+        return result
+    }
+
+    private func components(for date: Date, calendar: Calendar) -> DateComponents {
+        var result = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        result.calendar = calendar
+        result.timeZone = calendar.timeZone
+        return result
+    }
+    #endif
 }
-#endif

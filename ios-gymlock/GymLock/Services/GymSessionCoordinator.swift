@@ -491,6 +491,7 @@ final class GymSessionCoordinator {
         guard let store else { return }
         // A bedtime changed yesterday takes over once last night is done.
         store.applyDuePendingBedtime(now: now)
+        shield.syncNightActivities(plan: store.plan, now: now)
         windDown.reconcile(now: now, plan: store.plan, shield: shield)
         syncWindDownNotification(plan: store.plan, now: now)
     }

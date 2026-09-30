@@ -32,20 +32,6 @@ enum ShieldAuthorization: String, Hashable {
     case unavailable
 }
 
-/// Which lock currently holds the shield.
-///
-/// `AppShielding.apply` overwrites rather than stacks, so only one lock can
-/// hold the shield at a time. The owner is what stops the session reconciler
-/// from releasing a shield that now belongs to the night, and what stops the
-/// wind-down controller from claiming one that belongs to a morning.
-enum ShieldOwner: String, Codable, Hashable {
-    /// Applied by the evening wind-down window. Released by the clock.
-    case windDown
-    /// Applied by the gym session. Released by arrival, resolution, or the
-    /// failsafe.
-    case gymSession
-}
-
 /// The one way apps get shielded and released.
 ///
 /// Views never touch `ManagedSettingsStore`. Everything goes through this, which
@@ -77,6 +63,9 @@ protocol AppShielding: AnyObject {
     /// standing is the handover: the new lock takes ownership in the same call,
     /// with no gap in between.
     func apply(until deadline: Date, sessionID: UUID?, owner: ShieldOwner)
+
+    /// Keeps the background bedtime schedules aligned with the current plan.
+    func syncNightActivities(plan: MorningPlan, now: Date)
 
     /// Applies the shield on behalf of the gym session.
     func apply(until deadline: Date, sessionID: UUID?)
@@ -112,6 +101,8 @@ extension AppShielding {
     func apply(until deadline: Date, sessionID: UUID?) {
         apply(until: deadline, sessionID: sessionID, owner: .gymSession)
     }
+
+    func syncNightActivities(plan: MorningPlan, now: Date) {}
 }
 
 // MARK: - Policy
@@ -142,73 +133,6 @@ enum ShieldPolicy {
     }
 }
 
-// MARK: - Failsafe ledger
-
-/// The persisted record of an active shield.
-///
-/// Deliberately stored separately from the session. If session state is lost,
-/// corrupted, or wiped, this survives — and it is what the failsafe reads. A
-/// safety net attached to the thing it is protecting against is not a safety
-/// net.
-struct ShieldLedger: Codable, Hashable {
-    var appliedAt: Date
-    var failsafeDeadline: Date
-    var sessionID: UUID?
-    /// Which lock put the shield on. Ledgers written before the wind-down lock
-    /// existed were all session-owned, so they decode as `.gymSession`.
-    var owner: ShieldOwner
-
-    init(
-        appliedAt: Date,
-        failsafeDeadline: Date,
-        sessionID: UUID?,
-        owner: ShieldOwner = .gymSession
-    ) {
-        self.appliedAt = appliedAt
-        self.failsafeDeadline = failsafeDeadline
-        self.sessionID = sessionID
-        self.owner = owner
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        appliedAt = try container.decode(Date.self, forKey: .appliedAt)
-        failsafeDeadline = try container.decode(Date.self, forKey: .failsafeDeadline)
-        sessionID = try container.decodeIfPresent(UUID.self, forKey: .sessionID)
-        owner = try container.decodeIfPresent(ShieldOwner.self, forKey: .owner) ?? .gymSession
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case appliedAt, failsafeDeadline, sessionID, owner
-    }
-
-    func hasExpired(at now: Date) -> Bool { now >= failsafeDeadline }
-}
-
-/// Shared persistence for the ledger, used by both implementations.
-struct ShieldLedgerStore {
-    private let defaults: UserDefaults
-    private let key = "gymlock.shieldLedger"
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    var current: ShieldLedger? {
-        guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(ShieldLedger.self, from: data)
-    }
-
-    func save(_ ledger: ShieldLedger) {
-        guard let data = try? JSONEncoder().encode(ledger) else { return }
-        defaults.set(data, forKey: key)
-    }
-
-    func clear() {
-        defaults.removeObject(forKey: key)
-    }
-}
-
 // MARK: - Factory
 
 enum AppShieldingFactory {
@@ -222,7 +146,7 @@ enum AppShieldingFactory {
         return DemoShieldService(defaults: defaults)
         #else
         if #available(iOS 16.0, *) {
-            return FamilyControlsShieldService(defaults: defaults)
+            return FamilyControlsShieldService(defaults: GymLockScreenTime.defaults)
         }
         return DemoShieldService(defaults: defaults)
         #endif

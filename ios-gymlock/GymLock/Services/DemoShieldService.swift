@@ -112,7 +112,8 @@ final class DemoShieldService: AppShielding {
                 appliedAt: ledger.appliedAt,
                 failsafeDeadline: Date().addingTimeInterval(-1),
                 sessionID: ledger.sessionID,
-                owner: ledger.owner
+                owner: ledger.owner,
+                activityName: ledger.activityName
             )
         )
     }
