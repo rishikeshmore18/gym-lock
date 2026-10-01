@@ -9,6 +9,7 @@ import SwiftUI
 struct TodayHomeView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Owned by the tab shell so it survives tab switches.
     let intro: StreakIntroController
@@ -20,6 +21,10 @@ struct TodayHomeView: View {
     @State private var selectedDay = Calendar.current.startOfDay(for: Date())
     @State private var leadingDay: Date?
     @State private var hasSettled = false
+    /// The flame has been parsed, or has failed and will show its fallback.
+    @State private var isFlameReady = false
+
+    private var launchCover: LaunchCover { .shared }
 
     /// Geometry for the morph, in global space. `chipFrame` is the visible
     /// capsule, not its touch target.
@@ -51,6 +56,13 @@ struct TodayHomeView: View {
     private var streak: Int { store.streak.weeks }
 
     private var isMeasured: Bool { rootFrame.width > 0 && chipFrame.width > 0 }
+
+    /// Everything a cold launch waits on before lifting its cover.
+    private var isPrepared: Bool { hasSettled && isMeasured && isFlameReady }
+
+    /// The entrance waits for the flame, so it never opens on the placeholder,
+    /// and for the launch cover, so it never plays behind it.
+    private var canPlayEntrance: Bool { isPrepared && !launchCover.isHoldingApp }
 
     private var metrics: StreakCardMetrics { .fit(rootFrame.size) }
 
@@ -119,17 +131,29 @@ struct TodayHomeView: View {
             if leadingDay == nil {
                 leadingDay = window.defaultLeadingDay(visibleDays: CalendarStripView.defaultVisibleDays)
             }
-            withAnimation(.easeOut(duration: 0.28)) { hasSettled = true }
+            // Under the launch cover nobody is watching, so home lands
+            // settled rather than fading in behind the logo.
+            if launchCover.isHoldingApp {
+                hasSettled = true
+            } else {
+                withAnimation(.easeOut(duration: 0.28)) { hasSettled = true }
+            }
 
-            // Parse the flame while home is fading in. The player is already
-            // in the hierarchy, paused behind the header, and picks this up
-            // the moment it lands — so a tap never waits on a file read or on
-            // the layer tree being built. Started after the fade-in, not
-            // before it: home appearing must not depend on this finishing.
+            // Parse the flame while home is fading in, or while the launch
+            // cover is up. The player is already in the hierarchy, paused
+            // behind the header, and picks this up the moment it lands — so a
+            // tap never waits on a file read or on the layer tree being built.
+            // Home appearing never depends on this: the cover has a deadline,
+            // and a failure still counts as ready (the fallback glow shows).
             await FlameAsset.prepare()
+            isFlameReady = true
         }
-        .onChange(of: isMeasured, initial: true) { _, measured in
-            guard measured else { return }
+        .onChange(of: isPrepared, initial: true) { _, prepared in
+            if prepared { launchCover.contentIsReady() }
+        }
+        .onChange(of: canPlayEntrance, initial: true) { _, canPlay in
+            // Not while backgrounded: the shell plays it on return instead.
+            guard canPlay, scenePhase == .active else { return }
             intro.play(streak: streak, reduceMotion: reduceMotion)
         }
         .onChange(of: intro.absorbPulse) { _, _ in absorbCard() }

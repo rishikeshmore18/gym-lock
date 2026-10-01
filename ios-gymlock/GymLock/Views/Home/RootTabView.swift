@@ -20,6 +20,8 @@ struct RootTabView: View {
     @State private var isAskingForWakeTime = false
     @State private var tabBarMinY: CGFloat = .infinity
 
+    private var launchCover: LaunchCover { .shared }
+
     var body: some View {
         ZStack {
             destination(.home) {
@@ -69,14 +71,19 @@ struct RootTabView: View {
                 store.refreshStreak()
                 askForWakeTimeIfNeeded()
                 askToAddGymDayIfNeeded()
+                // Under the launch cover the entrance waits; home starts it
+                // itself once the cover lifts.
                 intro.sceneBecameActive(
                     streak: store.streak.weeks,
                     reduceMotion: reduceMotion,
-                    isHomeVisible: selection == .home
+                    isHomeVisible: selection == .home && !launchCover.isHoldingApp
                 )
             } else {
                 intro.sceneLeftForeground()
             }
+        }
+        .onChange(of: launchCover.isHoldingApp) { _, isHolding in
+            if !isHolding { presentLaunchPrompts() }
         }
         .sheet(isPresented: $isAskingToAddGymDay) {
             AddGymDaySheet(
@@ -114,21 +121,32 @@ struct RootTabView: View {
             // the shell rather than inside a tab so it still runs when the new
             // home is the screen the user lands on.
             store.seedPlanIfNeeded()
-            guard !store.plan.hasBeenReviewed else {
-                askForWakeTimeIfNeeded()
-                askToAddGymDayIfNeeded()
-                return
-            }
-            intro.isSuspended = true
-            isRunningSetup = true
+            // Suspended at once, so the entrance cannot slip in between the
+            // launch cover lifting and the setup flow covering home.
+            if !store.plan.hasBeenReviewed { intro.isSuspended = true }
+            presentLaunchPrompts()
         }
+    }
+
+    /// The setup flow, or the two questions for existing users. Held until the
+    /// launch cover lifts, so nothing slides up over the logo.
+    private func presentLaunchPrompts() {
+        guard !launchCover.isHoldingApp else { return }
+        guard !store.plan.hasBeenReviewed else {
+            askForWakeTimeIfNeeded()
+            askToAddGymDayIfNeeded()
+            return
+        }
+        guard !isRunningSetup else { return }
+        intro.isSuspended = true
+        isRunningSetup = true
     }
 
     /// Existing users with 1 or 2 gym days are asked on every open until
     /// they have 3. Never on top of the setup flow or a live morning.
     private func askToAddGymDayIfNeeded() {
         guard store.shouldAskToAddGymDay, !isRunningSetup, !coordinator.isSessionLive,
-              !isAskingForWakeTime
+              !isAskingForWakeTime, !launchCover.isHoldingApp
         else { return }
         isAskingToAddGymDay = true
     }
@@ -138,7 +156,7 @@ struct RootTabView: View {
     /// the add-a-day sheet, so only one sheet is ever up.
     private func askForWakeTimeIfNeeded() {
         guard store.shouldAskForWakeTime, !isRunningSetup, !coordinator.isSessionLive,
-              !isAskingToAddGymDay
+              !isAskingToAddGymDay, !launchCover.isHoldingApp
         else { return }
         isAskingForWakeTime = true
     }

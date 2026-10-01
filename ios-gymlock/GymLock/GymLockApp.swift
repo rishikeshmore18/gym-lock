@@ -31,6 +31,10 @@ struct GymLockApp: App {
         // an alarm tap: the response is dropped and the morning never starts.
         UNUserNotificationCenter.current().delegate = notificationDelegate
         AlarmNotificationDelegate.registerCategories()
+
+        // Starts the launch cover's clock with the process rather than with
+        // the first frame. It does no work of its own.
+        _ = LaunchCover.shared
     }
 
     var body: some Scene {
