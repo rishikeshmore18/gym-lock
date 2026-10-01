@@ -27,6 +27,13 @@ struct ProgressPhotoAddButton: View {
     /// Whether a camera exists; the option is hidden rather than shown broken.
     let hasCamera: Bool
 
+    @Environment(\.rootTabBarMinY) private var tabBarMinY
+    @State private var buttonMaxY: CGFloat = 0
+
+    /// Content scrolls beneath the floating tab bar. While any part of the
+    /// button sits under the bar, a tap there was meant for a tab.
+    private var isUnderTabBar: Bool { buttonMaxY > tabBarMinY }
+
     var body: some View {
         Menu {
             if hasCamera {
@@ -59,8 +66,27 @@ struct ProgressPhotoAddButton: View {
         .menuStyle(.button)
         .adaptiveGlassMenuButton(isBusy: isBusy)
         .disabled(isBusy)
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: {
+            buttonMaxY = $0
+        }
+        .allowsHitTesting(!isUnderTabBar)
         .accessibilityLabel("Add progress photo")
         .accessibilityHint("Choose Camera, Photos, or Files.")
+    }
+}
+
+// MARK: - Tab bar overlap
+
+private struct RootTabBarMinYKey: EnvironmentKey {
+    static let defaultValue: CGFloat = .infinity
+}
+
+extension EnvironmentValues {
+    /// Top edge of the floating tab bar in global coordinates; infinity when
+    /// there is no bar.
+    var rootTabBarMinY: CGFloat {
+        get { self[RootTabBarMinYKey.self] }
+        set { self[RootTabBarMinYKey.self] = newValue }
     }
 }
 

@@ -18,6 +18,7 @@ struct RootTabView: View {
     @State private var isRunningSetup = false
     @State private var isAskingToAddGymDay = false
     @State private var isAskingForWakeTime = false
+    @State private var tabBarMinY: CGFloat = .infinity
 
     var body: some View {
         ZStack {
@@ -37,8 +38,12 @@ struct RootTabView: View {
                 ProfileView()
             }
         }
+        .environment(\.rootTabBarMinY, tabBarMinY)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             RootTabBar(selection: $selection)
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
+                    tabBarMinY = $0
+                }
         }
         // Black rather than coral: on this screen coral means a skipped day,
         // and a coral tab would be competing with that.
