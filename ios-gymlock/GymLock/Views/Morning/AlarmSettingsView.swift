@@ -647,17 +647,20 @@ struct AlarmSettingsView: View {
     /// title, the summary and the filled circles change; the card itself
     /// stays exactly where and what it is, so it reads as the same row
     /// changing meaning under the dial rather than a new thing arriving.
+    /// The filled circles take the arc's colour as they change, so the card
+    /// visibly belongs to the half of the dial being edited.
     private var repeatCard: some View {
         VStack(spacing: 14) {
             HStack {
                 Button(action: switchDialContext) {
-                    Text(dialContext.dayCardTitle)
+                    Text("\(dialContext.dayCardTitle) >")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.ink)
                         .contentTransition(.opacity)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(dialContext.dayCardTitle)
                 .accessibilityHint(dialContext == .sleep ? "shows gym days" : "shows sleep schedule")
 
                 Spacer(minLength: 8)
@@ -681,6 +684,7 @@ struct AlarmSettingsView: View {
                     dayCircle(day)
                 }
             }
+            .animation(Theme.stateChange, value: dialContext)
 
             if let requiredNightNote {
                 Text(requiredNightNote)
@@ -730,6 +734,12 @@ struct AlarmSettingsView: View {
         }
     }
 
+    /// The fill for a selected circle: the colour of the arc being edited,
+    /// so the card follows the dial, coral for gym days and ink for nights.
+    private var dayCircleFill: Color {
+        dialContext == .gym ? Theme.accent : Theme.ink
+    }
+
     /// The truth about what this schedule does, not a value to pick. Listing
     /// the days here would only repeat the circles underneath, so the slot
     /// says the one thing the circles cannot say on their own.
@@ -752,7 +762,7 @@ struct AlarmSettingsView: View {
                 .foregroundStyle(isOn ? Color.white : Theme.inkSecondary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
-                .background(isOn ? Theme.ink : Theme.surfaceMuted, in: .circle)
+                .background(isOn ? dayCircleFill : Theme.surfaceMuted, in: .circle)
                 .scaleEffect(isOn ? 1 : 0.94)
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isOn)
         }
