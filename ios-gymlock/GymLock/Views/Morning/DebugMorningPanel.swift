@@ -24,6 +24,15 @@ struct DebugMorningPanel: View {
     @State private var gymSummary = "none"
     @State private var skipsSummary = "none"
     @State private var freezeSummary = "none"
+    /// A step held until the panel has actually gone, so its first frames
+    /// happen in front of you rather than behind the closing sheet.
+    @State private var stepAfterClose: GymSessionCoordinator.DebugStep?
+
+    /// Steps whose point is the on-screen animation that follows. They close
+    /// the panel instantly and only then run.
+    private static let playsAfterClose: Set<GymSessionCoordinator.DebugStep> = [
+        .tapWorkoutDoneNotification,
+    ]
 
     var body: some View {
         NavigationStack {
@@ -54,6 +63,12 @@ struct DebugMorningPanel: View {
                 alarmAuthorization = await coordinator.alarmAuthorization()
                 refreshDoorReadings()
             }
+        }
+        // Fires once the sheet is fully gone, whatever the dismissal took.
+        .onDisappear {
+            guard let step = stepAfterClose else { return }
+            stepAfterClose = nil
+            coordinator.simulate(step)
         }
     }
 
@@ -246,7 +261,8 @@ struct DebugMorningPanel: View {
             .ignoreAlarmUntilDeadline, .runningLateNearBedtime,
             .runningLateTwice, .phoneWasOffOnGymDay,
             // At the gym is judged by its result reading. Tapping the
-            // workout-done notification dismisses, so Progress shows.
+            // workout-done notification closes the panel first, then runs,
+            // so the Progress spotlight plays in view.
             .arriveStay20, .arriveLeaveAt12, .stepOutThreeMinutes, .healthWorkout22,
             .handTypedWorkout, .unplannedVisit, .visitInSleepHours, .imHereCameraPhoto,
             // Skips are judged by the result reading, except the examples,
@@ -263,6 +279,13 @@ struct DebugMorningPanel: View {
         let isReadingOnly = staysOpen.contains(step)
 
         return Button {
+            if Self.playsAfterClose.contains(step) {
+                stepAfterClose = step
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { dismiss() }
+                return
+            }
             coordinator.simulate(step)
             refreshDoorReadings()
             if !isReadingOnly { dismiss() }
