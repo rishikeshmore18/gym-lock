@@ -15,6 +15,11 @@ import SwiftUI
 /// The photographs come last, and answer the question the numbers cannot: not
 /// whether the sessions happened, but whether they changed anything.
 struct ProgressTabView: View {
+    /// The spotlight a workout-done notification opens (FLOW, Flow 3). Owned
+    /// by the tab shell; this screen only travels to the card and reports
+    /// where it sits.
+    let spotlight: ProgressSpotlightModel
+
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -43,6 +48,25 @@ struct ProgressTabView: View {
         // inside the tab shell stopped insetting their scroll views, which is
         // what put the large "Progress" title on top of the first card. The
         // header now belongs to the screen and collapses as the page scrolls.
+        ScrollViewReader { proxy in
+            page
+                // On a cold launch the travel waits for the launch cover, so
+                // it is seen, and so the page has finished its first layout.
+                .task(id: SpotlightTravel(
+                    request: spotlight.requestCount,
+                    isCovered: LaunchCover.shared.isHoldingApp
+                )) { travelToPhotos(with: proxy) }
+        }
+        .tint(Theme.accent)
+        .storyEditor(origin: $shareOrigin, photos: photos, transitionNamespace: shareTransition)
+        .task(id: refreshKey) { refresh() }
+        // The Day 0 photograph the user took during onboarding is their real
+        // before-picture; the stack starts from it rather than asking for the
+        // same thing a second time. Runs once — the store keeps its own flag.
+        .task { await photos.adoptDayZeroIfNeeded(store.profile.day0Media) }
+    }
+
+    private var page: some View {
         FloatingTitleScreen(title: "Progress") {
             VStack(spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
@@ -63,6 +87,8 @@ struct ProgressTabView: View {
                         BadgeEmblem()
                     }
                 }
+                // Dimmed under the spotlight, so out of VoiceOver's reach too.
+                .accessibilityHidden(spotlight.isActive)
 
                 ProgressPeriodCard(
                     model: period,
@@ -71,22 +97,45 @@ struct ProgressTabView: View {
                     onStepMonth: stepMonth,
                     onStepWeek: stepWeek
                 )
+                .accessibilityHidden(spotlight.isActive)
 
                 ProgressPhotosCard(
                     store: photos,
                     onShare: { shareOrigin = $0 },
                     transitionNamespace: shareTransition
                 )
+                .id(ProgressSpotlightModel.cardID)
+                // Cheap when the spotlight is down: the model only keeps the
+                // value, and nothing redraws.
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                    spotlight.cardMoved(to: $0)
+                }
             }
             .padding(.horizontal, 20)
         }
-        .tint(Theme.accent)
-        .storyEditor(origin: $shareOrigin, photos: photos, transitionNamespace: shareTransition)
-        .task(id: refreshKey) { refresh() }
-        // The Day 0 photograph the user took during onboarding is their real
-        // before-picture; the stack starts from it rather than asking for the
-        // same thing a second time. Runs once — the store keeps its own flag.
-        .task { await photos.adoptDayZeroIfNeeded(store.profile.day0Media) }
+    }
+
+    // MARK: Spotlight
+
+    private struct SpotlightTravel: Equatable {
+        let request: Int
+        let isCovered: Bool
+    }
+
+    /// Brings the real Progress Photos card a little below the middle of the
+    /// screen, leaving dark room above it for the line. The scroll view clamps
+    /// at its end, which keeps the card clear of the tab bar.
+    private func travelToPhotos(with proxy: ScrollViewProxy) {
+        guard spotlight.phase == .scrolling, !LaunchCover.shared.isHoldingApp else { return }
+        let anchor = UnitPoint(x: 0.5, y: 0.6)
+        if reduceMotion {
+            proxy.scrollTo(ProgressSpotlightModel.cardID, anchor: anchor)
+        } else {
+            withAnimation(.easeOut(duration: 0.28)) {
+                proxy.scrollTo(ProgressSpotlightModel.cardID, anchor: anchor)
+            }
+        }
+        spotlight.scrollStarted(animated: !reduceMotion)
     }
 
     // MARK: Actions
@@ -142,7 +191,7 @@ struct ProgressTabView: View {
 }
 
 #Preview("Progress") {
-    ProgressTabView()
+    ProgressTabView(spotlight: ProgressSpotlightModel())
         .environment(AppStore())
         .environment(ProgressPhotoStore())
 }

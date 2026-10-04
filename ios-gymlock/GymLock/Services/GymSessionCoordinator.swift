@@ -111,8 +111,8 @@ final class GymSessionCoordinator {
     private(set) var photos: ProgressPhotoStore?
     /// A tab a notification tap asked for. The tab shell switches and clears it.
     private(set) var requestedTab: RootTab?
-    /// The day the Progress spotlight is pending for. Nothing shows it until
-    /// Step 3 builds the overlay; the tap already lands on Progress.
+    /// The day the Progress spotlight is pending for. The tab shell takes it
+    /// once, when it switches to Progress for that tap.
     private(set) var pendingSpotlightDay: Date?
 
     private var ticker: Task<Void, Never>?
@@ -338,7 +338,7 @@ final class GymSessionCoordinator {
         requestedTab = nil
     }
 
-    /// Reads and clears the pending spotlight. For the Step 3 overlay.
+    /// Reads and clears the pending spotlight. Called once by the tab shell.
     func takePendingSpotlightDay() -> Date? {
         let day = pendingSpotlightDay
         pendingSpotlightDay = nil

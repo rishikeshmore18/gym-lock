@@ -19,6 +19,9 @@ struct RootTabView: View {
     @State private var isAskingToAddGymDay = false
     @State private var isAskingForWakeTime = false
     @State private var tabBarMinY: CGFloat = .infinity
+    /// The Progress spotlight. Owned here so it is armed in the same update
+    /// that selects Progress, and so its scrim can cover the tab bar too.
+    @State private var spotlight = ProgressSpotlightModel()
 
     private var launchCover: LaunchCover { .shared }
 
@@ -29,7 +32,7 @@ struct RootTabView: View {
             }
 
             destination(.progress) {
-                ProgressTabView()
+                ProgressTabView(spotlight: spotlight)
             }
 
             destination(.community) {
@@ -46,6 +49,17 @@ struct RootTabView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
                     tabBarMinY = $0
                 }
+                // Under the spotlight's scrim, which takes its taps; kept from
+                // VoiceOver too, so the dimmed bar cannot be reached.
+                .accessibilityHidden(spotlight.isActive)
+        }
+        // Above the tab bar as well as the page: the whole screen dims, and
+        // a tap anywhere dark only closes the spotlight.
+        .overlay {
+            if spotlight.isActive {
+                ProgressPhotoSpotlightOverlay(spotlight: spotlight, onDismiss: dismissSpotlight)
+                    .transition(.opacity)
+            }
         }
         // Black rather than coral: on this screen coral means a skipped day,
         // and a coral tab would be competing with that.
@@ -58,9 +72,15 @@ struct RootTabView: View {
             if tab != .home { intro.normalizeImmediately() }
         }
         // A notification tap asked for a tab (the workout-done line lands on
-        // Progress). The spotlight itself is a Step 3 screen.
-        .onChange(of: coordinator.requestedTab) { _, tab in
+        // Progress with its spotlight). The spotlight is armed before the tab
+        // changes, in the same update, so the first frame of Progress anyone
+        // sees is already dimmed. Initial, so a cold launch that asked before
+        // this view existed is still honoured.
+        .onChange(of: coordinator.requestedTab, initial: true) { _, tab in
             guard let tab else { return }
+            if !spotlight.accept(requestedTab: tab, from: coordinator), tab != .progress {
+                spotlight.dismiss()
+            }
             selection = tab
             coordinator.consumeRequestedTab()
         }
@@ -126,6 +146,10 @@ struct RootTabView: View {
             if !store.plan.hasBeenReviewed { intro.isSuspended = true }
             presentLaunchPrompts()
         }
+    }
+
+    private func dismissSpotlight() {
+        withAnimation(.easeOut(duration: 0.2)) { spotlight.dismiss() }
     }
 
     /// The setup flow, or the two questions for existing users. Held until the
