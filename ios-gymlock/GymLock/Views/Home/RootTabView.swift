@@ -22,6 +22,9 @@ struct RootTabView: View {
     /// The Progress spotlight. Owned here so it is armed in the same update
     /// that selects Progress, and so its scrim can cover the tab bar too.
     @State private var spotlight = ProgressSpotlightModel()
+    /// Bumped on every notification-driven tab request, so screens that
+    /// present over the shell can step aside and let the destination show.
+    @State private var tabRequestCount = 0
 
     private var launchCover: LaunchCover { .shared }
 
@@ -40,7 +43,7 @@ struct RootTabView: View {
             }
 
             destination(.profile) {
-                ProfileView()
+                ProfileView(tabRequestCount: tabRequestCount)
             }
         }
         .environment(\.rootTabBarMinY, tabBarMinY)
@@ -82,6 +85,7 @@ struct RootTabView: View {
                 spotlight.dismiss()
             }
             selection = tab
+            tabRequestCount += 1
             coordinator.consumeRequestedTab()
         }
         .onChange(of: scenePhase) { _, phase in

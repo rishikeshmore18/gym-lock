@@ -10,6 +10,11 @@ struct ProfileView: View {
     @Environment(AppStore.self) private var store
     @Environment(GymSessionCoordinator.self) private var coordinator
 
+    /// Changes whenever a notification tap sends the app to a tab. Home 2 and
+    /// the alarm settings cover would otherwise sit on top of the destination
+    /// (and the Progress spotlight), so both close at once, without animation.
+    var tabRequestCount: Int = 0
+
     /// The classic home, presented rather than pushed: it owns its own
     /// navigation stack and toolbar, and nesting one stack inside another
     /// would give it two back buttons and two titles.
@@ -50,6 +55,15 @@ struct ProfileView: View {
         }
         .task {
             alarmAuth = await coordinator.alarmAuthorization()
+        }
+        .onChange(of: tabRequestCount) { _, _ in
+            guard isShowingClassicHome || isShowingAlarmSettings else { return }
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) {
+                isShowingClassicHome = false
+                isShowingAlarmSettings = false
+            }
         }
     }
 
