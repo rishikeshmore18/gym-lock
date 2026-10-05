@@ -57,6 +57,20 @@ struct ProgressTabView: View {
                     isCovered: LaunchCover.shared.isHoldingApp
                 )) { travelToPhotos(with: proxy) }
         }
+        // The landing: once per request, because the model only ever moves
+        // to .focused once per request, never per geometry update.
+        .onChange(of: spotlight.phase) { _, phase in
+            if phase == .focused { Haptics.selection() }
+        }
+        // The card's own actions surfacing are taps on the card too: an
+        // import starting or the Story editor opening closes the spotlight
+        // even if a system control kept the tap to itself.
+        .onChange(of: photos.isImporting) { _, isImporting in
+            if isImporting { dismissSpotlight() }
+        }
+        .onChange(of: shareOrigin != nil) { _, isSharing in
+            if isSharing { dismissSpotlight() }
+        }
         .tint(Theme.accent)
         .storyEditor(origin: $shareOrigin, photos: photos, transitionNamespace: shareTransition)
         .task(id: refreshKey) { refresh() }
@@ -105,9 +119,21 @@ struct ProgressTabView: View {
                     transitionNamespace: shareTransition
                 )
                 .id(ProgressSpotlightModel.cardID)
-                // Cheap when the spotlight is down: the model only keeps the
-                // value, and nothing redraws.
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                // Any tap on the lit card also closes the spotlight. Watched
+                // alongside the card's own gestures, never instead of them, so
+                // Add Photo and the photos act on that same tap and a drag of
+                // the stack is still a drag. Off entirely when the spotlight
+                // is down.
+                .simultaneousGesture(
+                    TapGesture().onEnded { dismissSpotlight() },
+                    including: spotlight.isActive ? .all : .subviews
+                )
+                // Measured in the same named space as the overlay. Cheap when
+                // the spotlight is down: the model keeps the value unobserved,
+                // and nothing redraws.
+                .onGeometryChange(for: CGRect.self) {
+                    $0.frame(in: .named(ProgressSpotlightModel.coordinateSpaceName))
+                } action: {
                     spotlight.cardMoved(to: $0)
                 }
             }
@@ -122,20 +148,32 @@ struct ProgressTabView: View {
         let isCovered: Bool
     }
 
-    /// Brings the real Progress Photos card a little below the middle of the
-    /// screen, leaving dark room above it for the line. The scroll view clamps
-    /// at its end, which keeps the card clear of the tab bar.
+    /// Scrolls the least distance that shows the whole real card.
+    ///
+    /// No anchor on purpose. The card is the last thing on the page, so any
+    /// anchor that asks for it higher than the page can scroll (the old 60%
+    /// one) is a target past the end of the content, which a programmatic
+    /// scroll can leave the page resting beyond. "Wholly visible" is always
+    /// reachable, respects the tab bar's inset, and leaves the dark room
+    /// above the card for the line.
     private func travelToPhotos(with proxy: ScrollViewProxy) {
-        guard spotlight.phase == .scrolling, !LaunchCover.shared.isHoldingApp else { return }
-        let anchor = UnitPoint(x: 0.5, y: 0.6)
+        guard !LaunchCover.shared.isHoldingApp,
+              spotlight.startTravel(animated: !reduceMotion)
+        else { return }
+        Haptics.prepareSelection()
+        Haptics.soft()
         if reduceMotion {
-            proxy.scrollTo(ProgressSpotlightModel.cardID, anchor: anchor)
+            proxy.scrollTo(ProgressSpotlightModel.cardID)
         } else {
-            withAnimation(.easeOut(duration: 0.28)) {
-                proxy.scrollTo(ProgressSpotlightModel.cardID, anchor: anchor)
+            withAnimation(ProgressSpotlightModel.travelAnimation) {
+                proxy.scrollTo(ProgressSpotlightModel.cardID)
             }
         }
-        spotlight.scrollStarted(animated: !reduceMotion)
+    }
+
+    private func dismissSpotlight() {
+        guard spotlight.isActive else { return }
+        withAnimation(ProgressSpotlightModel.dismissAnimation) { spotlight.dismiss() }
     }
 
     // MARK: Actions

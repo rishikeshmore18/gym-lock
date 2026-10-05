@@ -64,6 +64,10 @@ struct RootTabView: View {
                     .transition(.opacity)
             }
         }
+        // The one space the card and the overlay are both measured in. It
+        // contains the page, the tab bar and the overlay, so nothing in the
+        // spotlight reads .global.
+        .coordinateSpace(.named(ProgressSpotlightModel.coordinateSpaceName))
         // Black rather than coral: on this screen coral means a skipped day,
         // and a coral tab would be competing with that.
         .tint(Theme.ink)
@@ -153,7 +157,8 @@ struct RootTabView: View {
     }
 
     private func dismissSpotlight() {
-        withAnimation(.easeOut(duration: 0.2)) { spotlight.dismiss() }
+        guard spotlight.isActive else { return }
+        withAnimation(ProgressSpotlightModel.dismissAnimation) { spotlight.dismiss() }
     }
 
     /// The setup flow, or the two questions for existing users. Held until the
