@@ -24,6 +24,10 @@ private enum HeaderMetrics {
 /// instant the user scrolls back up, and can be interrupted at any point.
 struct FloatingTitleScreen<Content: View>: View {
     let title: String
+    /// The Progress spotlight's dark treatment of the canvas and the title.
+    /// Visual only: nothing about the layout or the scrolling changes, and
+    /// when false nothing is drawn at all.
+    var isSpotlightDimmed: Bool = false
     @ViewBuilder var content: () -> Content
 
     @State private var scrollOffset: CGFloat = 0
@@ -41,6 +45,15 @@ struct FloatingTitleScreen<Content: View>: View {
                 content()
             }
             .padding(.bottom, bottomClearance)
+        }
+        .background {
+            if isSpotlightDimmed {
+                Color.black
+                    .opacity(SpotlightDim.opacity)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
         .background(Theme.canvas)
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -61,6 +74,7 @@ struct FloatingTitleScreen<Content: View>: View {
                 overscroll: CollapsingTitleMetrics.overscroll(forOffset: scrollOffset),
                 containerWidth: containerWidth
             )
+            .opacity(isSpotlightDimmed ? SpotlightDim.chromeOpacity : 1)
         }
     }
 

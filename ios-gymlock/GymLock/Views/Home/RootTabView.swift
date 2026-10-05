@@ -20,7 +20,7 @@ struct RootTabView: View {
     @State private var isAskingForWakeTime = false
     @State private var tabBarMinY: CGFloat = .infinity
     /// The Progress spotlight. Owned here so it is armed in the same update
-    /// that selects Progress, and so its scrim can cover the tab bar too.
+    /// that selects Progress, and so the tab bar can dim with the page.
     @State private var spotlight = ProgressSpotlightModel()
     /// Bumped on every notification-driven tab request, so screens that
     /// present over the shell can step aside and let the destination show.
@@ -52,22 +52,23 @@ struct RootTabView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
                     tabBarMinY = $0
                 }
-                // Under the spotlight's scrim, which takes its taps; kept from
-                // VoiceOver too, so the dimmed bar cannot be reached.
+                // Dimmed with the page under the spotlight. Faded rather than
+                // covered, so the glass shapes darken without a dark box
+                // around them; the bar sits on the already dark canvas.
+                .opacity(spotlight.isActive ? SpotlightDim.chromeOpacity : 1)
+                // In the bar's own bounds: while the spotlight is up a tap
+                // here only closes it, and never switches tab.
+                .overlay {
+                    if spotlight.isActive {
+                        Color.clear
+                            .contentShape(.rect)
+                            .onTapGesture(perform: dismissSpotlight)
+                            .accessibilityHidden(true)
+                    }
+                }
+                // Kept from VoiceOver too, so the dimmed bar cannot be reached.
                 .accessibilityHidden(spotlight.isActive)
         }
-        // Above the tab bar as well as the page: the whole screen dims, and
-        // a tap anywhere dark only closes the spotlight.
-        .overlay {
-            if spotlight.isActive {
-                ProgressPhotoSpotlightOverlay(spotlight: spotlight, onDismiss: dismissSpotlight)
-                    .transition(.opacity)
-            }
-        }
-        // The one space the card and the overlay are both measured in. It
-        // contains the page, the tab bar and the overlay, so nothing in the
-        // spotlight reads .global.
-        .coordinateSpace(.named(ProgressSpotlightModel.coordinateSpaceName))
         // Black rather than coral: on this screen coral means a skipped day,
         // and a coral tab would be competing with that.
         .tint(Theme.ink)

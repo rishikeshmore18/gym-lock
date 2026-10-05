@@ -16,8 +16,8 @@ import SwiftUI
 /// whether the sessions happened, but whether they changed anything.
 struct ProgressTabView: View {
     /// The spotlight a workout-done notification opens (FLOW, Flow 3). Owned
-    /// by the tab shell; this screen only travels to the card and reports
-    /// where it sits.
+    /// by the tab shell; this screen travels to the card and dims every
+    /// section but it, in place.
     let spotlight: ProgressSpotlightModel
 
     @Environment(AppStore.self) private var store
@@ -58,7 +58,7 @@ struct ProgressTabView: View {
                 )) { travelToPhotos(with: proxy) }
         }
         // The landing: once per request, because the model only ever moves
-        // to .focused once per request, never per geometry update.
+        // to .focused once per request.
         .onChange(of: spotlight.phase) { _, phase in
             if phase == .focused { Haptics.selection() }
         }
@@ -80,8 +80,12 @@ struct ProgressTabView: View {
         .task { await photos.adoptDayZeroIfNeeded(store.profile.day0Media) }
     }
 
+    /// Each section dims itself in its own shape while the spotlight is up;
+    /// the photos card does so only until it lands. Every spotlight piece is
+    /// an overlay, a background or a visual effect, so none of it adds size
+    /// and the page lays out exactly as a normal visit does.
     private var page: some View {
-        FloatingTitleScreen(title: "Progress") {
+        FloatingTitleScreen(title: "Progress", isSpotlightDimmed: spotlight.isActive) {
             VStack(spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
                     ProgressStatCard(
@@ -91,6 +95,7 @@ struct ProgressTabView: View {
                     ) {
                         FlameEmblem()
                     }
+                    .spotlightDimmed(spotlight.isActive, cornerRadius: statCardRadius)
 
                     ProgressStatCard(
                         title: "Badges Earned",
@@ -100,6 +105,7 @@ struct ProgressTabView: View {
                     ) {
                         BadgeEmblem()
                     }
+                    .spotlightDimmed(spotlight.isActive, cornerRadius: statCardRadius)
                 }
                 // Dimmed under the spotlight, so out of VoiceOver's reach too.
                 .accessibilityHidden(spotlight.isActive)
@@ -111,6 +117,7 @@ struct ProgressTabView: View {
                     onStepMonth: stepMonth,
                     onStepWeek: stepWeek
                 )
+                .spotlightDimmed(spotlight.isActive, cornerRadius: ProgressCardMetrics.cornerRadius)
                 .accessibilityHidden(spotlight.isActive)
 
                 ProgressPhotosCard(
@@ -118,27 +125,47 @@ struct ProgressTabView: View {
                     onShare: { shareOrigin = $0 },
                     transitionNamespace: shareTransition
                 )
-                .id(ProgressSpotlightModel.cardID)
-                // Any tap on the lit card also closes the spotlight. Watched
-                // alongside the card's own gestures, never instead of them, so
-                // Add Photo and the photos act on that same tap and a drag of
-                // the stack is still a drag. Off entirely when the spotlight
-                // is down.
-                .simultaneousGesture(
-                    TapGesture().onEnded { dismissSpotlight() },
-                    including: spotlight.isActive ? .all : .subviews
+                // A small lift once lit. Black and faint: depth, not glow.
+                .shadow(
+                    color: .black.opacity(spotlight.phase == .focused ? 0.09 : 0),
+                    radius: 17,
+                    y: 7
                 )
-                // Measured in the same named space as the overlay. Cheap when
-                // the spotlight is down: the model keeps the value unobserved,
-                // and nothing redraws.
-                .onGeometryChange(for: CGRect.self) {
-                    $0.frame(in: .named(ProgressSpotlightModel.coordinateSpaceName))
-                } action: {
-                    spotlight.cardMoved(to: $0)
+                // Behind the real card, so the card itself hides the line
+                // until it has risen clear of the top edge.
+                .background(alignment: .top) {
+                    if spotlight.phase == .focused {
+                        ProgressSpotlightHeadline(
+                            reduceMotion: reduceMotion,
+                            onDismiss: dismissSpotlight
+                        )
+                        .transition(
+                            .asymmetric(
+                                insertion: reduceMotion ? .opacity : .identity,
+                                removal: .opacity
+                            )
+                        )
+                    }
                 }
+                .spotlightDimmed(
+                    spotlight.phase == .scrolling,
+                    cornerRadius: ProgressCardMetrics.cornerRadius
+                )
+                .id(ProgressSpotlightModel.cardID)
             }
             .padding(.horizontal, 20)
         }
+        // Any tap anywhere on the page closes the spotlight: the dark canvas,
+        // the title, a dimmed card (whose dark layer has taken the touch from
+        // its controls), or the lit photos card. Watched alongside every
+        // other gesture, never instead of one, so on the lit card Add Photo
+        // and the photos act on that same tap and a drag of the stack stays
+        // a drag. Switched off entirely when the spotlight is down.
+        .contentShape(.rect)
+        .simultaneousGesture(
+            TapGesture().onEnded { dismissSpotlight() },
+            including: spotlight.isActive ? .all : .subviews
+        )
     }
 
     // MARK: Spotlight
@@ -151,11 +178,10 @@ struct ProgressTabView: View {
     /// Scrolls the least distance that shows the whole real card.
     ///
     /// No anchor on purpose. The card is the last thing on the page, so any
-    /// anchor that asks for it higher than the page can scroll (the old 60%
-    /// one) is a target past the end of the content, which a programmatic
-    /// scroll can leave the page resting beyond. "Wholly visible" is always
-    /// reachable, respects the tab bar's inset, and leaves the dark room
-    /// above the card for the line.
+    /// anchor that asks for it higher than the page can scroll is a target
+    /// past the end of the content. "Wholly visible" is always reachable,
+    /// respects the tab bar's inset, and leaves the dark room above the card
+    /// for the line. The model lands the card when the travel has run.
     private func travelToPhotos(with proxy: ScrollViewProxy) {
         guard !LaunchCover.shared.isHoldingApp,
               spotlight.startTravel(animated: !reduceMotion)

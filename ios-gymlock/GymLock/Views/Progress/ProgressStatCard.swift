@@ -11,7 +11,7 @@ import SwiftUI
 /// Sits between the home mini cards (18) and the momentum card (22): these
 /// tiles are wider than the minis, and a radius that does not grow with the
 /// card reads as a tighter, cheaper corner.
-private let statCardRadius: CGFloat = 20
+let statCardRadius: CGFloat = 20
 
 struct ProgressStatCard<Emblem: View>: View {
     /// Where the digit sits when the emblem underneath is colourful.

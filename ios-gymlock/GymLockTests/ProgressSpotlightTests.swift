@@ -1,5 +1,4 @@
 import Foundation
-import CoreGraphics
 import Testing
 @testable import GymLock
 
@@ -138,35 +137,32 @@ struct ProgressSpotlightTests {
         #expect(!spotlight.isActive)
     }
 
-    @Test func theOutsideRegionsLeaveTheCardUncovered() {
-        let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
-        let card = CGRect(x: 20, y: 400, width: 350, height: 280)
-        let regions = ProgressSpotlightModel.outsideRegions(around: card, in: bounds)
-
-        #expect(regions.count == 4)
-        #expect(regions.allSatisfy { !$0.intersects(card) })
-        let covered = regions.reduce(0) { $0 + $1.width * $1.height } + card.width * card.height
-        #expect(covered == bounds.width * bounds.height)
-    }
-
-    @Test func withNoCardTheWholeScreenDismisses() {
-        let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
-        #expect(ProgressSpotlightModel.outsideRegions(around: .zero, in: bounds) == [bounds])
-    }
-
-    // MARK: Presentation refinements
+    // MARK: Presentation
 
     @Test func dismissingDuringTravelCancelsTheLanding() async throws {
         let spotlight = ProgressSpotlightModel()
         spotlight.arm(day: today)
         #expect(spotlight.startTravel(animated: true))
-        spotlight.dismiss()
 
-        try await Task.sleep(for: .milliseconds(600))
+        try await Task.sleep(for: .milliseconds(100))
+        spotlight.dismiss()
+        try await Task.sleep(for: .milliseconds(500))
 
         #expect(spotlight.phase == .inactive)
-        #expect(!spotlight.isRevealed)
         #expect(spotlight.focusCount == 0)
+    }
+
+    @Test func theAnimatedTravelLandsAfterItHasRun() async throws {
+        let spotlight = ProgressSpotlightModel()
+        spotlight.arm(day: today)
+        spotlight.startTravel(animated: true)
+
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(spotlight.phase == .scrolling)
+
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(spotlight.phase == .focused)
+        #expect(spotlight.focusCount == 1)
     }
 
     @Test func aRequestLandsOnceAndTravelsOnce() async throws {
@@ -177,30 +173,25 @@ struct ProgressSpotlightTests {
 
         try await Task.sleep(for: .milliseconds(300))
         #expect(spotlight.phase == .focused)
-        #expect(spotlight.isRevealed)
         #expect(!spotlight.startTravel(animated: false))
 
         try await Task.sleep(for: .milliseconds(200))
         #expect(spotlight.focusCount == 1)
     }
 
-    @Test func cardMovementNeverLandsASecondTime() async throws {
+    /// A second notification while the first is still travelling replaces
+    /// it: the first request's landing must not land the second early.
+    @Test func aReplacedRequestNeverLandsTheNewOne() async throws {
         let spotlight = ProgressSpotlightModel()
         spotlight.arm(day: today)
-        spotlight.startTravel(animated: false)
-        for step in 0..<5 {
-            spotlight.cardMoved(to: CGRect(x: 20, y: 500 - CGFloat(step) * 20, width: 350, height: 280))
-        }
-        try await Task.sleep(for: .milliseconds(400))
-        #expect(spotlight.focusCount == 1)
+        spotlight.startTravel(animated: true)
+        try await Task.sleep(for: .milliseconds(100))
 
-        // Layout keeps changing after landing: no new landing, no new haptic.
-        for step in 0..<5 {
-            spotlight.cardMoved(to: CGRect(x: 20, y: 400 + CGFloat(step), width: 350, height: 280))
-        }
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(spotlight.focusCount == 1)
-        #expect(spotlight.cardFrame == CGRect(x: 20, y: 404, width: 350, height: 280))
+        spotlight.arm(day: today)
+        try await Task.sleep(for: .milliseconds(400))
+
+        #expect(spotlight.phase == .scrolling)
+        #expect(spotlight.focusCount == 0)
     }
 
     @Test func aNewNotificationRearmsTheOneShotGuards() async throws {
@@ -211,7 +202,7 @@ struct ProgressSpotlightTests {
         spotlight.dismiss()
 
         spotlight.arm(day: today)
-        #expect(!spotlight.isRevealed)
+        #expect(spotlight.phase == .scrolling)
         #expect(spotlight.startTravel(animated: false))
         try await Task.sleep(for: .milliseconds(300))
         #expect(spotlight.focusCount == 2)
@@ -223,31 +214,19 @@ struct ProgressSpotlightTests {
         #expect(spotlight.phase == .inactive)
     }
 
-    /// The screenshot bug: an overlay canvas that does not start at the
-    /// space's origin (safe-area shifted) must still put the hole exactly on
-    /// the card.
-    @Test func theHoleMatchesTheCardWhenTheCanvasIsShifted() {
-        let card = CGRect(x: 20, y: 512, width: 350, height: 296)
-
-        // Canvas extended under a 59 pt status bar: it starts above the space.
-        let underStatusBar = CGPoint(x: 0, y: -59)
-        let hole = ProgressSpotlightModel.localHole(cardFrame: card, canvasOrigin: underStatusBar)
-        #expect(hole == CGRect(x: 20, y: 571, width: 350, height: 296))
-        // Drawn back at the canvas origin, it lands on the card again.
-        #expect(hole.offsetBy(dx: underStatusBar.x, dy: underStatusBar.y) == card)
-
-        // A canvas that coincides with the space leaves the frame untouched.
-        #expect(ProgressSpotlightModel.localHole(cardFrame: card, canvasOrigin: .zero) == card)
-    }
-
-    @Test func noOutsideRegionTouchesTheCardAtAnyHeight() {
-        let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
-        for top in stride(from: CGFloat(80), through: 520, by: 40) {
-            let card = CGRect(x: 20, y: top, width: 350, height: 296)
-            let regions = ProgressSpotlightModel.outsideRegions(around: card, in: bounds)
-            #expect(regions.allSatisfy { $0.intersection(card).isEmpty })
-            let covered = regions.reduce(0) { $0 + $1.width * $1.height } + card.width * card.height
-            #expect(covered == bounds.width * bounds.height)
+    /// The spotlight is presentation state only: no frame, rectangle or
+    /// coordinate of any kind lives in the model.
+    @Test func theModelCarriesNoGeometry() {
+        let spotlight = ProgressSpotlightModel()
+        spotlight.arm(day: today)
+        let labels = Mirror(reflecting: spotlight).children.compactMap(\.label)
+        let geometric = labels.filter { label in
+            let lowered = label.lowercased()
+            return ["frame", "rect", "hole", "region", "coordinate", "origin"]
+                .contains { lowered.contains($0) }
         }
+        #expect(geometric.isEmpty)
+        let types = Mirror(reflecting: spotlight).children.map { String(describing: type(of: $0.value)) }
+        #expect(!types.contains { $0.contains("CGRect") || $0.contains("CGPoint") })
     }
 }
