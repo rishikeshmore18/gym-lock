@@ -7,7 +7,7 @@ import SwiftUI
 /// asking the user to log anything and without inventing a single mark.
 ///
 /// The layout is deliberately split: the claim on the left ("4/5 this week"),
-/// the evidence for it on the right (the seven days that produced the number).
+/// the evidence for it on the right (one flame per planned gym session).
 /// A metric with its own receipt next to it is believed; a metric on its own is
 /// just a number the app is asserting.
 struct MomentumSection: View {
@@ -18,10 +18,6 @@ struct MomentumSection: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hasRevealed = false
-
-    /// Caps the day dots on wide screens. Past this they stop reading as marks
-    /// and start reading as buttons.
-    private static let maxDot: CGFloat = 30
 
     var body: some View {
         card
@@ -124,197 +120,65 @@ struct MomentumSection: View {
 
     // MARK: Right — the evidence
 
-    private var week: some View {
-        HStack(spacing: 4) {
-            ForEach(Array(field.days.enumerated()), id: \.element.id) { index, day in
-                VStack(spacing: 7) {
-                    Text(day.label)
-                        .font(.system(size: 10, weight: day.isToday ? .bold : .medium))
-                        .foregroundStyle(day.isToday ? Theme.ink : Theme.inkTertiary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-
-                    MomentumDot(mark: day.mark, isToday: day.isToday)
-                        .frame(maxWidth: Self.maxDot)
-                }
-                .frame(maxWidth: .infinity)
-                .opacity(hasRevealed ? 1 : 0)
-                .scaleEffect(hasRevealed ? 1 : 0.7)
-                .animation(revealAnimation(index: index), value: hasRevealed)
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    /// A short left-to-right cascade, the way the week itself runs. Under
-    /// Reduce Motion the days are simply there.
-    private func revealAnimation(index: Int) -> Animation? {
-        guard !reduceMotion else { return nil }
-        return .spring(response: 0.44, dampingFraction: 0.78)
-            .delay(Double(index) * 0.035)
-    }
-}
-
-// MARK: - One day
-
-/// A single day of the week.
-///
-/// Every state is the same circle at a different weight, so the row reads as one
-/// material: solid for a day that counted, an open ring for one that never
-/// resolved, a small dot for a day nothing was ever asked of.
-private struct MomentumDot: View {
-    let mark: MomentumMark
-    let isToday: Bool
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isBreathing = false
-
-    var body: some View {
-        Color.clear
-            .aspectRatio(1, contentMode: .fit)
-            .overlay { shape }
-            .overlay {
-                if isToday {
-                    // Today is circled rather than filled. It has not earned a
-                    // fill yet, and pretending otherwise would be the one lie
-                    // this whole layer exists to avoid.
-                    Circle()
-                        .strokeBorder(Theme.ink, lineWidth: 1.5)
-                        .padding(-3.5)
-                }
-            }
-            .scaleEffect(isBreathing ? 1.05 : 1)
-            .animation(.spring(response: 0.45, dampingFraction: 0.7), value: mark)
-            .task(id: shouldBreathe) {
-                guard shouldBreathe, !reduceMotion else {
-                    isBreathing = false
-                    return
-                }
-                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                    isBreathing = true
-                }
-            }
-    }
-
-    /// Only today, and only while it is still open. A pulse on a finished day
-    /// would be decoration; here it is the one thing left to do.
-    private var shouldBreathe: Bool { isToday && mark == .planned }
-
+    /// One flame per planned gym session, lit by verified workouts only. With
+    /// no training days there is no honest commitment to draw, so nothing is
+    /// drawn; the left side already says "NO DAYS SET".
     @ViewBuilder
-    private var shape: some View {
-        switch mark {
-        case .verified:
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [Theme.accentWarm, Theme.accent, Theme.accentDeep],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .shadow(color: Theme.accent.opacity(0.35), radius: 4, y: 2)
-
-        case .preserved:
-            Circle()
-                .fill(Theme.accent.opacity(0.16))
-                .overlay {
-                    Circle().strokeBorder(Theme.accent.opacity(0.75), lineWidth: 2)
-                }
-
-        case .missed:
-            // Deflated rather than marked wrong. A red cross on a Tuesday is
-            // the fastest way to lose someone who already feels behind.
-            Circle()
-                .fill(Theme.border)
-                .scaleEffect(0.58)
-
-        case .excused:
-            Circle()
-                .fill(Theme.surfaceMuted)
-                .scaleEffect(0.82)
-
-        case .unresolved:
-            Circle()
-                .strokeBorder(Theme.border, lineWidth: 2)
-
-        case .planned:
-            Circle()
-                .fill(Theme.surfaceMuted)
-
-        case .rest:
-            Circle()
-                .fill(Theme.border.opacity(0.7))
-                .scaleEffect(0.26)
+    private var week: some View {
+        if field.hasSchedule, field.targetCount > 0 {
+            MomentumFlameProgress(
+                verifiedCount: field.verifiedCount,
+                targetCount: field.targetCount,
+                isRevealed: hasRevealed
+            )
+        } else {
+            Color.clear.frame(maxWidth: .infinity)
         }
     }
 }
 
 // MARK: - Previews
 
-#Preview("Momentum · mid-week") {
-    let marks: [MomentumMark] = [.verified, .rest, .verified, .planned, .planned, .rest, .rest]
-
-    return MomentumSection(
-        field: MomentumField(
-            days: marks.enumerated().map { index, mark in
-                MomentumDay(
-                    column: index,
-                    label: Weekday.allCases[index].shortLabel,
-                    mark: mark,
-                    isToday: index == 3
-                )
-            },
-            verifiedCount: 2,
-            preservedCount: 0,
-            targetCount: 4,
-            hasSchedule: true
-        )
+private func previewField(verified: Int, target: Int, home: Int = 0) -> MomentumField {
+    MomentumField(
+        days: [],
+        verifiedCount: verified,
+        preservedCount: home,
+        targetCount: target,
+        hasSchedule: target > 0
     )
+}
+
+private func previewCard(_ field: MomentumField) -> some View {
+    MomentumSection(field: field)
+        .padding(18)
+        .background(Theme.canvas)
+}
+
+#Preview("0 / 3") { previewCard(previewField(verified: 0, target: 3)) }
+#Preview("1 / 3") { previewCard(previewField(verified: 1, target: 3)) }
+#Preview("2 / 3") { previewCard(previewField(verified: 2, target: 3)) }
+#Preview("3 / 3") { previewCard(previewField(verified: 3, target: 3)) }
+#Preview("1 / 4") { previewCard(previewField(verified: 1, target: 4)) }
+#Preview("3 / 4") { previewCard(previewField(verified: 3, target: 4)) }
+#Preview("4 / 4") { previewCard(previewField(verified: 4, target: 4)) }
+#Preview("4 / 5") { previewCard(previewField(verified: 4, target: 5)) }
+#Preview("3 / 7") { previewCard(previewField(verified: 3, target: 7)) }
+#Preview("No schedule") { previewCard(.empty) }
+#Preview("1 / 3 · +1 at home") { previewCard(previewField(verified: 1, target: 3, home: 1)) }
+
+#Preview("Live · new workout, then week complete") {
+    @Previewable @State var verified = 1
+    VStack(spacing: 20) {
+        MomentumSection(field: previewField(verified: verified, target: 3), onTap: {})
+        Button("Verify a workout") { verified = verified >= 3 ? 0 : verified + 1 }
+    }
     .padding(18)
     .background(Theme.canvas)
 }
 
-#Preview("Momentum · mixed week") {
-    let marks: [MomentumMark] = [.verified, .preserved, .verified, .missed, .verified, .rest, .unresolved]
-
-    return MomentumSection(
-        field: MomentumField(
-            days: marks.enumerated().map { index, mark in
-                MomentumDay(
-                    column: index,
-                    label: Weekday.allCases[index].shortLabel,
-                    mark: mark,
-                    isToday: index == 6
-                )
-            },
-            verifiedCount: 3,
-            preservedCount: 1,
-            targetCount: 5,
-            hasSchedule: true
-        ),
-        onTap: {}
-    )
-    .padding(18)
-    .background(Theme.canvas)
-}
-
-#Preview("Momentum · week one") {
-    MomentumSection(
-        field: MomentumField(
-            days: (0..<7).map { index in
-                MomentumDay(
-                    column: index,
-                    label: Weekday.allCases[index].shortLabel,
-                    mark: index < 4 ? .planned : .rest,
-                    isToday: index == 0
-                )
-            },
-            verifiedCount: 0,
-            preservedCount: 0,
-            targetCount: 4,
-            hasSchedule: true
-        )
-    )
-    .padding(18)
-    .background(Theme.canvas)
+#Preview("Narrow · 7 days · large text") {
+    previewCard(previewField(verified: 5, target: 7, home: 2))
+        .frame(width: 375)
+        .dynamicTypeSize(.accessibility2)
 }
