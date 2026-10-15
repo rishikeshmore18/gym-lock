@@ -24,10 +24,11 @@ nonisolated struct SkipScreenPlan: Hashable {
     var rescheduleNote: String?
 }
 
-/// The skip screen's question: can they still reach 3 this week? Counted
-/// workouts so far, plus the planned chances left after today — remaining gym
-/// days and pending reschedules. Today does not count; it is the day being
-/// skipped.
+/// The skip screen's question: can they still reach this week's goal?
+/// Counted workouts so far, plus the planned chances left after today —
+/// remaining gym days and pending reschedules — against the goal the week
+/// was saved with (`StreakSnapshot.weeklyGoal`). Today does not count; it is
+/// the day being skipped.
 nonisolated enum SkipRules {
     /// Workouts counted this week (Monday to Sunday), not counting the day
     /// being skipped.
@@ -83,14 +84,18 @@ nonisolated enum SkipRules {
     /// skip comes first and nothing is made of it. When it is not, reschedule
     /// comes first, recommended. Reschedule is hidden when there is nowhere
     /// to move the workout to (no free days, or Sunday).
+    ///
+    /// `weeklyGoal` is this week's saved goal, the one the streak judges it
+    /// by. A 5-day week with 2 counted and 2 chances left is not reachable.
     static func screen(
         log: MomentumLog,
         plan: MorningPlan,
+        weeklyGoal: Int,
         day: Date,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> SkipScreenPlan {
-        let goal = StreakPolicy.defaultWeeklyGoal
+        let goal = max(1, weeklyGoal)
         let counted = countedThisWeek(log: log, day: day, calendar: calendar)
         let chances = chancesRemaining(log: log, plan: plan, day: day, now: now, calendar: calendar)
         let needed = max(0, goal - counted)

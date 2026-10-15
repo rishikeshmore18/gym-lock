@@ -1759,12 +1759,19 @@ final class GymSessionCoordinator {
         guard let store, let day = session?.day else {
             return SkipScreenPlan(
                 heading: "make it up. this keeps your streak.",
-                moreNeeded: StreakPolicy.defaultWeeklyGoal,
+                moreNeeded: StreakPolicy.minimumGymDays,
                 options: [.homeWorkout, .skip],
                 rescheduleNote: nil
             )
         }
-        return SkipRules.screen(log: store.log, plan: store.plan, day: day, now: Date(), calendar: .current)
+        return SkipRules.screen(
+            log: store.log,
+            plan: store.plan,
+            weeklyGoal: store.weeklyGoal(forWeekContaining: day),
+            day: day,
+            now: Date(),
+            calendar: .current
+        )
     }
 
     /// Where today's workout can be moved to.

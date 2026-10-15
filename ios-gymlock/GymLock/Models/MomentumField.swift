@@ -4,8 +4,9 @@ import Foundation
 ///
 /// The distinction between `verified` and `preserved` is deliberate and is never
 /// blurred: one of them is a trip to the gym, the other is a home session that
-/// kept momentum alive. Both are worth drawing; only one of them counts as
-/// showing up.
+/// kept momentum alive. Both count toward the week's goal, exactly as the
+/// streak counts them; only one of them is a trip to the gym, and the card
+/// says so beside the number.
 enum MomentumMark: Equatable {
     /// Confirmed arrival at the gym.
     case verified
@@ -47,12 +48,18 @@ struct MomentumDay: Equatable, Identifiable {
 struct MomentumField: Equatable {
     /// Exactly seven days, Monday-first.
     var days: [MomentumDay]
-    /// Verified gym visits inside this week.
+    /// Verified gym workouts inside this week.
     var verifiedCount: Int
-    /// Home sessions inside this week, reported separately and never folded
-    /// into the headline number.
+    /// Counted home workouts inside this week, named beside the number so
+    /// it is always clear where the counted days came from.
     var preservedCount: Int
-    /// Sessions the user planned for this week — the denominator.
+    /// Distinct counted workout days this week: `StreakEngine.sessionDays`,
+    /// the same number the streak judges the week by. Gym or home, each day
+    /// once; an arrival without a finished workout is not in it.
+    var countedCount: Int
+    /// This week's goal, as saved when the week started
+    /// (`StreakSnapshot.weeklyGoal`) — the denominator. It never grows to
+    /// hold extra workouts; the commitment is what was planned.
     var targetCount: Int
     /// False when no training days are configured, which is the one case where
     /// there is no honest fraction to show.
@@ -62,23 +69,30 @@ struct MomentumField: Equatable {
         days: [],
         verifiedCount: 0,
         preservedCount: 0,
+        countedCount: 0,
         targetCount: 0,
         hasSchedule: false
     )
 
     // MARK: Derived copy
 
-    /// The headline metric: gym visits against sessions planned this week.
+    /// Counted stages on the card: never more than the goal. Extra workouts
+    /// are not drawn.
+    var completedStages: Int {
+        min(max(countedCount, 0), max(targetCount, 0))
+    }
+
+    /// The headline metric: counted workout days against this week's goal.
     var summaryValue: String {
         guard hasSchedule, targetCount > 0 else { return "—" }
-        return "\(verifiedCount)/\(targetCount)"
+        return "\(countedCount)/\(targetCount)"
     }
 
     var caption: String {
         hasSchedule && targetCount > 0 ? "THIS WEEK" : "NO DAYS SET"
     }
 
-    /// Home sessions get their own line rather than inflating the fraction.
+    /// How many of the counted days were home workouts.
     var homeNote: String? {
         guard preservedCount > 0 else { return nil }
         return preservedCount == 1 ? "+1 at home" : "+\(preservedCount) at home"
@@ -88,23 +102,27 @@ struct MomentumField: Equatable {
         guard hasSchedule, targetCount > 0 else {
             return "Momentum. No training days set yet."
         }
-        var text = "Momentum. \(verifiedCount) of \(targetCount) planned gym sessions this week."
+        var text = "Momentum. \(countedCount) of \(targetCount) workout days this week."
         if preservedCount > 0 {
-            text += " Plus \(preservedCount) kept at home."
+            text += " \(preservedCount) of them at home."
         }
         return text
     }
 
     // MARK: Building
 
-    /// Builds the current week from the ledger and the user's plan.
+    /// Builds the current week from the ledger, the user's plan and this
+    /// week's saved goal.
     ///
-    /// The week is Monday-first regardless of locale so the field lines up with
-    /// the schedule selector the user configured.
+    /// `weeklyGoal` is `StreakSnapshot.weeklyGoal`: the card's denominator is
+    /// the streak's, never a second number derived here. The week is
+    /// Monday-first regardless of locale so the field lines up with the
+    /// schedule selector the user configured.
     static func build(
         log: MomentumLog,
         plan: MorningPlan,
         schedule: GymSchedule,
+        weeklyGoal: Int,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> MomentumField {
@@ -163,22 +181,26 @@ struct MomentumField: Equatable {
             )
         }
 
+        // The one definition of a counted day, shared with the streak.
+        let counted = StreakEngine.sessionDays(in: log, weekStarting: week.start, calendar: calendar).count
+
         return MomentumField(
             days: days,
             verifiedCount: verified,
             preservedCount: preserved,
-            // A gym visit on an unplanned day still counts, so the denominator
-            // grows to hold it rather than the fraction going above one.
-            targetCount: max(trainingDays.count, verified),
+            countedCount: counted,
+            targetCount: trainingDays.isEmpty ? 0 : max(weeklyGoal, 1),
             hasSchedule: !trainingDays.isEmpty
         )
     }
 
     /// The best thing a single day can honestly be said to have been.
     private static func dominantMark(_ outcomes: [SessionOutcome]) -> MomentumMark {
-        // Verified means the workout was done; a gym visit alone is not.
+        // Verified means the workout was done; a gym visit alone is not. A
+        // home workout is preserved once it counts, by the same rule the
+        // streak applies.
         if outcomes.contains(where: \.isVerifiedWorkout) { return .verified }
-        if outcomes.contains(where: { $0.kind == .homeWorkout }) { return .preserved }
+        if outcomes.contains(where: { $0.kind == .homeWorkout && $0.counts }) { return .preserved }
         if outcomes.contains(where: { $0.kind == .missed }) { return .missed }
         return .excused
     }

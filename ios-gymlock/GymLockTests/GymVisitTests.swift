@@ -194,21 +194,26 @@ struct GymVisitTests {
 
     // MARK: - The notification line
 
-    @Test func theLineUsesTheRealCountThisWeek() {
-        #expect(WorkoutDoneLine.countLine(2) == "2 of 3 this week. share your progress.")
-        #expect(WorkoutDoneLine.countLine(3) == "that's 3. this one keeps your streak.")
-        #expect(WorkoutDoneLine.countLine(4) == "4 this week. that's a bonus day.")
-        #expect(WorkoutDoneLine.countLine(1) == "1 of 3 this week. share your progress.")
+    @Test func theLineUsesTheRealCountThisWeekAgainstTheWeeksGoal() {
+        #expect(WorkoutDoneLine.countLine(2, goal: 3) == "2 of 3 this week. share your progress.")
+        #expect(WorkoutDoneLine.countLine(3, goal: 3) == "that's 3. this one keeps your streak.")
+        #expect(WorkoutDoneLine.countLine(4, goal: 3) == "4 this week. that's a bonus day.")
+        #expect(WorkoutDoneLine.countLine(1, goal: 3) == "1 of 3 this week. share your progress.")
+
+        // A 4-day plan: 3 is not the one that keeps the streak.
+        #expect(WorkoutDoneLine.countLine(3, goal: 4) == "3 of 4 this week. share your progress.")
+        #expect(WorkoutDoneLine.countLine(4, goal: 4) == "that's 4. this one keeps your streak.")
+        #expect(WorkoutDoneLine.countLine(5, goal: 4) == "5 this week. that's a bonus day.")
     }
 
     @Test func comingBackAfterAMissGetsItsOwnLine() {
-        #expect(WorkoutDoneLine.pick(countThisWeek: 2, cameBack: true, last: nil) == WorkoutDoneLine.cameBack)
+        #expect(WorkoutDoneLine.pick(countThisWeek: 2, goal: 3, cameBack: true, last: nil) == WorkoutDoneLine.cameBack)
         #expect(WorkoutDoneLine.cameBack == "you came back. that's the hardest one.")
     }
 
     @Test func theSameLineIsNeverSentTwiceInARow() {
-        let line = WorkoutDoneLine.pick(countThisWeek: 2, cameBack: true, last: WorkoutDoneLine.cameBack)
-        #expect(line == WorkoutDoneLine.countLine(2))
+        let line = WorkoutDoneLine.pick(countThisWeek: 2, goal: 3, cameBack: true, last: WorkoutDoneLine.cameBack)
+        #expect(line == WorkoutDoneLine.countLine(2, goal: 3))
     }
 
     @Test func comebackIsTheFirstCountedDayAfterAMissedOrSkippedDay() throws {
@@ -231,8 +236,9 @@ struct GymVisitTests {
         // Scheduled for 30 minutes, with this workout already in the count.
         let scheduled = current(tracker, visit.id)
         #expect(scheduled?.doneFireAt == arrived.addingTimeInterval(minutes(30)))
-        #expect(scheduled?.doneLine == WorkoutDoneLine.countLine(1))
-        #expect(tracker.lastLine == WorkoutDoneLine.countLine(1))
+        let goal = store.streak.weeklyGoal
+        #expect(scheduled?.doneLine == WorkoutDoneLine.countLine(1, goal: goal))
+        #expect(tracker.lastLine == WorkoutDoneLine.countLine(1, goal: goal))
     }
 
     @Test func aVisitInSleepHoursGetsTheSleepLine() {
@@ -247,7 +253,7 @@ struct GymVisitTests {
     @Test func noGymLineUsesAnEmDash() {
         let lines = [
             WorkoutDoneLine.arrival, WorkoutDoneLine.cameBack,
-            WorkoutDoneLine.countLine(2), WorkoutDoneLine.countLine(3), WorkoutDoneLine.countLine(4),
+            WorkoutDoneLine.countLine(2, goal: 3), WorkoutDoneLine.countLine(3, goal: 3), WorkoutDoneLine.countLine(4, goal: 3),
             WorkoutDoneLine.sleepLine(bedtime: "23:00"), WorkoutDoneLine.shortVisit(minutes: 12),
         ]
         for line in lines { #expect(!line.contains("\u{2014}")) }

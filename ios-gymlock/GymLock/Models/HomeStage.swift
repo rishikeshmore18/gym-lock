@@ -132,6 +132,7 @@ enum HomeCardDeriver {
             log: store.log,
             plan: store.plan,
             schedule: store.schedule,
+            weeklyGoal: store.streak.weeklyGoal,
             now: now,
             calendar: calendar
         )

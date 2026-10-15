@@ -262,9 +262,10 @@ nonisolated enum WorkoutDoneLine {
     static let arrival = "you're in. 20 minutes and today counts."
     static let cameBack = "you came back. that's the hardest one."
 
-    /// The count line, with the real number of workouts this week.
-    static func countLine(_ count: Int) -> String {
-        let goal = StreakPolicy.minimumGymDays
+    /// The count line, with the real number of workouts this week against
+    /// this week's goal (the days planned for it).
+    static func countLine(_ count: Int, goal: Int) -> String {
+        let goal = max(1, goal)
         if count < goal { return "\(count) of \(goal) this week. share your progress." }
         if count == goal { return "that's \(goal). this one keeps your streak." }
         return "\(count) this week. that's a bonus day."
@@ -281,8 +282,8 @@ nonisolated enum WorkoutDoneLine {
     /// The line to send. The comeback line comes first when it is true;
     /// the same line is never sent twice in a row when another true one
     /// exists.
-    static func pick(countThisWeek: Int, cameBack isComeback: Bool, last: String?) -> String {
-        let candidates = (isComeback ? [cameBack] : []) + [countLine(countThisWeek)]
+    static func pick(countThisWeek: Int, goal: Int, cameBack isComeback: Bool, last: String?) -> String {
+        let candidates = (isComeback ? [cameBack] : []) + [countLine(countThisWeek, goal: goal)]
         return candidates.first { $0 != last } ?? candidates[0]
     }
 

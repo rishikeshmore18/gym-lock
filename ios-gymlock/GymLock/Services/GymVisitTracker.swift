@@ -214,7 +214,8 @@ final class GymVisitTracker {
         }
         let count = WorkoutDoneLine.countThisWeek(log: counted, day: visit.countsOn, calendar: calendar)
         let comeback = WorkoutDoneLine.isComeback(log: store.log, day: visit.countsOn, calendar: calendar)
-        return WorkoutDoneLine.pick(countThisWeek: count, cameBack: comeback, last: lastLine)
+        let goal = store.weeklyGoal(forWeekContaining: visit.countsOn, calendar: calendar)
+        return WorkoutDoneLine.pick(countThisWeek: count, goal: goal, cameBack: comeback, last: lastLine)
     }
 
     // MARK: - Storage

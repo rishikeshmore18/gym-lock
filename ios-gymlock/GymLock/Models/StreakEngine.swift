@@ -49,9 +49,10 @@ enum StreakEngine {
         let plannedDays = plan.effectiveTrainingDays(fallback: schedule).count
         let sessionDays = sessionDaysByWeek(log, calendar: calendar, weekCalendar: weekCalendar)
 
-        // Set once, never moved. A user with history when the 3-day rule
-        // arrived keeps the week they are in; it starts next Monday. Anyone
-        // else gets it from their first week.
+        // Set once, never moved. A user with history when the 3-day minimum
+        // arrived keeps the week they were in; it starts next Monday. Anyone
+        // else gets it from their first week. Only decides which weeks are
+        // backfilled by the legacy rule.
         let ruleStart: Date
         if let stored = vault.threeDayRuleStart {
             ruleStart = stored
@@ -65,8 +66,10 @@ enum StreakEngine {
         }
 
         // A week's goal is saved the first time it is seen and read back ever
-        // after. On the first run after the update this backfills every past
-        // week with exactly the goal it shows today.
+        // after: the days planned for it (FLOW, item 19a). A plan change
+        // therefore applies from the next week the engine meets, never to a
+        // week already saved. On a first run with no saved goals this
+        // backfills every past week with exactly the goal it shows today.
         func goal(forWeekStarting week: Date) -> Int {
             if let saved = vault.savedGoal(forWeekStarting: week, calendar: calendar) {
                 return saved
@@ -79,6 +82,24 @@ enum StreakEngine {
             )
             vault.weekGoals[week] = goal
             return goal
+        }
+
+        // One-time migration from the fixed-3 rule (FLOW, item 19a): the live
+        // week's saved goal becomes the plan it was made under, so the new
+        // rule is real now rather than from next Monday. Past weeks keep the
+        // goal they were judged by. Never repeated, so a plan change later
+        // this week still waits for Monday.
+        if (vault.goalRule ?? 0) < StreakPolicy.currentGoalRule {
+            if vault.savedGoal(forWeekStarting: liveWeekStart, calendar: calendar) != nil {
+                let key = vault.weekGoals.keys.first { calendar.isDate($0, inSameDayAs: liveWeekStart) } ?? liveWeekStart
+                vault.weekGoals[key] = StreakPolicy.goal(
+                    forWeekStarting: liveWeekStart,
+                    ruleStart: ruleStart,
+                    plannedDays: plannedDays,
+                    calendar: calendar
+                )
+            }
+            vault.goalRule = StreakPolicy.currentGoalRule
         }
 
         // The first launch on the week-based logic has nothing to spend.
@@ -186,8 +207,8 @@ enum StreakEngine {
         weekCalendar.dateInterval(of: .weekOfYear, for: date)?.start
     }
 
-    /// The first week the 3-day rule covers: next Monday for someone who
-    /// already has history, the live week for someone who doesn't.
+    /// The first week the 3-day minimum covered: next Monday for someone who
+    /// already had history, the live week for someone who didn't.
     static func threeDayRuleStart(
         hasHistory: Bool,
         liveWeekStart: Date,
@@ -204,8 +225,9 @@ enum StreakEngine {
     ///
     /// This is the single definition of a "session day": several outcomes on
     /// one day count once, and only outcomes that preserve momentum count at
-    /// all. The share frames read it too, so a streak number and the "3 of 3"
-    /// beside it can never be counting different things.
+    /// all. The share frames and the Momentum card read it too, so a streak
+    /// number and the "3 of 4" beside it can never be counting different
+    /// things.
     static func sessionDays(
         in log: MomentumLog,
         weekStarting start: Date,

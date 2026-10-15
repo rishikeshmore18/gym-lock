@@ -615,7 +615,7 @@ extension GymSessionCoordinator {
             let start = store.streakVault.threeDayRuleStart?
                 .formatted(date: .abbreviated, time: .omitted) ?? "none"
             Self.debugWeekRulesResult =
-                "2 gym days · goal \(store.streak.weeklyGoal) this week · 3 from \(start) · reopen the app"
+                "2 gym days · goal \(store.streak.weeklyGoal) this week · minimum 3 from \(start) · reopen the app"
 
         case .changePlanMidWeek:
             guard let store = debugStore else { return }

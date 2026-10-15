@@ -315,6 +315,7 @@ struct FreezeAndRiskTests {
         plan p: MorningPlan? = nil,
         at now: Date,
         streak: Int = 6,
+        goal: Int = 3,
         frozen: Bool = false,
         freezes: Int = 0,
         sawMakeUp: Bool = false
@@ -323,7 +324,7 @@ struct FreezeAndRiskTests {
             log: log,
             plan: p ?? plan(),
             streakWeeks: streak,
-            weeklyGoal: 3,
+            weeklyGoal: goal,
             isWeekFrozen: frozen,
             freezesHeld: freezes,
             homeWorkoutsUsed: HomeWorkoutRules.usedThisMonth(log: log, now: now, calendar: calendar),
@@ -373,6 +374,20 @@ struct FreezeAndRiskTests {
         // With two counted, one needed and Wed + Fri ahead: quiet until
         // Friday's alarm has passed.
         #expect(notice(workouts([0, 1]), at: tuesday)?.fireDate == date(2026, 9, 25, 10))
+    }
+
+    @Test func riskIsJudgedAgainstTheWeeksGoalNotThree() {
+        // A 4-day plan (Mon/Tue/Thu/Fri), Monday and Tuesday done, Wednesday
+        // 09:00: Thu and Fri left for the 2 needed, so quiet.
+        let fourDays = plan(days: [.monday, .tuesday, .thursday, .friday])
+        let log = workouts([0, 1])
+        #expect(banner(log, plan: fourDays, at: date(2026, 9, 23, 9), goal: 4) == nil)
+
+        // Thursday's alarm passed with nothing counted: only Friday left for
+        // the 2 still needed. Under a fixed 3 this week would look safe.
+        let thursday = date(2026, 9, 24, 9)
+        #expect(banner(log, plan: fourDays, at: thursday, goal: 4)?.line == "2 workouts keep your 6-week streak.")
+        #expect(banner(log, plan: fourDays, at: thursday, goal: 3) == nil)
     }
 
     @Test func todaysAlarmCountsUntilItRings() {

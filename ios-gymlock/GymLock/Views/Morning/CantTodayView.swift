@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// The same screen appears whether they tapped "can't today" or slept through
 /// the alarm. The heading and the order of the three doors follow one
-/// question: can they still reach 3 this week with the planned days left?
+/// question: can they still reach this week's goal with the planned days left?
 /// There is no skip budget and nothing is taken away.
 ///
 /// PLACEHOLDER UI: designed in Step 3

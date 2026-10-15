@@ -7,7 +7,10 @@ import SwiftUI
 /// asking the user to log anything and without inventing a single mark.
 ///
 /// The layout is deliberately split: the claim on the left ("4/5 this week"),
-/// the evidence for it on the right (one flame per planned gym session).
+/// the evidence for it on the right (one flame per planned workout day). Both
+/// count what the streak counts: distinct workout days, gym or home, against
+/// the goal the week was saved with. The "+N at home" note says where the
+/// counted days came from.
 /// A metric with its own receipt next to it is believed; a metric on its own is
 /// just a number the app is asserting.
 struct MomentumSection: View {
@@ -85,7 +88,7 @@ struct MomentumSection: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .contentTransition(.numericText())
-                .animation(.spring(response: 0.42, dampingFraction: 0.75), value: field.verifiedCount)
+                .animation(.spring(response: 0.42, dampingFraction: 0.75), value: field.countedCount)
                 .padding(.top, 6)
 
             HStack(spacing: 5) {
@@ -96,8 +99,8 @@ struct MomentumSection: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
 
-                // Home sessions are reported next to the metric, never inside
-                // it: they keep momentum, but they are not a trip to the gym.
+                // Home workouts are inside the number, like the streak counts
+                // them; the note says how many of the counted days they were.
                 if let note = field.homeNote {
                     Text(note)
                         .font(.system(size: 10, weight: .semibold))
@@ -120,14 +123,14 @@ struct MomentumSection: View {
 
     // MARK: Right — the evidence
 
-    /// One flame per planned gym session, lit by verified workouts only. With
-    /// no training days there is no honest commitment to draw, so nothing is
-    /// drawn; the left side already says "NO DAYS SET".
+    /// One flame per planned workout day, lit by counted workout days (gym or
+    /// home). With no training days there is no honest commitment to draw,
+    /// so nothing is drawn; the left side already says "NO DAYS SET".
     @ViewBuilder
     private var week: some View {
         if field.hasSchedule, field.targetCount > 0 {
             MomentumFlameProgress(
-                verifiedCount: field.verifiedCount,
+                countedCount: field.countedCount,
                 targetCount: field.targetCount,
                 isRevealed: hasRevealed
             )
@@ -139,11 +142,13 @@ struct MomentumSection: View {
 
 // MARK: - Previews
 
+/// `verified` gym days plus `home` counted home days, against a `target`.
 private func previewField(verified: Int, target: Int, home: Int = 0) -> MomentumField {
     MomentumField(
         days: [],
         verifiedCount: verified,
         preservedCount: home,
+        countedCount: verified + home,
         targetCount: target,
         hasSchedule: target > 0
     )
@@ -165,7 +170,10 @@ private func previewCard(_ field: MomentumField) -> some View {
 #Preview("4 / 5") { previewCard(previewField(verified: 4, target: 5)) }
 #Preview("3 / 7") { previewCard(previewField(verified: 3, target: 7)) }
 #Preview("No schedule") { previewCard(.empty) }
-#Preview("1 / 3 · +1 at home") { previewCard(previewField(verified: 1, target: 3, home: 1)) }
+#Preview("2 / 3 · +1 at home") { previewCard(previewField(verified: 1, target: 3, home: 1)) }
+#Preview("3 / 3 · +2 at home") { previewCard(previewField(verified: 1, target: 3, home: 2)) }
+#Preview("3 / 4 · +2 at home") { previewCard(previewField(verified: 1, target: 4, home: 2)) }
+#Preview("5 counted on a 4-day plan") { previewCard(previewField(verified: 5, target: 4)) }
 
 #Preview("Live · new workout, then week complete") {
     @Previewable @State var verified = 1
@@ -178,7 +186,7 @@ private func previewCard(_ field: MomentumField) -> some View {
 }
 
 #Preview("Narrow · 7 days · large text") {
-    previewCard(previewField(verified: 5, target: 7, home: 2))
+    previewCard(previewField(verified: 3, target: 7, home: 2))
         .frame(width: 375)
         .dynamicTypeSize(.accessibility2)
 }

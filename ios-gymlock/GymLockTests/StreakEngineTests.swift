@@ -124,16 +124,119 @@ struct StreakEngineTests {
         #expect(evaluate(ledger, vault: &vault).weeks == 3)
     }
 
-    // MARK: Goal clamping
+    // MARK: The weekly goal is the plan (FLOW, item 19a)
 
-    @Test("Weeks before the 3-day rule keep the old goal, clamped to the plan")
-    func goalClamping() {
+    /// Counted days in the live week, Monday onward, one per kind given.
+    private func liveWeek(_ kinds: [SessionOutcomeKind]) -> MomentumLog {
+        MomentumLog(outcomes: kinds.enumerated().map { offset, kind in
+            SessionOutcome(date: day(offset), kind: kind)
+        })
+    }
+
+    /// A vault already past the 3-day minimum's start, so every week is
+    /// judged by the plan rule rather than backfilled by the legacy one.
+    private var planRuleVault: StreakVault {
+        var vault = StreakVault.empty
+        vault.threeDayRuleStart = day(-700, hour: 0)
+        return vault
+    }
+
+    @Test("The weekly goal is the number of planned days, floored at 3")
+    func goalIsThePlan() {
+        #expect(StreakPolicy.weeklyGoal(plannedDays: 3) == 3)
+        #expect(StreakPolicy.weeklyGoal(plannedDays: 4) == 4)
+        #expect(StreakPolicy.weeklyGoal(plannedDays: 5) == 5)
+        #expect(StreakPolicy.weeklyGoal(plannedDays: 7) == 7)
+        // The floor is validation, not a goal: a legacy 2-day plan needs 3.
+        #expect(StreakPolicy.weeklyGoal(plannedDays: 2) == 3)
+        #expect(StreakPolicy.weeklyGoal(plannedDays: 0) == 3)
+    }
+
+    @Test("A 3-day plan is kept at 3, not at 2")
+    func threeDayPlan() {
+        var vault = planRuleVault
+        let two = evaluate(liveWeek([.showedUp, .showedUp]), plan: planWith(days: 3), vault: &vault, now: day(6, hour: 12))
+        #expect(two.weeklyGoal == 3)
+        #expect(two.thisWeekSessionDays == 2)
+        #expect(!two.isThisWeekKept)
+
+        let three = evaluate(liveWeek([.showedUp, .showedUp, .showedUp]), plan: planWith(days: 3), vault: &vault, now: day(6, hour: 12))
+        #expect(three.isThisWeekKept)
+        #expect(three.weeks == 1)
+    }
+
+    @Test("A 4-day plan is not kept at 3; the 4th counted day keeps it")
+    func fourDayPlan() {
+        var vault = planRuleVault
+        let three = evaluate(liveWeek([.showedUp, .showedUp, .showedUp]), plan: planWith(days: 4), vault: &vault, now: day(6, hour: 12))
+        #expect(three.weeklyGoal == 4)
+        #expect(three.thisWeekSessionDays == 3)
+        #expect(!three.isThisWeekKept)
+        #expect(three.weeks == 0)
+
+        let four = evaluate(liveWeek([.showedUp, .showedUp, .showedUp, .showedUp]), plan: planWith(days: 4), vault: &vault, now: day(6, hour: 12))
+        #expect(four.isThisWeekKept)
+        #expect(four.weeks == 1)
+    }
+
+    @Test("A 5-day plan needs 5")
+    func fiveDayPlan() {
+        var vault = planRuleVault
+        let four = evaluate(liveWeek(Array(repeating: .showedUp, count: 4)), plan: planWith(days: 5), vault: &vault, now: day(6, hour: 12))
+        #expect(four.weeklyGoal == 5)
+        #expect(!four.isThisWeekKept)
+
+        let five = evaluate(liveWeek(Array(repeating: .showedUp, count: 5)), plan: planWith(days: 5), vault: &vault, now: day(6, hour: 12))
+        #expect(five.isThisWeekKept)
+    }
+
+    @Test("A 7-day plan needs 7")
+    func sevenDayPlan() {
+        var vault = planRuleVault
+        let six = evaluate(liveWeek(Array(repeating: .showedUp, count: 6)), plan: planWith(days: 7), vault: &vault, now: day(6, hour: 12))
+        #expect(six.weeklyGoal == 7)
+        #expect(!six.isThisWeekKept)
+
+        let seven = evaluate(liveWeek(Array(repeating: .showedUp, count: 7)), plan: planWith(days: 7), vault: &vault, now: day(6, hour: 12))
+        #expect(seven.isThisWeekKept)
+        #expect(seven.weeks == 1)
+    }
+
+    @Test("Home workouts count toward the plan's goal, each day once")
+    func homeWorkoutsCountTowardTheGoal() {
+        var vault = planRuleVault
+        // 4-day plan: one gym workout and two verified home workouts.
+        let three = evaluate(liveWeek([.showedUp, .homeWorkout, .homeWorkout]), plan: planWith(days: 4), vault: &vault, now: day(6, hour: 12))
+        #expect(three.thisWeekSessionDays == 3)
+        #expect(three.weeklyGoal == 4)
+        #expect(!three.isThisWeekKept)
+
+        let four = evaluate(liveWeek([.showedUp, .homeWorkout, .homeWorkout, .homeWorkout]), plan: planWith(days: 4), vault: &vault, now: day(6, hour: 12))
+        #expect(four.thisWeekSessionDays == 4)
+        #expect(four.isThisWeekKept)
+    }
+
+    @Test("A gym arrival without a finished workout does not count")
+    func unprovenArrivalDoesNotCount() {
+        var vault = planRuleVault
+        let ledger = MomentumLog(outcomes: [
+            SessionOutcome(date: day(0), kind: .showedUp),
+            SessionOutcome(date: day(1), kind: .showedUp),
+            SessionOutcome(date: day(2), kind: .showedUp, proof: .unproven),
+        ])
+        let snapshot = evaluate(ledger, plan: planWith(days: 3), vault: &vault, now: day(6, hour: 12))
+        #expect(snapshot.thisWeekSessionDays == 2)
+        #expect(!snapshot.isThisWeekKept)
+    }
+
+    @Test("Weeks before the 3-day minimum keep the legacy goal, clamped to the plan")
+    func legacyGoalClamping() {
         #expect(StreakPolicy.legacyWeeklyGoal(plannedDays: 2) == 2)
         #expect(StreakPolicy.legacyWeeklyGoal(plannedDays: 5) == 3)
         #expect(StreakPolicy.legacyWeeklyGoal(plannedDays: 0) == 1)
 
         // An existing user: history exists, so the live week keeps its old
-        // goal and the 3-day rule starts next Monday.
+        // goal and the plan rule starts next Monday.
         var vault = StreakVault.empty
         let twoDays = MomentumLog(outcomes: [
             SessionOutcome(date: day(-7), kind: .showedUp),

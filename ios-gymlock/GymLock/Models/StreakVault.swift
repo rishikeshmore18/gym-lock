@@ -8,27 +8,37 @@ import Foundation
 nonisolated enum StreakPolicy {
     /// The most freezes a user can hold at once.
     static let maximumFreezes = 2
-    /// Workouts a week needs to be kept. Whatever the plan says.
-    static let defaultWeeklyGoal = 3
-    /// Nobody can plan fewer gym days than this.
+    /// Nobody can plan fewer gym days than this. A validation floor, not a
+    /// goal: the goal is the plan itself (`weeklyGoal(plannedDays:)`).
     static let minimumGymDays = 3
     /// The note shown when a gym day can't come off (FLOW, "Which nights").
     static let minimumGymDaysMessage = "3 gym days is the minimum."
+    /// The goal rule vaults are on once the live week has been brought in
+    /// line with the plan (FLOW, item 19a). Bump when the rule changes again.
+    static let currentGoalRule = 1
 
-    /// The rule weeks were judged by before the 3-day minimum: three, but
-    /// never more than the plan, floored at one.
+    /// The one weekly goal (FLOW, item 19a): the number of workout days
+    /// planned for the week. Valid plans hold 3 to 7 days, so this normally
+    /// equals the plan; the floor only catches a legacy plan still below 3.
+    static func weeklyGoal(plannedDays: Int) -> Int {
+        max(minimumGymDays, plannedDays)
+    }
+
+    /// The rule weeks were judged by before the 3-day minimum existed: three,
+    /// but never more than the plan, floored at one.
     ///
-    /// Only used to save the goal of weeks that started before
+    /// Only used to backfill the goal of weeks that started before
     /// `StreakVault.threeDayRuleStart`, so no existing user sees a past week
     /// change. Never used for a week on or after it.
     static func legacyWeeklyGoal(plannedDays: Int) -> Int {
-        max(1, min(defaultWeeklyGoal, plannedDays))
+        max(1, min(minimumGymDays, plannedDays))
     }
 
     /// The goal a week gets the first time the engine sees it.
     ///
-    /// On or after the rule start it is always 3. Before it, the legacy rule
-    /// with the plan as it is when the goal is saved.
+    /// On or after the rule start it is the plan (`weeklyGoal(plannedDays:)`).
+    /// Before it, the legacy rule with the plan as it is when the goal is
+    /// saved, so history is never re-judged.
     static func goal(
         forWeekStarting weekStart: Date,
         ruleStart: Date,
@@ -36,7 +46,7 @@ nonisolated enum StreakPolicy {
         calendar: Calendar
     ) -> Int {
         let isCovered = calendar.compare(weekStart, to: ruleStart, toGranularity: .day) != .orderedAscending
-        return isCovered ? defaultWeeklyGoal : legacyWeeklyGoal(plannedDays: plannedDays)
+        return isCovered ? weeklyGoal(plannedDays: plannedDays) : legacyWeeklyGoal(plannedDays: plannedDays)
     }
 
     /// Whether an existing user should be asked to add a gym day on open.
@@ -73,10 +83,16 @@ nonisolated struct StreakVault: Codable, Hashable {
     /// engine sees the week. After that it is the only thing that week is
     /// judged by, so a plan change can never rewrite it.
     var weekGoals: [Date: Int] = [:]
-    /// Monday of the first week the 3-day rule applies to. Set once and never
-    /// moved: next Monday for a user who already had history when this rule
-    /// arrived, their first week for everyone else.
+    /// Monday of the first week the 3-day minimum applied to. Set once and
+    /// never moved: next Monday for a user who already had history when that
+    /// rule arrived, their first week for everyone else. Only decides which
+    /// weeks are backfilled by the legacy rule; nothing newer reads it.
     var threeDayRuleStart: Date?
+    /// Which goal rule the vault has been migrated to
+    /// (`StreakPolicy.currentGoalRule`). Nil on vaults saved under the fixed-3
+    /// rule; the first evaluation after the update brings the live week's
+    /// goal in line with the plan, once, and sets this.
+    var goalRule: Int?
     /// How far the freeze calendar has been settled (FLOW, Flow 5): every
     /// grant and every Dec 31 expiry up to this moment has been applied, and
     /// none after it. Nil on vaults saved before the calendar existed; the
@@ -90,7 +106,7 @@ nonisolated struct StreakVault: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case freezesAvailable, frozenWeekStarts, preArmedWeekStart
         case lastEvaluatedWeekStart, kept4Counter, weekGoals, threeDayRuleStart
-        case freezeClock, freezeYear
+        case freezeClock, freezeYear, goalRule
     }
 
     static let empty = StreakVault(
@@ -137,6 +153,7 @@ extension StreakVault {
         threeDayRuleStart = try container.decodeIfPresent(Date.self, forKey: .threeDayRuleStart)
         freezeClock = try container.decodeIfPresent(Date.self, forKey: .freezeClock)
         freezeYear = try container.decodeIfPresent(Int.self, forKey: .freezeYear)
+        goalRule = try container.decodeIfPresent(Int.self, forKey: .goalRule)
     }
 }
 
@@ -146,6 +163,9 @@ nonisolated struct StreakSnapshot: Hashable {
     /// Kept weeks in a row, including the live week once it is kept. The one
     /// number shown everywhere.
     var weeks: Int
+    /// The live week's goal: the days planned for it, saved when it started.
+    /// The same number the Momentum card, the skip screen and the at-risk
+    /// check use.
     var weeklyGoal: Int
     /// Distinct days this week with a momentum-preserving outcome.
     var thisWeekSessionDays: Int
@@ -160,7 +180,7 @@ nonisolated struct StreakSnapshot: Hashable {
 
     static let empty = StreakSnapshot(
         weeks: 0,
-        weeklyGoal: StreakPolicy.defaultWeeklyGoal,
+        weeklyGoal: StreakPolicy.minimumGymDays,
         thisWeekSessionDays: 0,
         isThisWeekKept: false,
         freezesAvailable: 0,

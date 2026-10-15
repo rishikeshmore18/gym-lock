@@ -159,9 +159,13 @@ struct TodayHomeView: View {
         .onChange(of: intro.absorbPulse) { _, _ in absorbCard() }
         .onChange(of: cards.pathStep) { previous, current in
             // A step forward earns exactly one tap, and finishing the path is
-            // the one moment that gets the full success haptic.
+            // the one moment that gets the full success haptic. When that
+            // same workout also completes the week, the Momentum card owns
+            // the success haptic, so the path only taps: one commit per event.
             guard current > previous else { return }
-            if current >= 4 {
+            let momentum = cards.momentum
+            let weekCompletesNow = momentum.targetCount > 0 && momentum.countedCount == momentum.targetCount
+            if current >= 4, !weekCompletesNow {
                 Haptics.commit()
             } else {
                 Haptics.tap()

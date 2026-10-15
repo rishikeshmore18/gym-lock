@@ -3,17 +3,17 @@ import SwiftUI
 /// The right half of the Momentum card: the week's gym commitment as a row of
 /// flames, one per planned session, joined by connectors.
 ///
-/// A flame lights only for a verified gym workout (`MomentumField.verifiedCount`).
-/// Home sessions never light one; they stay in the "+X at home" note on the
-/// left. The number of flames is the user's own plan (`targetCount`), never
-/// the streak's three-day floor.
+/// A flame lights for each counted workout day (`MomentumField.countedCount`):
+/// gym or home, the same days the streak counts, each day once. The number
+/// of flames is this week's goal (`targetCount`), the days the user planned.
+/// Extra workouts past the goal light nothing more.
 ///
 /// Motion follows the badges emblem's rule: light is the only motion. Lit
 /// flames carry the same slow specular sweep as `BadgeEmblem`, the next unlit
 /// flame breathes gently to mark itself as the next task, and nothing ever
 /// scales, bounces, or pulses.
 struct MomentumFlameProgress: View {
-    let verifiedCount: Int
+    let countedCount: Int
     let targetCount: Int
     /// Flips to true once, when the Momentum card has arrived on screen.
     let isRevealed: Bool
@@ -30,17 +30,17 @@ struct MomentumFlameProgress: View {
     /// card keeps exactly the size it had.
     private static let height: CGFloat = 52
 
-    init(verifiedCount: Int, targetCount: Int, isRevealed: Bool) {
-        self.verifiedCount = verifiedCount
+    init(countedCount: Int, targetCount: Int, isRevealed: Bool) {
+        self.countedCount = countedCount
         self.targetCount = targetCount
         self.isRevealed = isRevealed
-        let lit = Self.lit(verifiedCount, of: targetCount)
+        let lit = Self.lit(countedCount, of: targetCount)
         _litCount = State(initialValue: lit)
         _filledConnectors = State(initialValue: max(0, lit - 1))
     }
 
     private struct Snapshot: Equatable {
-        var verified: Int
+        var counted: Int
         var target: Int
     }
 
@@ -60,7 +60,7 @@ struct MomentumFlameProgress: View {
                         .frame(width: proxy.size.width, height: proxy.size.height)
                 }
             }
-            .onChange(of: Snapshot(verified: verifiedCount, target: targetCount)) { old, new in
+            .onChange(of: Snapshot(counted: countedCount, target: targetCount)) { old, new in
                 apply(from: old, to: new)
             }
             .onDisappear { sequence?.cancel() }
@@ -108,14 +108,14 @@ struct MomentumFlameProgress: View {
 
     // MARK: Motion
 
-    private static func lit(_ verified: Int, of target: Int) -> Int {
-        min(max(verified, 0), max(target, 0))
+    private static func lit(_ counted: Int, of target: Int) -> Int {
+        min(max(counted, 0), max(target, 0))
     }
 
     private func apply(from old: Snapshot, to new: Snapshot) {
         sequence?.cancel()
 
-        let target = Self.lit(new.verified, of: new.target)
+        let target = Self.lit(new.counted, of: new.target)
         let start = min(litCount, target)
 
         // Fewer lit (a new week, a corrected record): show it, quietly.
@@ -128,7 +128,7 @@ struct MomentumFlameProgress: View {
         }
 
         // The week's own goal reached just now, not a bonus visit past it.
-        let wasComplete = old.target > 0 && Self.lit(old.verified, of: old.target) >= old.target
+        let wasComplete = old.target > 0 && Self.lit(old.counted, of: old.target) >= old.target
         let completesWeek = target == new.target && !wasComplete
 
         if reduceMotion {

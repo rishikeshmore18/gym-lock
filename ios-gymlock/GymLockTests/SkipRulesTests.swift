@@ -55,7 +55,7 @@ struct SkipRulesTests {
     @Test func exampleAWeekNotReachableReschedulesFirst() {
         let plan = makePlan(days: [.monday, .wednesday, .friday])
         let log = makeLog((0, .showedUp))
-        let screen = SkipRules.screen(log: log, plan: plan, day: day(2), now: Date(), calendar: calendar)
+        let screen = SkipRules.screen(log: log, plan: plan, weeklyGoal: 3, day: day(2), now: Date(), calendar: calendar)
 
         #expect(screen.heading == "make it up. this keeps your streak.")
         #expect(screen.options == [.reschedule, .homeWorkout, .skip])
@@ -80,12 +80,37 @@ struct SkipRulesTests {
 
     // MARK: - Example B (FLOW, Flow 4)
 
-    @Test func exampleBWeekReachableSkipFirst() {
+    @Test func exampleBFiveDayPlanNeedsFiveSoTuesdayMustBeMadeUp() {
+        // Monday done, Tuesday skipped: Wed/Thu/Fri left is 1 + 3 = 4 < 5.
         let plan = makePlan(days: [.monday, .tuesday, .wednesday, .thursday, .friday])
         let log = makeLog((0, .showedUp))
-        let screen = SkipRules.screen(log: log, plan: plan, day: day(1), now: Date(), calendar: calendar)
+        let screen = SkipRules.screen(log: log, plan: plan, weeklyGoal: 5, day: day(1), now: monday, calendar: calendar)
 
-        #expect(screen.heading == "no problem. you need 2 more this week.")
+        #expect(screen.heading == "make it up. this keeps your streak.")
+        #expect(screen.moreNeeded == 4)
+        #expect(screen.options.first == .reschedule)
+    }
+
+    @Test func theSkipScreenJudgesByTheWeeksSavedGoalNotByThree() {
+        // Same ledger and plan; only the saved goal differs. Under 3 the
+        // week is still reachable, under 5 it is not.
+        let plan = makePlan(days: [.monday, .tuesday, .wednesday, .thursday, .friday])
+        let log = makeLog((0, .showedUp))
+        let three = SkipRules.screen(log: log, plan: plan, weeklyGoal: 3, day: day(1), now: monday, calendar: calendar)
+        #expect(three.heading == "no problem. you need 2 more this week.")
+        #expect(three.options.first == .skip)
+
+        let five = SkipRules.screen(log: log, plan: plan, weeklyGoal: 5, day: day(1), now: monday, calendar: calendar)
+        #expect(five.heading == "make it up. this keeps your streak.")
+    }
+
+    @Test func aWeekAlreadyCoveredByAnUnplannedDayStaysReachable() {
+        // Tue-Sat plan, 5 needed. An unplanned Monday workout and Tuesday
+        // done: skipping Wednesday leaves 2 + Thu/Fri/Sat = 5.
+        let plan = makePlan(days: [.tuesday, .wednesday, .thursday, .friday, .saturday])
+        let log = makeLog((0, .showedUp), (1, .showedUp))
+        let screen = SkipRules.screen(log: log, plan: plan, weeklyGoal: 5, day: day(2), now: monday, calendar: calendar)
+        #expect(screen.heading == "no problem. you need 3 more this week.")
         #expect(screen.options.first == .skip)
     }
 
@@ -113,7 +138,7 @@ struct SkipRulesTests {
         let plan = makePlan(days: [.monday, .tuesday, .wednesday, .thursday, .friday])
         let log = makeLog((0, .skipped), (1, .skipped))
 
-        let screen = SkipRules.screen(log: log, plan: plan, day: day(2), now: monday, calendar: calendar)
+        let screen = SkipRules.screen(log: log, plan: plan, weeklyGoal: 5, day: day(2), now: monday, calendar: calendar)
         #expect(screen.heading == "make it up. this keeps your streak.")
         #expect(screen.options.first == .reschedule)
 
@@ -147,19 +172,32 @@ struct SkipRulesTests {
 
     @Test func sundayHidesRescheduleAndOffersTheRest() {
         let plan = makePlan(days: [.monday, .wednesday, .friday])
-        let screen = SkipRules.screen(log: makeLog(), plan: plan, day: day(6), now: monday, calendar: calendar)
+        let screen = SkipRules.screen(log: makeLog(), plan: plan, weeklyGoal: 3, day: day(6), now: monday, calendar: calendar)
         #expect(screen.options == [.homeWorkout, .skip])
     }
 
     @Test func noFreeDaysButWeekReachableHidesRescheduleWithTheNote() {
-        // 7 planned days leaves no free day, and one workout means the week
-        // is already reachable with the planned days left.
-        let plan = makePlan(days: Set(Weekday.allCases))
-        let log = makeLog((0, .showedUp))
-        let screen = SkipRules.screen(log: log, plan: plan, day: day(1), now: monday, calendar: calendar)
+        // Tue-Sun plan, 6 needed. An unplanned Monday workout and Tuesday
+        // done: skipping Wednesday leaves 2 + Thu/Fri/Sat/Sun = 6, and
+        // there is no free day left to move it to.
+        let plan = makePlan(days: [.tuesday, .wednesday, .thursday, .friday, .saturday, .sunday])
+        let log = makeLog((0, .showedUp), (1, .showedUp))
+        let screen = SkipRules.screen(log: log, plan: plan, weeklyGoal: 6, day: day(2), now: monday, calendar: calendar)
 
         #expect(!screen.options.contains(.reschedule))
         #expect(screen.rescheduleNote == "your planned days left are enough.")
+    }
+
+    @Test func sevenPlannedDaysHaveNoSlack() {
+        // Every day is needed: one skip, no free day, and the week can only
+        // be saved by a home workout.
+        let plan = makePlan(days: Set(Weekday.allCases))
+        let log = makeLog((0, .showedUp))
+        let screen = SkipRules.screen(log: log, plan: plan, weeklyGoal: 7, day: day(1), now: monday, calendar: calendar)
+
+        #expect(screen.heading == "make it up. this keeps your streak.")
+        #expect(screen.options == [.homeWorkout, .skip])
+        #expect(screen.rescheduleNote == nil)
     }
 
     // MARK: - Reschedule times

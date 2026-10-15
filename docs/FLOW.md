@@ -63,7 +63,7 @@ Never delete a Change line or a numbered item.
 - **What breaks them isn't one missed day.** It's a bad week that turns into "forget it."
 - **Late-night scrolling eats their sleep.** In a small trial, no phone before bed meant falling asleep faster and sleeping longer.
 
-So the design is **strict in the moment** (apps lock), **forgiving across the week** (3 days keeps the streak, reschedules, freezes), and **honest about proof** (GPS proves you showed up; Apple Health, 20 minutes at the gym, or a photo proves you trained).
+So the design is **strict in the moment** (apps lock), **forgiving across the week** (your planned days keep the streak, reschedules, freezes), and **honest about proof** (GPS proves you showed up; Apple Health, 20 minutes at the gym, or a photo proves you trained).
 
 ## Step 0 — Which Flow the User Gets
 
@@ -262,9 +262,9 @@ GYM DAY
    ├─ YES ──► +1 day this week · 🏅 "workout verified" sticker
    │            │
    │            └─ 🔔 at 30 min in the gym OR when they leave, whichever is first:
-   │                 • "2 of 3 this week. share your progress."
-   │                 • "that's 3. this one keeps your streak."
-   │                 • "4 this week. that's a bonus day."
+   │                 • "2 of 3 this week. share your progress."   (N of goal)
+   │                 • "that's 3. this one keeps your streak."     (goal reached)
+   │                 • "4 this week. that's a bonus day."         (past the goal)
    │                 • "you came back. that's the hardest one."
    │                 (never the same line twice in a row)
    │                 └─ tap ──► PROGRESS SPOTLIGHT (below)
@@ -321,6 +321,8 @@ GYM DAY
  │  a home workout counts as a full workout     │
  │  (max 3 home workouts a month)               │
  │  the week runs Monday → Sunday               │
+ │  the weekly goal is the number of workout    │
+ │  days planned for that week (minimum 3)      │
  └──────────────────────────────────────────────┘
 ```
 
@@ -332,9 +334,10 @@ GYM DAY
  [can't today]   or   missed the alarm (notification when the lock lifts)
    │
    ▼
- Can you still reach 3 this week with the planned days you have left?
+ Can you still reach this week's goal with the planned days you have left?
+ (the goal is the number of days planned for the week, minimum 3)
    │
-   ├─ NO  (goal is 3, or goal is higher but too many days were missed)
+   ├─ NO  (every planned day left is needed, and this one is being skipped)
    │   │
    │   │  "make it up. this keeps your streak."
    │   │
@@ -342,7 +345,7 @@ GYM DAY
    │   ├─    [home workout, 20 min]
    │   └─    [skip]
    │
-   └─ YES (goal is above 3, and there's still room)
+   └─ YES (a reschedule or an unplanned day already covers it)
        │
        │  "no problem. you need 2 more this week."
        │
@@ -398,22 +401,25 @@ GYM DAY
 
 ```text
  Mon ✅
- Tue can't today ──► left Wed/Thu/Fri ──► 1 + 3 = 4 ≥ 3
-                     "no problem" ──► taps [skip]
+ Tue can't today ──► left Wed/Thu/Fri ──► 1 + 3 = 4 < 5 ──► ⭐ reschedule first
+                     picks [Sat 7:30]
  Wed can't today ──► picks [home workout] ──► Apple Health finds 22 min ──► +1
  Thu ✅
- Fri ✅ ──► 1 + 1 + 1 + 1 = 4 ✅ streak kept
+ Fri ✅
+ Sat ✅ ──► 1 + 1 + 1 + 1 + 1 = 5 ✅ streak kept
 ```
 
 **Example C — goal is 5 days, but a bad week (reschedule twice)**
 
 ```text
  Mon ✗ skip   Tue ✗ skip   Wed ✗ slept through
-     left Thu/Fri ──► 0 + 2 = 2 < 3 ──► ⭐ reschedule first ──► picks [Sat]
+     left Thu/Fri ──► 0 + 2 = 2 < 5 ──► ⭐ reschedule first ──► picks [Sat]
  Thu ✅   Fri ✅
  Sat ✗ missed the rescheduled day ──► Sun is still free ──► reschedule again ──► [Sun]
- Sun ✅ ──► 3 ✅ streak kept
+ Sun ✅ ──► 4 < 5 ──► week not kept ──► a freeze if they hold one, otherwise the streak resets
 ```
+
+A 5-day plan needs 5 counted days. Three skips with only two free days left cannot be made up; that is what freezes are for.
 
 **Example D — goal is 3 days, no Apple Watch**
 
@@ -438,7 +444,7 @@ How one is earned, held and spent.
    from the next year on, it counts from Jan 1 → freezes arrive Mar 1 and Jul 1.
    unused freezes expire on Dec 31.
 
- SUNDAY MIDNIGHT: did the week reach 3?
+ SUNDAY MIDNIGHT: did the week reach its goal (the days planned for it, minimum 3)?
    │
    ├─ YES ──► streak +1
    │
@@ -503,7 +509,7 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 | What happens | Rule |
 | --- | --- |
 | Missed on Sunday | No days left to reschedule to. Freeze or reset. |
-| Plans 7 days | No free days to reschedule to, but 4 days of slack. The home workout is still there if any are left this month. |
+| Plans 7 days | No free days to reschedule to, and no slack: the goal is 7. A missed day can only be made up with a home workout, if any are left this month. |
 | No free days left, but the week is still reachable | Hide "reschedule" and say "your planned days left are enough." |
 | Misses a rescheduled day | Offered again while free days remain this week. Nothing carries into next week. |
 | Wants to cancel a reschedule | Allowed. It turns into a skip. |
@@ -513,8 +519,9 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 | Home-workout photo from the library, or taken before the timer | Doesn't count. It must be a camera photo taken after the timer starts, the same day. |
 | Already added a progress photo earlier today | The workout photo replaces it (one photo a day is already built). |
 | Two workouts in one day (gym + home, or two gym visits) | Counts as 1 day. Already built. |
-| Changes the plan in the middle of a week | The new rule starts next Monday. *(Built (`2026-09-26`): today, raising the plan re-checks past weeks and can reset the streak)* |
-| Existing user with only 1–2 gym days | Asked to add a day next time they open the app. The 3-day rule starts next Monday. *(Built (`2026-09-26`))* |
+| Changes the plan in the middle of a week | The new goal starts next Monday. The week under way keeps the goal it started with. *(Built (`2026-09-26`): today, raising the plan re-checks past weeks and can reset the streak)* |
+| Plans 4, 5, 6 or 7 days | That is the week's goal. A 4-day plan with 3 counted days is not kept; the 4th counted day keeps it. There is no separate "3 keeps the streak" rule. *(Built (`2026-10-15`))* |
+| Existing user with only 1–2 gym days | Asked to add a day next time they open the app. The 3-day minimum starts next Monday. *(Built (`2026-09-26`))* |
 | Tries to drop to 2 gym days | Refused: "3 gym days is the minimum." *(Built (`2026-09-26`))* |
 | Target picker in onboarding | 3 to 7. *(Built (`2026-09-26`): today it allows 1, and someone planning 2 days only needs 2 for the streak)* |
 | Joined in November | 2 months lands in January. The new year restarts the count, so the first freeze comes Mar 1. |
@@ -554,8 +561,9 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 
 **Streak and freezes**
 
-18. 3 is the minimum everywhere: onboarding picker 3–7, and the streak always needs 3. **(Built: `2026-09-26`)**
-19. Save each week's rule when the week starts, so plan changes never rewrite past weeks. **(Built: `2026-09-26`)**
+18. 3 is the minimum everywhere: onboarding picker 3–7, and no plan can go below 3. **(Built: `2026-09-26`)**
+19. Save each week's goal when the week starts, so plan changes never rewrite past weeks. **(Built: `2026-09-26`)**
+19a. The weekly streak requirement is the number of workout days planned for that week, with a minimum of 3. A 4-day plan needs 4, a 7-day plan needs 7. The live week's saved goal is brought in line with the plan once, on the first run after this change; past weeks keep the goal they were saved with. *(Supersedes the fixed-3 rule in item 18.)* **(Built: `2026-10-15`)**
 20. Count a visit on the day the alarm rang, and let unplanned days count.
 21. Freezes: 2 per calendar year (at 2 and 6 months of use; Mar 1 and Jul 1 in later years). They expire Dec 31, with a notification when one is earned. A planned freeze pauses that week's gym alarms. **(Built: `2026-09-27`)**
 22. Streak-at-risk notification plus a banner on Home. **(Built: `2026-09-27`)**
@@ -618,9 +626,10 @@ Paths are under `ios-gymlock/GymLock/`, as of commit `40b723c`. This map is for 
 | Session | One run from a gym alarm to its result. |
 | Workout done | What counts the day. Defined in Flow 3. |
 | Week | Monday to Sunday. |
-| Week kept / streak kept | The week reached 3 workouts. |
+| Weekly goal | The number of workout days planned for that week, minimum 3. Saved when the week starts; a plan change applies from next Monday. |
+| Week kept / streak kept | The week reached its weekly goal in counted workout days. |
 | Streak | Kept weeks in a row. A frozen week neither adds to it nor breaks it. |
-| Freeze | Protects one week that didn't reach 3. See Flow 5. |
+| Freeze | Protects one week that didn't reach its weekly goal. See Flow 5. |
 | Reschedule | Moving a missed workout to later today or a free day this week, with a real alarm and lock. See Flow 4. |
 | Home workout | The 20-minute workout at home. Counts as a full workout when verified. See Flow 4. |
 | Skip | Giving up a planned day. Nothing is counted. |

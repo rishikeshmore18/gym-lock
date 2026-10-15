@@ -231,6 +231,17 @@ final class AppStore {
         onStreakRefreshed?()
     }
 
+    /// The saved goal of the week containing `day`: the live week's goal for
+    /// the live week, and the goal a past week was judged by for a day that
+    /// counts on it (a Sunday 23:30 alarm whose visit lands after midnight).
+    func weeklyGoal(forWeekContaining day: Date, calendar: Calendar = .current) -> Int {
+        let weekCalendar = ProgressAnalytics.displayCalendar(calendar)
+        guard let start = StreakEngine.weekStart(containing: day, weekCalendar: weekCalendar),
+              let saved = streakVault.savedGoal(forWeekStarting: start, calendar: calendar)
+        else { return streak.weeklyGoal }
+        return saved
+    }
+
     /// The day the user joined, which times their first year's freezes
     /// (FLOW, Flow 5).
     var joinedAt: Date { AppInstallDate.resolve(defaults) }
