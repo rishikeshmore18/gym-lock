@@ -8,9 +8,10 @@ import SwiftUI
 /// left. The number of flames is the user's own plan (`targetCount`), never
 /// the streak's three-day floor.
 ///
-/// Motion is state indication only and always one-shot: a quiet left-to-right
-/// pulse over the lit flames when the card first reveals, then, when a new
-/// workout is verified, just the newly completed segment. Nothing loops.
+/// Motion follows the badges emblem's rule: light is the only motion. Lit
+/// flames carry the same slow specular sweep as `BadgeEmblem`, the next unlit
+/// flame breathes gently to mark itself as the next task, and nothing ever
+/// scales, bounces, or pulses.
 struct MomentumFlameProgress: View {
     let verifiedCount: Int
     let targetCount: Int
@@ -23,10 +24,6 @@ struct MomentumFlameProgress: View {
     @State private var litCount: Int
     /// Accent connectors as drawn: connector `i` joins flame `i` and `i + 1`.
     @State private var filledConnectors: Int
-    /// One trigger per flame; bumping one plays that flame's pulse once.
-    @State private var pulses: [Int]
-    /// The flame that completes the week gets a slightly stronger settle.
-    @State private var strongPulseIndex: Int?
     @State private var sequence: Task<Void, Never>?
 
     /// Height of the visual. Below the left column's natural height, so the
@@ -40,12 +37,17 @@ struct MomentumFlameProgress: View {
         let lit = Self.lit(verifiedCount, of: targetCount)
         _litCount = State(initialValue: lit)
         _filledConnectors = State(initialValue: max(0, lit - 1))
-        _pulses = State(initialValue: Array(repeating: 0, count: max(0, targetCount)))
     }
 
     private struct Snapshot: Equatable {
         var verified: Int
         var target: Int
+    }
+
+    /// The flame that is the user's next task: the first unlit one, while the
+    /// week still has room. There is no next flame once the week is complete.
+    private var nextFlame: Int? {
+        litCount < targetCount ? litCount : nil
     }
 
     var body: some View {
@@ -57,9 +59,6 @@ struct MomentumFlameProgress: View {
                     row(metrics: Metrics(width: proxy.size.width, count: targetCount))
                         .frame(width: proxy.size.width, height: proxy.size.height)
                 }
-            }
-            .onChange(of: isRevealed) { _, revealed in
-                if revealed { playEntrance() }
             }
             .onChange(of: Snapshot(verified: verifiedCount, target: targetCount)) { old, new in
                 apply(from: old, to: new)
@@ -98,9 +97,9 @@ struct MomentumFlameProgress: View {
                 }
                 MomentumFlameStage(
                     isLit: index < litCount,
-                    size: metrics.flame,
-                    pulse: pulses.indices.contains(index) ? pulses[index] : 0,
-                    isStrong: strongPulseIndex == index
+                    isNext: nextFlame == index,
+                    isRevealed: isRevealed,
+                    size: metrics.flame
                 )
             }
         }
@@ -113,33 +112,8 @@ struct MomentumFlameProgress: View {
         min(max(verified, 0), max(target, 0))
     }
 
-    private func pulse(_ index: Int) {
-        guard pulses.indices.contains(index) else { return }
-        pulses[index] += 1
-    }
-
-    /// One quiet pass over the lit flames, left to right, 50 ms apart.
-    private func playEntrance() {
-        guard !reduceMotion, litCount > 0 else { return }
-        sequence?.cancel()
-        strongPulseIndex = nil
-        let count = litCount
-        sequence = Task {
-            for index in 0..<count {
-                pulse(index)
-                try? await Task.sleep(for: .milliseconds(50))
-                if Task.isCancelled { return }
-            }
-        }
-    }
-
     private func apply(from old: Snapshot, to new: Snapshot) {
         sequence?.cancel()
-
-        if old.target != new.target {
-            pulses = Array(repeating: 0, count: max(0, new.target))
-            strongPulseIndex = nil
-        }
 
         let target = Self.lit(new.verified, of: new.target)
         let start = min(litCount, target)
@@ -174,12 +148,9 @@ struct MomentumFlameProgress: View {
                     try? await Task.sleep(for: .milliseconds(130))
                     if Task.isCancelled { return }
                 }
-                // 2. The flame lights, 3. and settles once.
-                let isLast = index == target - 1
-                strongPulseIndex = (isLast && completesWeek) ? index : nil
+                // 2. The flame lights with the card's state change.
                 withAnimation(Theme.stateChange) { litCount = index + 1 }
-                pulse(index)
-                if isLast {
+                if index == target - 1 {
                     completesWeek ? Haptics.commit() : Haptics.tap()
                 } else {
                     try? await Task.sleep(for: .milliseconds(200))
@@ -194,34 +165,20 @@ struct MomentumFlameProgress: View {
 
 private struct MomentumFlameStage: View {
     let isLit: Bool
+    /// True for the one unlit flame that is the user's next task.
+    let isNext: Bool
+    let isRevealed: Bool
     let size: CGFloat
-    let pulse: Int
-    let isStrong: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
-            flame
-                .foregroundStyle(Theme.inkTertiary.opacity(0.3))
-                .opacity(isLit ? 0 : 1)
-            flame
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Theme.accentWarm, Theme.accent, Theme.accentDeep],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .opacity(isLit ? 1 : 0)
+            idle
+            litFlame
+            sheen
         }
         .frame(width: size, height: size)
-        .keyframeAnimator(initialValue: CGFloat(1), trigger: pulse) { content, scale in
-            content.scaleEffect(scale, anchor: .bottom)
-        } keyframes: { _ in
-            // 1 → peak → 1: 200 ms, or 240 ms for the week's last flame. No
-            // spring, so nothing bounces.
-            LinearKeyframe(isStrong ? 1.1 : 1.06, duration: isStrong ? 0.11 : 0.09, timingCurve: .easeOut)
-            LinearKeyframe(1, duration: isStrong ? 0.13 : 0.11, timingCurve: .easeInOut)
-        }
         .overlay(alignment: .bottom) {
             Capsule()
                 .fill(isLit ? Theme.accent : Theme.border)
@@ -230,10 +187,111 @@ private struct MomentumFlameStage: View {
         }
     }
 
+    /// The unlit flame: quiet grey, breathing only while it is the next task.
+    private var idle: some View {
+        flame
+            .foregroundStyle(Theme.inkTertiary.opacity(0.3))
+            .opacity(isLit ? 0 : 1)
+            .modifier(NextTaskBreathe(isActive: isNext && !reduceMotion && isRevealed))
+    }
+
+    private var litFlame: some View {
+        flame
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [Theme.accentWarm, Theme.accent, Theme.accentDeep],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .opacity(isLit ? 1 : 0)
+    }
+
+    // MARK: Specular sweep — the badge emblem's motion, on the lit flame
+
+    /// A soft diagonal band of light, clipped to the flame itself. The same
+    /// slow sweep the badge uses: it crosses, pauses well out of frame, and
+    /// comes back. It never pulses or asks for attention.
+    @ViewBuilder
+    private var sheen: some View {
+        if isLit && !reduceMotion {
+            band
+                .phaseAnimator(SheenPhase.allCases) { content, phase in
+                    content
+                        .offset(x: phase.offset * size)
+                        .opacity(phase.opacity)
+                } animation: { phase in
+                    switch phase {
+                    // The return trip is long and fully transparent: it doubles
+                    // as the pause between sweeps, so nothing flickers back.
+                    case .rest: .linear(duration: 3.8)
+                    case .sweep: .easeInOut(duration: 1.15)
+                    case .fade: .easeOut(duration: 0.3)
+                    }
+                }
+                .blendMode(.plusLighter)
+                .mask { litFlame.allowsHitTesting(false) }
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var band: some View {
+        LinearGradient(
+            colors: [.clear, .white.opacity(0.9), .clear],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(width: size * 0.4, height: size * 2)
+        .rotationEffect(.degrees(18))
+    }
+
     private var flame: some View {
         Image(systemName: "flame.fill")
             .resizable()
             .scaledToFit()
+    }
+}
+
+/// Where the light is, and whether it is visible there.
+private enum SheenPhase: CaseIterable {
+    /// Parked off the left edge, invisible.
+    case rest
+    /// Crossing the flame.
+    case sweep
+    /// Off the right edge, dimming out.
+    case fade
+
+    var offset: CGFloat {
+        switch self {
+        case .rest: -1
+        case .sweep, .fade: 1
+        }
+    }
+
+    var opacity: Double {
+        switch self {
+        case .rest, .fade: 0
+        case .sweep: 1
+        }
+    }
+}
+
+/// The next task's cue: a slow, shallow opacity breathe — light coming and
+/// going, nothing more. Stops the moment the flame is lit, the week is
+/// complete, or Reduce Motion is on.
+private struct NextTaskBreathe: ViewModifier {
+    let isActive: Bool
+
+    func body(content: Content) -> some View {
+        if isActive {
+            content.phaseAnimator([0.3, 0.55, 0.3]) { content, opacity in
+                content.opacity(opacity)
+            } animation: { _ in
+                .easeInOut(duration: 1.6)
+            }
+        } else {
+            content
+        }
     }
 }
 
