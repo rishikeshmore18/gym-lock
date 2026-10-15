@@ -1,13 +1,14 @@
 import Foundation
 import Observation
 
-/// The branded cover a cold launch opens on, while the real app mounts and
-/// prepares underneath it.
+/// The branded cover every open of the app starts on, while the real app
+/// mounts (on a cold launch) or wakes (on a return from the background)
+/// underneath it.
 ///
-/// Once per process, and only in memory. It is created on the first frame the
-/// app draws and never again until the process dies, so a tab switch, a trip
-/// to Control Centre or a return from the background can never bring it back.
-/// Nothing is persisted: this is not a first-install screen.
+/// It plays on a cold launch and again each time the app comes back from the
+/// background. A tab switch, a trip to Control Centre or the notification
+/// shade (inactive, not background) never brings it back. Nothing is
+/// persisted: this is not a first-install screen.
 ///
 /// It never delays anything. The app underneath is built at the same moment
 /// the cover is, and the cover only decides when that already-built app is
@@ -103,11 +104,33 @@ final class LaunchCover {
     }
 
     /// Ends the cover with no animation, for when nobody is watching it (the
-    /// app went to the background mid-intro). Never replays.
+    /// app went to the background mid-intro).
     func finishImmediately() {
         clock?.cancel()
         exit?.cancel()
         phase = .finished
+    }
+
+    /// Shows the cover again, for the app coming back from the background.
+    ///
+    /// Content that was ready before stays ready, so the cover lifts after the
+    /// minimum; content that never reported in still gets the deadline. A
+    /// cover that is still up (a return before it ever lifted) is left alone.
+    func replay() {
+        guard phase == .finished else { return }
+        clock?.cancel()
+        exit?.cancel()
+        hasMetMinimum = false
+        phase = .covering
+        clock = Task { [weak self, timing] in
+            try? await Task.sleep(for: timing.minimum)
+            guard !Task.isCancelled else { return }
+            self?.minimumElapsed()
+
+            try? await Task.sleep(for: timing.deadline - timing.minimum)
+            guard !Task.isCancelled else { return }
+            self?.deadlinePassed()
+        }
     }
 
     private func revealIfDue() {

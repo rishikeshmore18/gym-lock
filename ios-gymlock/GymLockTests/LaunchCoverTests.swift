@@ -40,7 +40,7 @@ struct LaunchCoverTests {
         #expect(cover.phase == .revealing)
     }
 
-    @Test func backgroundingFinishesAndNothingBringsItBack() {
+    @Test func backgroundingFinishesAndTheOldClockCannotBringItBack() {
         let cover = LaunchCover(timing: .standard, startsClock: false)
         cover.finishImmediately()
         cover.contentIsReady()
@@ -50,6 +50,35 @@ struct LaunchCoverTests {
         #expect(cover.phase == .finished)
         #expect(!cover.isVisible)
         #expect(!cover.isHoldingApp)
+    }
+
+    @Test func aReturnFromTheBackgroundPlaysTheLogoAgain() async {
+        let timing = LaunchCover.Timing(minimum: .milliseconds(20), deadline: .milliseconds(60), exit: .milliseconds(10))
+        let cover = LaunchCover(timing: timing, startsClock: false)
+        cover.contentIsReady()
+        cover.minimumElapsed()
+        cover.finishImmediately()
+        #expect(cover.phase == .finished)
+
+        cover.replay()
+        #expect(cover.phase == .covering)
+        #expect(cover.isHoldingApp)
+        #expect(cover.isVisible)
+
+        // Home was ready before, so the minimum alone lifts it.
+        try? await Task.sleep(for: .milliseconds(400))
+        #expect(cover.phase == .finished)
+    }
+
+    @Test func aReplayNeverInterruptsACoverThatIsStillUp() {
+        let cover = LaunchCover(timing: .standard, startsClock: false)
+        cover.contentIsReady()
+        cover.replay()
+        #expect(cover.phase == .covering)
+        cover.minimumElapsed()
+        #expect(cover.phase == .revealing)
+        cover.replay()
+        #expect(cover.phase == .revealing)
     }
 
     @Test func theRevealLeavesTheHierarchyAfterItsFade() async {

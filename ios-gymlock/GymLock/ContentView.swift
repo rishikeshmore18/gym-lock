@@ -10,9 +10,13 @@ struct ContentView: View {
     @Environment(GymSessionCoordinator.self) private var coordinator
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Once per process. Read directly rather than through the environment so
-    /// it exists from the very first frame, before anything is injected.
+    /// Read directly rather than through the environment so it exists from
+    /// the very first frame, before anything is injected.
     private var launchCover: LaunchCover { .shared }
+
+    /// The app has been in the background since the cover last played, so the
+    /// next return to the foreground is an "open" and gets the logo again.
+    @State private var hasBeenInBackground = false
 
     private var isMorningLive: Binding<Bool> {
         Binding(
@@ -47,9 +51,23 @@ struct ContentView: View {
         .onChange(of: coordinator.isSessionLive, initial: true) { _, isLive in
             if isLive { launchCover.yieldToMorning() }
         }
-        // Left mid-intro: come back to the app, never to a replay.
+        // Every open starts on the logo: a cold launch, and each return from
+        // the background. Going to the background ends a running intro at
+        // once (nobody is watching it); coming back plays a fresh one, unless
+        // a live morning is on screen — that never waits on branding.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { launchCover.finishImmediately() }
+            switch phase {
+            case .background:
+                launchCover.finishImmediately()
+                hasBeenInBackground = true
+            case .active:
+                guard hasBeenInBackground else { return }
+                hasBeenInBackground = false
+                guard !coordinator.isSessionLive else { return }
+                launchCover.replay()
+            default:
+                break
+            }
         }
         .task {
             // Home reports its own readiness once it has settled. The other
