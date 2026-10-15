@@ -519,7 +519,7 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 | Home-workout photo from the library, or taken before the timer | Doesn't count. It must be a camera photo taken after the timer starts, the same day. |
 | Already added a progress photo earlier today | The workout photo replaces it (one photo a day is already built). |
 | Two workouts in one day (gym + home, or two gym visits) | Counts as 1 day. Already built. |
-| Changes the plan in the middle of a week | The new goal starts next Monday. The week under way keeps the goal it started with. *(Built (`2026-09-26`): today, raising the plan re-checks past weeks and can reset the streak)* |
+| Changes the plan in the middle of a week | The week under way follows the plan at once: the gym days on the alarm screen and the Momentum goal on Home are always the same number. Weeks already over keep the goal they were judged by. *(Built `2026-10-15`; until then the change waited for Monday)* |
 | Plans 4, 5, 6 or 7 days | That is the week's goal. A 4-day plan with 3 counted days is not kept; the 4th counted day keeps it. There is no separate "3 keeps the streak" rule. *(Built (`2026-10-15`))* |
 | Existing user with only 1–2 gym days | Asked to add a day next time they open the app. The 3-day minimum starts next Monday. *(Built (`2026-09-26`))* |
 | Tries to drop to 2 gym days | Refused: "3 gym days is the minimum." *(Built (`2026-09-26`))* |
@@ -563,7 +563,7 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 
 18. 3 is the minimum everywhere: onboarding picker 3–7, and no plan can go below 3. **(Built: `2026-09-26`)**
 19. Save each week's goal when the week starts, so plan changes never rewrite past weeks. **(Built: `2026-09-26`)**
-19a. The weekly streak requirement is the number of workout days planned for that week, with a minimum of 3. A 4-day plan needs 4, a 7-day plan needs 7. The live week's saved goal is brought in line with the plan once, on the first run after this change; past weeks keep the goal they were saved with. *(Supersedes the fixed-3 rule in item 18.)* **(Built: `2026-10-15`)**
+19a. The weekly streak requirement is the number of workout days planned for that week, with a minimum of 3. A 4-day plan needs 4, a 7-day plan needs 7. The alarm screen's gym days are the one setting: the live week's goal follows every change immediately, so Home never shows a different number than Alarm. Past weeks keep the goal they were saved with. *(Supersedes the fixed-3 rule in item 18.)* **(Built: `2026-10-15`)**
 20. Count a visit on the day the alarm rang, and let unplanned days count.
 21. Freezes: 2 per calendar year (at 2 and 6 months of use; Mar 1 and Jul 1 in later years). They expire Dec 31, with a notification when one is earned. A planned freeze pauses that week's gym alarms. **(Built: `2026-09-27`)**
 22. Streak-at-risk notification plus a banner on Home. **(Built: `2026-09-27`)**
@@ -626,7 +626,7 @@ Paths are under `ios-gymlock/GymLock/`, as of commit `40b723c`. This map is for 
 | Session | One run from a gym alarm to its result. |
 | Workout done | What counts the day. Defined in Flow 3. |
 | Week | Monday to Sunday. |
-| Weekly goal | The number of workout days planned for that week, minimum 3. Saved when the week starts; a plan change applies from next Monday. |
+| Weekly goal | The number of workout days planned for that week, minimum 3. The live week follows the alarm screen's gym days at once; a completed week keeps the goal it was judged by. |
 | Week kept / streak kept | The week reached its weekly goal in counted workout days. |
 | Streak | Kept weeks in a row. A frozen week neither adds to it nor breaks it. |
 | Freeze | Protects one week that didn't reach its weekly goal. See Flow 5. |

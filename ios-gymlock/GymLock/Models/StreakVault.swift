@@ -13,8 +13,9 @@ nonisolated enum StreakPolicy {
     static let minimumGymDays = 3
     /// The note shown when a gym day can't come off (FLOW, "Which nights").
     static let minimumGymDaysMessage = "3 gym days is the minimum."
-    /// The goal rule vaults are on once the live week has been brought in
-    /// line with the plan (FLOW, item 19a). Bump when the rule changes again.
+    /// The goal rule the vault was last evaluated under (FLOW, item 19a):
+    /// 1 = the goal is the plan, and the live week follows plan changes at
+    /// once. Bump when the rule changes again.
     static let currentGoalRule = 1
 
     /// The one weekly goal (FLOW, item 19a): the number of workout days
@@ -79,19 +80,20 @@ nonisolated struct StreakVault: Codable, Hashable {
     /// Left over from when a freeze was earned every 4 kept weeks. Nothing
     /// reads or earns from it any more; it stays so old vaults round-trip.
     var kept4Counter: Int
-    /// Each week's goal, keyed by the week's Monday, saved the first time the
-    /// engine sees the week. After that it is the only thing that week is
-    /// judged by, so a plan change can never rewrite it.
+    /// Each week's goal, keyed by the week's Monday. The live week's entry is
+    /// re-saved from the plan on every evaluation, so it always matches the
+    /// gym days on the alarm screen; once the week has ended its entry is the
+    /// only thing it is judged by, so a plan change can never rewrite it.
     var weekGoals: [Date: Int] = [:]
     /// Monday of the first week the 3-day minimum applied to. Set once and
     /// never moved: next Monday for a user who already had history when that
     /// rule arrived, their first week for everyone else. Only decides which
     /// weeks are backfilled by the legacy rule; nothing newer reads it.
     var threeDayRuleStart: Date?
-    /// Which goal rule the vault has been migrated to
+    /// Which goal rule the vault was last evaluated under
     /// (`StreakPolicy.currentGoalRule`). Nil on vaults saved under the fixed-3
-    /// rule; the first evaluation after the update brings the live week's
-    /// goal in line with the plan, once, and sets this.
+    /// rule. Informational: the live week is brought in line with the plan on
+    /// every evaluation regardless.
     var goalRule: Int?
     /// How far the freeze calendar has been settled (FLOW, Flow 5): every
     /// grant and every Dec 31 expiry up to this moment has been applied, and

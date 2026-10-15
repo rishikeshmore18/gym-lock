@@ -77,7 +77,7 @@ struct WeekRulesTests {
 
     // MARK: - The goal is saved when the week starts
 
-    @Test func changingThePlanMidWeekNeverChangesTheLiveOrPastWeeks() {
+    @Test func changingThePlanMidWeekNeverChangesPastWeeks() {
         // An existing user on 2 days: past weeks and the live week are legacy.
         let log = twoDayWeeks(2, live: [0])
         var vault = StreakVault.empty
@@ -86,14 +86,19 @@ struct WeekRulesTests {
         #expect(first.weeklyGoal == 2)
         #expect(first.weeks == 2)
 
-        // 2 -> 3, 3 -> 5, 5 -> 3, all mid-week.
+        // 2 -> 3, 3 -> 5, 5 -> 3, all mid-week. The live week follows the
+        // plan (legacy rule: 3, never more than the plan); the past weeks
+        // stay judged by 2.
         for days in [threeDays, fiveDays, threeDays] {
             let snapshot = evaluate(log, days: days, vault: &vault, now: day(3, hour: 12))
-            #expect(snapshot.weeklyGoal == 2)
+            #expect(snapshot.weeklyGoal == 3)
             #expect(snapshot.weeks == 2)
             #expect(vault.savedGoal(forWeekStarting: day(-7, hour: 0), calendar: calendar) == 2)
             #expect(vault.savedGoal(forWeekStarting: day(-14, hour: 0), calendar: calendar) == 2)
         }
+
+        // Back to 2 days: the live week follows that too.
+        #expect(evaluate(log, days: twoDays, vault: &vault, now: day(3, hour: 12)).weeklyGoal == 2)
     }
 
     @Test func raisingThePlanNoLongerResetsTheStreak() {
@@ -148,21 +153,30 @@ struct WeekRulesTests {
         #expect(vault.savedGoal(forWeekStarting: monday, calendar: calendar) == 5)
     }
 
-    @Test func aPlanChangeMidWeekWaitsForMonday() {
+    @Test func theLiveWeekFollowsThePlanAtOnce() {
+        // The alarm screen is the one setting: the week under way always
+        // shows the gym days it currently has.
         var vault = planRuleVault
         #expect(evaluate(.empty, days: fourDays, vault: &vault, now: day(1, hour: 12)).weeklyGoal == 4)
 
-        // 4 -> 5 on Wednesday: this week stays 4.
-        let midWeek = evaluate(.empty, days: fiveDays, vault: &vault, now: day(2, hour: 12))
-        #expect(midWeek.weeklyGoal == 4)
+        // 4 -> 5 on Wednesday: this week is 5 now.
+        let raised = evaluate(.empty, days: fiveDays, vault: &vault, now: day(2, hour: 12))
+        #expect(raised.weeklyGoal == 5)
+        #expect(vault.savedGoal(forWeekStarting: monday, calendar: calendar) == 5)
 
-        // Next Monday the week is saved at 5.
-        let nextWeek = evaluate(.empty, days: fiveDays, vault: &vault, now: day(7, hour: 12))
-        #expect(nextWeek.weeklyGoal == 5)
-        #expect(vault.savedGoal(forWeekStarting: monday, calendar: calendar) == 4)
+        // 5 -> 7 on Thursday: 7, and still one entry for the week.
+        let everyDay = evaluate(.empty, days: Set(Weekday.allCases), vault: &vault, now: day(3, hour: 12))
+        #expect(everyDay.weeklyGoal == 7)
+        #expect(vault.weekGoals.filter { calendar.isDate($0.key, inSameDayAs: monday) }.count == 1)
+
+        // 7 -> 3 on Friday: 3. Three days already counted now keep the week.
+        let log = MomentumLog(outcomes: [0, 1, 2].map { SessionOutcome(date: day($0), kind: .showedUp) })
+        let lowered = evaluate(log, days: threeDays, vault: &vault, now: day(4, hour: 12))
+        #expect(lowered.weeklyGoal == 3)
+        #expect(lowered.isThisWeekKept)
     }
 
-    @Test func theLiveWeekIsMigratedFromTheFixedThreeOnce() {
+    @Test func aWeekSavedUnderTheFixedThreeFollowsThePlanOnTheNextRun() {
         // A vault saved under the fixed-3 rule: last week and this week at 3,
         // the plan already 4 days.
         var vault = StreakVault.empty
@@ -172,28 +186,30 @@ struct WeekRulesTests {
         #expect(vault.goalRule == nil)
 
         let log = MomentumLog(outcomes: [0, 1, 2].map { SessionOutcome(date: day($0), kind: .showedUp) })
-        let migrated = evaluate(log, days: fourDays, vault: &vault, now: day(2, hour: 12))
+        let updated = evaluate(log, days: fourDays, vault: &vault, now: day(2, hour: 12))
         #expect(vault.goalRule == StreakPolicy.currentGoalRule)
-        #expect(migrated.weeklyGoal == 4)
-        #expect(migrated.thisWeekSessionDays == 3)
-        #expect(!migrated.isThisWeekKept)
+        #expect(updated.weeklyGoal == 4)
+        #expect(updated.thisWeekSessionDays == 3)
+        #expect(!updated.isThisWeekKept)
         // Last week keeps the goal it was judged by.
         #expect(vault.savedGoal(forWeekStarting: day(-7, hour: 0), calendar: calendar) == 3)
 
         // The 4th counted day keeps it.
         let fourth = MomentumLog(outcomes: [0, 1, 2, 3].map { SessionOutcome(date: day($0), kind: .showedUp) })
         #expect(evaluate(fourth, days: fourDays, vault: &vault, now: day(3, hour: 12)).isThisWeekKept)
-
-        // Migration never repeats: a plan change later this week waits for
-        // Monday, as it always did.
-        #expect(evaluate(fourth, days: fiveDays, vault: &vault, now: day(4, hour: 12)).weeklyGoal == 4)
     }
 
-    @Test func aVaultAlreadyOnTheRuleIsLeftAlone() {
+    @Test func onceTheWeekIsOverItsGoalIsLocked() {
         var vault = planRuleVault
-        vault.weekGoals = [monday: 3]
-        // Already migrated: the saved 3 stands even though the plan is 4.
-        #expect(evaluate(.empty, days: fourDays, vault: &vault, now: day(2, hour: 12)).weeklyGoal == 3)
+        let log = MomentumLog(outcomes: [0, 1, 2, 3].map { SessionOutcome(date: day($0), kind: .showedUp) })
+        #expect(evaluate(log, days: fourDays, vault: &vault, now: day(4, hour: 12)).isThisWeekKept)
+
+        // Next week the plan is 7. Last week was 4 of 4 and stays kept; the
+        // new week needs 7.
+        let next = evaluate(log, days: Set(Weekday.allCases), vault: &vault, now: day(8, hour: 12))
+        #expect(vault.savedGoal(forWeekStarting: monday, calendar: calendar) == 4)
+        #expect(next.weeks == 1)
+        #expect(next.weeklyGoal == 7)
     }
 
     @Test func twoPlannedDaysStillNeedThree() {

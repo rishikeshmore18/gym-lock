@@ -65,13 +65,17 @@ enum StreakEngine {
             vault.threeDayRuleStart = ruleStart
         }
 
-        // A week's goal is saved the first time it is seen and read back ever
-        // after: the days planned for it (FLOW, item 19a). A plan change
-        // therefore applies from the next week the engine meets, never to a
-        // week already saved. On a first run with no saved goals this
-        // backfills every past week with exactly the goal it shows today.
+        // The goal of a week is the days planned for it (FLOW, item 19a).
+        //
+        // The live week always follows the plan as it is right now, so the
+        // alarm screen's gym days and the Momentum card can never disagree:
+        // the goal is re-saved on every evaluation. A completed week keeps the
+        // goal it was last saved with, so a plan change can never re-judge
+        // history. On a first run with no saved goals this backfills every
+        // past week with exactly the goal it shows today.
         func goal(forWeekStarting week: Date) -> Int {
-            if let saved = vault.savedGoal(forWeekStarting: week, calendar: calendar) {
+            let isLive = calendar.isDate(week, inSameDayAs: liveWeekStart)
+            if !isLive, let saved = vault.savedGoal(forWeekStarting: week, calendar: calendar) {
                 return saved
             }
             let goal = StreakPolicy.goal(
@@ -80,25 +84,14 @@ enum StreakEngine {
                 plannedDays: plannedDays,
                 calendar: calendar
             )
-            vault.weekGoals[week] = goal
+            let key = vault.weekGoals.keys.first { calendar.isDate($0, inSameDayAs: week) } ?? week
+            if vault.weekGoals[key] != goal {
+                vault.weekGoals[key] = goal
+            }
             return goal
         }
 
-        // One-time migration from the fixed-3 rule (FLOW, item 19a): the live
-        // week's saved goal becomes the plan it was made under, so the new
-        // rule is real now rather than from next Monday. Past weeks keep the
-        // goal they were judged by. Never repeated, so a plan change later
-        // this week still waits for Monday.
-        if (vault.goalRule ?? 0) < StreakPolicy.currentGoalRule {
-            if vault.savedGoal(forWeekStarting: liveWeekStart, calendar: calendar) != nil {
-                let key = vault.weekGoals.keys.first { calendar.isDate($0, inSameDayAs: liveWeekStart) } ?? liveWeekStart
-                vault.weekGoals[key] = StreakPolicy.goal(
-                    forWeekStarting: liveWeekStart,
-                    ruleStart: ruleStart,
-                    plannedDays: plannedDays,
-                    calendar: calendar
-                )
-            }
+        if vault.goalRule != StreakPolicy.currentGoalRule {
             vault.goalRule = StreakPolicy.currentGoalRule
         }
 
