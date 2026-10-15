@@ -31,7 +31,7 @@ struct RootTabView: View {
     var body: some View {
         ZStack {
             destination(.home) {
-                TodayHomeView(intro: intro, coordinator: coordinator)
+                TodayHomeView(intro: intro, coordinator: coordinator, isVisible: selection == .home)
             }
 
             destination(.progress) {
@@ -77,7 +77,13 @@ struct RootTabView: View {
             // point animating a collapse onto a screen nobody is looking at,
             // and it guarantees the next tab never inherits a dimmed backdrop,
             // a running flame, or a close button floating over it.
-            if tab != .home { intro.normalizeImmediately() }
+            // Arriving on home is the moment a celebration that was earned
+            // elsewhere (a notification that landed on Progress) gets its turn.
+            if tab != .home {
+                intro.normalizeImmediately()
+            } else {
+                presentEarnedCelebrationIfNeeded()
+            }
         }
         // A notification tap asked for a tab (the workout-done line lands on
         // Progress with its spotlight). The spotlight is armed before the tab
@@ -100,19 +106,22 @@ struct RootTabView: View {
                 store.refreshStreak()
                 askForWakeTimeIfNeeded()
                 askToAddGymDayIfNeeded()
-                // Under the launch cover the entrance waits; home starts it
+                // Under the launch cover the celebration waits; home starts it
                 // itself once the cover lifts.
                 intro.sceneBecameActive(
-                    streak: store.streak.weeks,
+                    streak: store.streak,
                     reduceMotion: reduceMotion,
-                    isHomeVisible: selection == .home && !launchCover.isHoldingApp
+                    isHomeVisible: isHomeVisible
                 )
             } else {
                 intro.sceneLeftForeground()
             }
         }
         .onChange(of: launchCover.isHoldingApp) { _, isHolding in
-            if !isHolding { presentLaunchPrompts() }
+            if !isHolding {
+                presentLaunchPrompts()
+                presentEarnedCelebrationIfNeeded()
+            }
         }
         .sheet(isPresented: $isAskingToAddGymDay) {
             AddGymDaySheet(
@@ -133,7 +142,7 @@ struct RootTabView: View {
         .fullScreenCover(isPresented: $isRunningSetup) {
             MorningSetupFlowView {
                 isRunningSetup = false
-                intro.resume(streak: store.streak.weeks, reduceMotion: reduceMotion)
+                intro.resume(streak: store.streak, reduceMotion: reduceMotion, isHomeVisible: isHomeVisible)
                 Task {
                     await coordinator.requestAlarmAuthorization()
                     await coordinator.syncAlarms()
@@ -155,6 +164,19 @@ struct RootTabView: View {
             if !store.plan.hasBeenReviewed { intro.isSuspended = true }
             presentLaunchPrompts()
         }
+    }
+
+    /// Home is on screen and not behind the launch cover.
+    private var isHomeVisible: Bool { selection == .home && !launchCover.isHoldingApp }
+
+    /// Asks for the earned celebration; a no-op unless a kept week is still
+    /// owed one and Home is the screen the user is looking at.
+    private func presentEarnedCelebrationIfNeeded() {
+        intro.presentEarnedCelebrationIfNeeded(
+            streak: store.streak,
+            reduceMotion: reduceMotion,
+            isHomeVisible: isHomeVisible
+        )
     }
 
     private func dismissSpotlight() {

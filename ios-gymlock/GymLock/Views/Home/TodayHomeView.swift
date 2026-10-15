@@ -15,6 +15,9 @@ struct TodayHomeView: View {
     let intro: StreakIntroController
     /// The morning session, for the hero and mini cards.
     let coordinator: GymSessionCoordinator
+    /// Whether this is the tab on screen. Home is mounted permanently, so it
+    /// has to be told; the earned celebration only ever starts while true.
+    var isVisible: Bool = true
 
     @State private var window = CalendarWindow()
     @State private var index = DayStatusIndex.empty
@@ -60,9 +63,10 @@ struct TodayHomeView: View {
     /// Everything a cold launch waits on before lifting its cover.
     private var isPrepared: Bool { hasSettled && isMeasured && isFlameReady }
 
-    /// The entrance waits for the flame, so it never opens on the placeholder,
-    /// and for the launch cover, so it never plays behind it.
-    private var canPlayEntrance: Bool { isPrepared && !launchCover.isHoldingApp }
+    /// The celebration waits for the flame, so it never opens on the
+    /// placeholder, for the launch cover, so it never plays behind it, and for
+    /// Home to be the visible tab.
+    private var canPlayEntrance: Bool { isPrepared && !launchCover.isHoldingApp && isVisible }
 
     private var metrics: StreakCardMetrics { .fit(rootFrame.size) }
 
@@ -151,11 +155,12 @@ struct TodayHomeView: View {
         .onChange(of: isPrepared, initial: true) { _, prepared in
             if prepared { launchCover.contentIsReady() }
         }
-        .onChange(of: canPlayEntrance, initial: true) { _, canPlay in
-            // Not while backgrounded: the shell plays it on return instead.
-            guard canPlay, scenePhase == .active else { return }
-            intro.play(streak: streak, reduceMotion: reduceMotion)
-        }
+        // Home being ready is not a reason to celebrate; a week just kept is.
+        // Both the screen becoming able to show it and the streak flipping to
+        // kept while it is already on screen go through the same gate, which
+        // only opens once per kept week.
+        .onChange(of: canPlayEntrance, initial: true) { _, _ in presentEarnedCelebrationIfNeeded() }
+        .onChange(of: store.streak) { _, _ in presentEarnedCelebrationIfNeeded() }
         .onChange(of: intro.absorbPulse) { _, _ in absorbCard() }
         .onChange(of: cards.pathStep) { previous, current in
             // A step forward earns exactly one tap, and finishing the path is
@@ -182,6 +187,16 @@ struct TodayHomeView: View {
             bubbleSettle?.cancel()
             bubbleScale = 1
         }
+    }
+
+    /// Not while backgrounded: the shell asks again on return instead.
+    private func presentEarnedCelebrationIfNeeded() {
+        guard canPlayEntrance, scenePhase == .active else { return }
+        intro.presentEarnedCelebrationIfNeeded(
+            streak: store.streak,
+            reduceMotion: reduceMotion,
+            isHomeVisible: isVisible
+        )
     }
 
     // MARK: - Header

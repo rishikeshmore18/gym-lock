@@ -22,11 +22,14 @@ enum StreakPresentation: Equatable {
 
 /// Owns the streak presentation and the timing of its entrance.
 ///
-/// Kept outside the home view on purpose. The rule is "once per foreground
-/// session", so the thing that remembers whether it has played must outlive
-/// every tab switch and every scroll — if this lived in the view it would fire
-/// again every time the user came back to Home, which is exactly the gimmick
-/// this is meant not to be.
+/// The card opens on its own for exactly one reason: the user has just kept
+/// the week — reached the week's goal, whatever their plan makes it. That
+/// celebration is earned once per week, remembered on disk by the week's
+/// Monday, and only ever starts while Home is actually on screen. Reopening
+/// the app, backgrounding it, or switching tabs never replays it.
+///
+/// Kept outside the home view on purpose, so the pending celebration survives
+/// a cold launch into Progress and waits for the user's first visit to Home.
 @MainActor
 @Observable
 final class StreakIntroController {
@@ -62,16 +65,18 @@ final class StreakIntroController {
     /// playing to nobody behind a cover.
     var isSuspended = false
 
-    private var hasPlayedThisSession = false
-    private var leftForegroundAt: Date?
     private var playback: Task<Void, Never>?
 
     private let defaults: UserDefaults
-    private static let lastSeenStreakKey = "gymlock.home.lastSeenStreak"
+    private let calendar: Calendar
 
-    /// How long the app must have been away before reopening counts as a new
-    /// session. A glance at Control Centre is not a new session.
-    private static let sessionGap: TimeInterval = 45
+    /// Monday of the last week whose completion was celebrated on Home.
+    static let lastCelebratedWeekStartKey = "gymlock.streak.lastCelebratedWeekStart"
+    /// Set once this rule has looked at the streak for the first time, so an
+    /// existing user's already-kept week is not mistaken for a new one.
+    static let celebrationBaselineKey = "gymlock.streak.celebrationBaselined"
+    /// Written by the retired once-per-session entrance; cleared on sight.
+    private static let retiredLastSeenStreakKey = "gymlock.home.lastSeenStreak"
 
     // MARK: - Motion
 
@@ -117,48 +122,83 @@ final class StreakIntroController {
         )
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, calendar: Calendar = .current) {
         self.defaults = defaults
+        self.calendar = calendar
+        defaults.removeObject(forKey: Self.retiredLastSeenStreakKey)
     }
 
-    /// The streak the user was last shown, used only to decide how warm the
-    /// haptic should be.
+    /// Monday of the week that has already had its celebration, if any.
     ///
-    /// This is a record of what the interface displayed, not a second streak
-    /// calculation. `MomentumLog` remains the only thing that knows what the
-    /// streak actually is.
-    private var lastSeenStreak: Int? {
-        get { defaults.object(forKey: Self.lastSeenStreakKey) as? Int }
+    /// A record of what the interface did, not a second streak calculation:
+    /// the engine alone decides whether a week is kept.
+    private(set) var lastCelebratedWeekStart: Date? {
+        get { defaults.object(forKey: Self.lastCelebratedWeekStartKey) as? Date }
         set {
             if let newValue {
-                defaults.set(newValue, forKey: Self.lastSeenStreakKey)
+                defaults.set(newValue, forKey: Self.lastCelebratedWeekStartKey)
             } else {
-                defaults.removeObject(forKey: Self.lastSeenStreakKey)
+                defaults.removeObject(forKey: Self.lastCelebratedWeekStartKey)
             }
         }
     }
 
+    private func hasCelebrated(weekStarting week: Date) -> Bool {
+        guard let lastCelebratedWeekStart else { return false }
+        return calendar.isDate(lastCelebratedWeekStart, inSameDayAs: week)
+    }
+
     // MARK: - Automatic entrance
 
-    /// Plays the entrance, if it hasn't already run this session.
-    func play(streak: Int, reduceMotion: Bool) {
-        guard !isSuspended, !hasPlayedThisSession, state == .compact else { return }
-        hasPlayedThisSession = true
+    /// Whether the live week has been kept and not yet celebrated.
+    ///
+    /// Pure: asking never consumes anything. A frozen week that fell short is
+    /// not kept, so it is not a celebration.
+    func hasPendingCelebration(for streak: StreakSnapshot) -> Bool {
+        baselineIfNeeded(streak)
+        return streak.isThisWeekKept && !hasCelebrated(weekStarting: streak.liveWeekStart)
+    }
 
-        let previous = lastSeenStreak
-        lastSeenStreak = streak
+    /// Starts the earned celebration if one is pending and Home can show it.
+    ///
+    /// The week is marked celebrated the moment the presentation is committed
+    /// here — not when the app merely learnt about the completion on another
+    /// tab, and not at the end of the animation. Returns whether it began.
+    @discardableResult
+    func presentEarnedCelebrationIfNeeded(
+        streak: StreakSnapshot,
+        reduceMotion: Bool,
+        isHomeVisible: Bool
+    ) -> Bool {
+        guard hasPendingCelebration(for: streak) else { return false }
+        guard !isSuspended, isHomeVisible, state == .compact else { return false }
+
+        lastCelebratedWeekStart = streak.liveWeekStart
 
         playback?.cancel()
         playback = Task { [weak self] in
-            await self?.run(streak: streak, previous: previous, reduceMotion: reduceMotion)
+            await self?.run(streak: streak.weeks, reduceMotion: reduceMotion)
         }
+        return true
     }
 
-    /// Called when a covering flow finishes, so a suppressed entrance still
-    /// gets its turn.
-    func resume(streak: Int, reduceMotion: Bool) {
+    /// Called when a covering flow finishes, so a celebration held back behind
+    /// it still gets its turn.
+    func resume(streak: StreakSnapshot, reduceMotion: Bool, isHomeVisible: Bool) {
         isSuspended = false
-        play(streak: streak, reduceMotion: reduceMotion)
+        presentEarnedCelebrationIfNeeded(streak: streak, reduceMotion: reduceMotion, isHomeVisible: isHomeVisible)
+    }
+
+    /// First run of this rule on a device: a week that was already kept before
+    /// the rule existed counts as seen, so installing the update is never
+    /// mistaken for a fresh completion. Completions after this point are
+    /// genuinely new and celebrate as normal.
+    private func baselineIfNeeded(_ streak: StreakSnapshot) {
+        guard !defaults.bool(forKey: Self.celebrationBaselineKey) else { return }
+        if lastCelebratedWeekStart == nil, streak.isThisWeekKept {
+            lastCelebratedWeekStart = streak.liveWeekStart
+        }
+        defaults.set(true, forKey: Self.celebrationBaselineKey)
     }
 
     // MARK: - Manual presentation
@@ -219,26 +259,20 @@ final class StreakIntroController {
     }
 
     func sceneLeftForeground() {
-        leftForegroundAt = Date()
         normalizeImmediately()
     }
 
-    func sceneBecameActive(streak: Int, reduceMotion: Bool, isHomeVisible: Bool) {
-        if let leftForegroundAt, Date().timeIntervalSince(leftForegroundAt) > Self.sessionGap {
-            hasPlayedThisSession = false
-        }
-        self.leftForegroundAt = nil
-
-        // A card the user had open before backgrounding is not restored. They
-        // left; coming back to a dimmed screen would be the app deciding what
-        // they wanted.
-        guard isHomeVisible else { return }
-        play(streak: streak, reduceMotion: reduceMotion)
+    /// A card the user had open before backgrounding is not restored. They
+    /// left; coming back to a dimmed screen would be the app deciding what
+    /// they wanted. Only a celebration that is still owed can open here, and
+    /// only onto a visible Home.
+    func sceneBecameActive(streak: StreakSnapshot, reduceMotion: Bool, isHomeVisible: Bool) {
+        presentEarnedCelebrationIfNeeded(streak: streak, reduceMotion: reduceMotion, isHomeVisible: isHomeVisible)
     }
 
     // MARK: - Sequence
 
-    private func run(streak: Int, previous: Int?, reduceMotion: Bool) async {
+    private func run(streak: Int, reduceMotion: Bool) async {
         let timing = reduceMotion ? Timing.reducedMotion : Timing.standard
 
         // Let the screen settle first, so the card grows out of a header that
@@ -251,7 +285,8 @@ final class StreakIntroController {
 
         // The card has landed and the number has resolved by now.
         guard await sleep(timing.expandTravel) else { return }
-        playHaptic(streak: streak, previous: previous)
+        // The card only opens itself for a week just kept: the streak grew.
+        if streak > 0 { Haptics.commit() }
 
         // The part worth watching, then a beat to take it in.
         guard await sleep(timing.flameMoment + timing.hold) else { return }
@@ -284,18 +319,6 @@ final class StreakIntroController {
             guard await sleep(travel - absorbAt), state == .collapsing else { return }
             state = .compact
             playback = nil
-        }
-    }
-
-    /// A streak that grew earns a little more warmth. A streak that reset earns
-    /// no reaction at all — no shake, no red, no comment.
-    private func playHaptic(streak: Int, previous: Int?) {
-        guard streak > 0 else { return }
-
-        if let previous, streak > previous {
-            Haptics.commit()
-        } else {
-            Haptics.soft()
         }
     }
 
