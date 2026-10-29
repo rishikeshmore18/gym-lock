@@ -160,11 +160,14 @@ enum NotificationRoute: Codable, Hashable {
 
         switch actionIdentifier {
         case AlarmNotificationDelegate.Action.snooze:
-            return AlarmHandoff.Pending(slotID: slotID, firedAt: now, wantsSnooze: true)
+            return AlarmHandoff.Pending(slotID: slotID, firedAt: now, action: .snoozed)
         case AlarmNotificationDelegate.Action.imUp,
              UNNotificationDefaultActionIdentifier,
              UNNotificationDismissActionIdentifier:
-            return AlarmHandoff.Pending(slotID: slotID, firedAt: now, wantsSnooze: false)
+            // The notification backend's sound plays once and stops on its
+            // own, so the app's ringer is still the alarm here: `.fired`
+            // keeps it ringing exactly as before.
+            return AlarmHandoff.Pending(slotID: slotID, firedAt: now, action: .fired)
         default:
             return nil
         }

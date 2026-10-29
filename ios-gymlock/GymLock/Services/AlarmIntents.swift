@@ -29,7 +29,7 @@ struct StartGymSessionIntent: LiveActivityIntent {
             return .result()
         }
         AlarmHandoff.write(
-            .init(slotID: UUID(uuidString: alarmID), firedAt: Date(), wantsSnooze: false)
+            .init(slotID: UUID(uuidString: alarmID), firedAt: Date(), action: .stopped)
         )
         NotificationCenter.default.post(name: .gymLockAlarmHandoffAvailable, object: nil)
         return .result()
@@ -61,7 +61,7 @@ struct SnoozeGymSessionIntent: LiveActivityIntent {
             return .result()
         }
         AlarmHandoff.write(
-            .init(slotID: UUID(uuidString: alarmID), firedAt: Date(), wantsSnooze: true)
+            .init(slotID: UUID(uuidString: alarmID), firedAt: Date(), action: .snoozed)
         )
         NotificationCenter.default.post(name: .gymLockAlarmHandoffAvailable, object: nil)
         return .result()

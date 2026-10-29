@@ -375,7 +375,7 @@ struct SongTrimmerView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.inkTertiary)
 
-                Text("your song plays when you open the app. the system alarm rings first.")
+                Text("your selected clip plays with the system alarm.")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)

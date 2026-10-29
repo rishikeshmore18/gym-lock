@@ -29,6 +29,21 @@ nonisolated enum SessionResume {
         var startAt: Date
         var wantsSnooze: Bool
         var source: Source
+        /// What the note said happened. Nil for a clock decision.
+        var action: AlarmHandoffAction? = nil
+
+        /// Whether the app may start its own ringer for this morning.
+        ///
+        /// A clock decision (the user ignored everything and opened the app)
+        /// rings as before. A note only rings when the alarm fired and nobody
+        /// has touched it: after Stop or Snooze on the system alarm, the song
+        /// must stay silent.
+        var mayStartRinger: Bool {
+            switch source {
+            case .clock: true
+            case .handoff: action == .fired
+            }
+        }
     }
 
     /// What to do with the pending handoff, alongside whether to start.
@@ -40,6 +55,10 @@ nonisolated enum SessionResume {
         var decision: Decision?
         /// The caller clears the handoff when this is true.
         var clearsHandoff: Bool
+        /// Set when a note for the morning already running is thrown away, so
+        /// the caller can still honour a Stop or Snooze tap on the system
+        /// alarm (silencing the app's ringer) without starting anything.
+        var acknowledgedAction: AlarmHandoffAction? = nil
 
         static let nothing = Resolution(decision: nil, clearsHandoff: false)
         static let discardHandoff = Resolution(decision: nil, clearsHandoff: true)
@@ -129,7 +148,11 @@ nonisolated enum SessionResume {
                 calendar.isDate(handoff.firedAt, inSameDayAs: $0)
             } ?? true
             if isSameDay, handoff.slotID == nil || handoffSlotID == liveSlotID {
-                return .discardHandoff
+                return Resolution(
+                    decision: nil,
+                    clearsHandoff: true,
+                    acknowledgedAction: handoff.action
+                )
             }
             // A different slot waits: it may become actionable once this
             // morning resolves, and `staleAfter` bounds how long it can sit.
@@ -148,7 +171,8 @@ nonisolated enum SessionResume {
                     slotID: handoff.slotID,
                     startAt: handoff.firedAt,
                     wantsSnooze: handoff.wantsSnooze,
-                    source: .handoff
+                    source: .handoff,
+                    action: handoff.action
                 ),
                 clearsHandoff: true
             )

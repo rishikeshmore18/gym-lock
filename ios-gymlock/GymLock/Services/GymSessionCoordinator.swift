@@ -361,7 +361,9 @@ final class GymSessionCoordinator {
             // Writing rather than starting directly: this arrives off the main
             // actor, and the handoff's one-shot take is what stops the intent
             // and this observer from starting two sessions for one alarm.
-            AlarmHandoff.write(.init(slotID: id, firedAt: Date(), wantsSnooze: false))
+            // `.fired`: the alarm is ringing and nobody has touched it. A
+            // Stop or Snooze tap already written is never overwritten.
+            AlarmHandoff.write(.init(slotID: id, firedAt: Date(), action: .fired))
             Task { @MainActor [weak self] in self?.resumeSessionIfDue() }
         })
         #endif
@@ -464,6 +466,17 @@ final class GymSessionCoordinator {
             AlarmHandoff.clear()
         }
 
+        // The morning is already running (the observer got there first) and
+        // the user has now tapped Stop or Snooze on the system alarm: the
+        // app's ringer goes quiet with it, and a snooze is taken.
+        switch resolution.acknowledgedAction {
+        case .stopped?: ringer.stop()
+        case .snoozed?:
+            ringer.stop()
+            snooze()
+        default: break
+        }
+
         guard let decision = resolution.decision else { return }
 
         // A one-off alarm carries its own id; the plan maps it back to its slot.
@@ -472,7 +485,8 @@ final class GymSessionCoordinator {
         // `startAt` rather than `now`: the deadline is measured from when the
         // alarm actually rang, so ignoring it for ten minutes does not quietly
         // buy ten more minutes.
-        beginSession(for: slot, at: decision.startAt)
+        // Stop and Snooze on the system alarm never restart the song.
+        beginSession(for: slot, at: decision.startAt, startsRinger: decision.mayStartRinger)
 
         if decision.wantsSnooze {
             snooze()
@@ -1013,7 +1027,7 @@ final class GymSessionCoordinator {
 
     /// Called when an alarm fires, or when the user opens the app during a
     /// window that has already begun.
-    func beginSession(for slot: AlarmSlot?, at date: Date = Date()) {
+    func beginSession(for slot: AlarmSlot?, at date: Date = Date(), startsRinger: Bool = true) {
         guard let store else { return }
 
         let calendar = Calendar.current
@@ -1072,9 +1086,11 @@ final class GymSessionCoordinator {
         // moment is the thirty seconds after the alarm.
         applyShield(for: new)
 
-        // The chosen track, which is a separate thing from whatever the system
-        // alarm just rang with.
-        startRingingIfFrontmost()
+        // The chosen track, only while the alarm is still unanswered and the
+        // app is already in front. After Stop or Snooze it stays silent.
+        if startsRinger {
+            startRingingIfFrontmost()
+        }
 
         persist()
         startTicking()
@@ -1082,10 +1098,9 @@ final class GymSessionCoordinator {
 
     /// Plays the user's own track, but only with a screen in front of them.
     ///
-    /// AlarmKit rings with the system sound because custom sounds are broken on
-    /// iOS 26.0, and the stop intent is what brings the app forward. That makes
-    /// this the moment the real track starts. Starting it from a background
-    /// launch would burn battery playing to nobody.
+    /// On iOS 26.1+ AlarmKit itself plays the clip while locked or closed; this
+    /// only covers an alarm that fires with the app already open. Starting it
+    /// from a background launch would burn battery playing to nobody.
     private func startRingingIfFrontmost() {
         guard let store else { return }
         guard UIApplication.shared.applicationState == .active else { return }

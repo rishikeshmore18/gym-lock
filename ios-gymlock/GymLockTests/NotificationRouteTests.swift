@@ -173,10 +173,12 @@ struct NotificationRouteTests {
         let dismiss = alarm.handoff(forAction: UNNotificationDismissActionIdentifier, at: now)
         let snooze = alarm.handoff(forAction: AlarmNotificationDelegate.Action.snooze, at: now)
 
-        #expect(imUp == AlarmHandoff.Pending(slotID: slot, firedAt: now, wantsSnooze: false))
-        #expect(body == AlarmHandoff.Pending(slotID: slot, firedAt: now, wantsSnooze: false))
-        #expect(dismiss == AlarmHandoff.Pending(slotID: slot, firedAt: now, wantsSnooze: false))
-        #expect(snooze == AlarmHandoff.Pending(slotID: slot, firedAt: now, wantsSnooze: true))
+        // The notification backend's own sound plays once, so the app's
+        // ringer stays the alarm: these taps are `.fired`, as before.
+        #expect(imUp == AlarmHandoff.Pending(slotID: slot, firedAt: now, action: .fired))
+        #expect(body == AlarmHandoff.Pending(slotID: slot, firedAt: now, action: .fired))
+        #expect(dismiss == AlarmHandoff.Pending(slotID: slot, firedAt: now, action: .fired))
+        #expect(snooze == AlarmHandoff.Pending(slotID: slot, firedAt: now, action: .snoozed))
     }
 
     @Test func anUnrecognisedActionOnAnAlarmWritesNothing() {

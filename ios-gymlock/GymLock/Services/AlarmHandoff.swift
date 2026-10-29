@@ -18,16 +18,65 @@ extension Notification.Name {
 ///
 /// `nonisolated` on purpose: an `AppIntent` performs off the main actor, and a
 /// notification response can arrive before any UI exists.
+/// What happened at the alarm, which decides whether the app may play the
+/// song again.
+///
+/// - `fired`: the alarm is ringing and nobody has touched it yet.
+/// - `stopped`: the user tapped the system alarm's stop button.
+/// - `snoozed`: the user tapped the system alarm's snooze button.
+///
+/// Only `fired` ever starts `AlarmRinger`. After a stop or a snooze the user
+/// has already silenced the system alarm, and the app ringing the same song
+/// again would undo the tap.
+nonisolated enum AlarmHandoffAction: String, Codable, Hashable {
+    case fired, stopped, snoozed
+}
+
 nonisolated enum AlarmHandoff {
     struct Pending: Codable, Hashable {
         var slotID: UUID?
         var firedAt: Date
-        var wantsSnooze: Bool
+        var action: AlarmHandoffAction
 
-        init(slotID: UUID?, firedAt: Date = Date(), wantsSnooze: Bool) {
+        /// Compatibility view for callers that only care about snooze.
+        var wantsSnooze: Bool { action == .snoozed }
+
+        init(slotID: UUID?, firedAt: Date = Date(), action: AlarmHandoffAction) {
             self.slotID = slotID
             self.firedAt = firedAt
-            self.wantsSnooze = wantsSnooze
+            self.action = action
+        }
+
+        /// The pre-action spelling. Notes written this way always came from a
+        /// button tap, so `false` means stopped, which never restarts audio.
+        init(slotID: UUID?, firedAt: Date = Date(), wantsSnooze: Bool) {
+            self.init(slotID: slotID, firedAt: firedAt, action: wantsSnooze ? .snoozed : .stopped)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case slotID, firedAt, action, wantsSnooze
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            slotID = try container.decodeIfPresent(UUID.self, forKey: .slotID)
+            firedAt = try container.decode(Date.self, forKey: .firedAt)
+            if let action = try? container.decodeIfPresent(AlarmHandoffAction.self, forKey: .action) {
+                self.action = action
+            } else {
+                // A note saved by an older build: only `wantsSnooze`.
+                let snooze = (try? container.decodeIfPresent(Bool.self, forKey: .wantsSnooze)) ?? false
+                action = snooze ? .snoozed : .stopped
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(slotID, forKey: .slotID)
+            try container.encode(firedAt, forKey: .firedAt)
+            try container.encode(action, forKey: .action)
+            // Kept so an older build reading this note still understands it.
+            try container.encode(wantsSnooze, forKey: .wantsSnooze)
         }
     }
 
@@ -44,6 +93,14 @@ nonisolated enum AlarmHandoff {
     static let storageKey = "gymlock.alarm.handoff"
 
     static func write(_ pending: Pending, defaults: UserDefaults = .standard) {
+        // A user's tap is never overwritten by the observer reporting that the
+        // same alarm rang: that would turn a stop back into a ring.
+        if pending.action == .fired,
+           let existing = peek(now: pending.firedAt, defaults: defaults),
+           existing.action != .fired,
+           existing.slotID == pending.slotID {
+            return
+        }
         guard let data = try? JSONEncoder().encode(pending) else { return }
         defaults.set(data, forKey: storageKey)
     }

@@ -236,29 +236,20 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
         }
     }
 
-    /// AlarmKit ignores `.named` sounds on iOS 26.0 and plays the system error
-    /// tone instead of the track. Until that is fixed, the system alarm sound
-    /// rings and `AlarmRinger` takes over with the user's actual track the
-    /// moment the stop intent brings the app forward.
+    /// The user's clip, played by the system alarm itself, so it rings while
+    /// locked or with the app closed.
     ///
-    /// Flip this to `true` to go back to custom sounds once the platform bug is
-    /// resolved; nothing else has to change.
-    private static let alarmKitHonoursCustomSounds = false
-
-    /// The system alarm sound, for now.
-    ///
-    /// This is deliberately not a silent degradation: `StartGymSessionIntent`
-    /// runs `.foreground(.immediate)`, so the app is guaranteed to be frontmost
-    /// the instant the user taps "I'm up", and that is when the chosen track
-    /// actually starts playing.
+    /// The full file name with its extension (`gymlock-custom-alarm.caf`, or a
+    /// bundled track's caf). iOS 26.0 and anything missing on disk get the
+    /// system alarm sound, never silence. See `AlarmKitSoundResolver`.
     private func sound(for request: GymAlarmRequest) -> AlertConfiguration.AlertSound {
-        guard Self.alarmKitHonoursCustomSounds,
-              let resource = request.soundResource,
-              Bundle.main.url(forResource: resource, withExtension: "mp3") != nil
-        else {
-            return .default
+        switch AlarmKitSoundResolver.resolve(
+            soundFileName: request.soundFileName,
+            soundResource: request.soundResource
+        ) {
+        case .named(let fileName): .named(fileName)
+        case .systemDefault: .default
         }
-        return .named("\(resource).mp3")
     }
 }
 
