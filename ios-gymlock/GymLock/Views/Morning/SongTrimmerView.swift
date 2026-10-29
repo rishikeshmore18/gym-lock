@@ -69,9 +69,11 @@ struct SongTrimmerView: View {
                 NavigationStack {
                     page.toolbar(.hidden, for: .navigationBar)
                 }
+                // Light status bar over the black page; scoped to this cover.
+                .preferredColorScheme(.dark)
             }
         }
-        .tint(Theme.accent)
+        .tint(.white)
         .sheet(isPresented: $isImportingFile) {
             AudioFilePicker { url in
                 isImportingFile = false
@@ -99,15 +101,19 @@ struct SongTrimmerView: View {
         }
     }
 
-    /// The page itself, under the same glass header as the Alarm screen.
+    /// The page itself: black, edge to edge, chrome in glass, the way the
+    /// Story editor and the camera treat media. Nothing on it is coloured;
+    /// white is the only emphasis.
     private var page: some View {
-        ZStack(alignment: .top) {
-            Theme.canvas.ignoresSafeArea()
+        ZStack {
+            backdrop
 
             VStack(spacing: 0) {
-                Color.clear.frame(height: AlarmPageHeader.band)
+                topBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
 
-                ZStack(alignment: .top) {
+                ZStack {
                     if sourceURL == nil {
                         sourcePicker
                             .transition(sourceTransition)
@@ -116,21 +122,110 @@ struct SongTrimmerView: View {
                             .transition(selectorTransition)
                     }
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
-            }
-
-            AlarmPageHeader(
-                title: "your song",
-                symbol: presentation == .pushed ? "chevron.left" : "xmark",
-                label: presentation == .pushed ? "Back" : "Close"
-            ) {
-                stopPreview()
-                dismiss()
+                .frame(maxHeight: .infinity)
             }
         }
+        .environment(\.colorScheme, .dark)
+        .animation(stepAnimation, value: sourceURL == nil)
         .animation(Theme.stateChange, value: errorMessage)
         .animation(Theme.stateChange, value: isPreparingSource)
         .animation(Theme.stateChange, value: libraryBlocked)
+    }
+
+    /// Black with one soft pool of light behind the track, which brightens a
+    /// little while the clip plays: the page breathes with the sound.
+    private var backdrop: some View {
+        ZStack {
+            Color.black
+            RadialGradient(
+                colors: [Color.white.opacity(isPreviewing ? 0.15 : 0.07), .clear],
+                center: UnitPoint(x: 0.5, y: 0.34),
+                startRadius: 0,
+                endRadius: 420
+            )
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.7), value: isPreviewing)
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+
+    /// Close on the left, done on the right, the page name between: the
+    /// shape of every story music picker, in glass.
+    private var topBar: some View {
+        ZStack {
+            Text("your song")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .accessibilityAddTraits(.isHeader)
+
+            HStack {
+                Button {
+                    Haptics.tap()
+                    stopPreview()
+                    dismiss()
+                } label: {
+                    Image(systemName: presentation == .pushed ? "chevron.left" : "xmark")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .editorGlass(in: .circle)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(presentation == .pushed ? "Back" : "Close")
+
+                Spacer(minLength: 12)
+
+                if sourceURL != nil {
+                    doneButton
+                        .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
+                }
+            }
+        }
+        .frame(height: 48)
+    }
+
+    @ViewBuilder
+    private var doneButton: some View {
+        let isBlocked = isExporting || isLoadingWaveform
+        let label = ZStack {
+            Text("done")
+                .font(.system(size: 16, weight: .bold))
+                .opacity(isExporting ? 0 : 1)
+            if isExporting {
+                ProgressView()
+                    .tint(.black)
+            }
+        }
+        .foregroundStyle(.black)
+        .padding(.horizontal, 6)
+        .frame(height: 36)
+        .animation(Theme.stateChange, value: isExporting)
+
+        Group {
+            if #available(iOS 26.0, *) {
+                Button {
+                    Task { await save() }
+                } label: {
+                    label
+                }
+                .buttonStyle(.glassProminent)
+                .buttonBorderShape(.capsule)
+                .tint(.white)
+            } else {
+                Button {
+                    Task { await save() }
+                } label: {
+                    label
+                        .padding(.horizontal, 14)
+                        .frame(height: 44)
+                        .background(.white, in: .capsule)
+                }
+                .buttonStyle(TrimmerPressStyle())
+            }
+        }
+        .disabled(isBlocked)
+        .opacity(isLoadingWaveform ? 0.45 : 1)
+        .accessibilityLabel(isExporting ? "Saving" : "Use this clip")
     }
 
     /// Under 300 ms either way. Reduce Motion: a plain crossfade.
@@ -156,19 +251,42 @@ struct SongTrimmerView: View {
     // MARK: - Picking
 
     private var sourcePicker: some View {
-        VStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("pick a track")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Theme.ink)
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
 
-                Text("you choose 28 seconds of it. that is the most an alarm can play.")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.inkSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            Image(systemName: "music.note")
+                .font(.system(size: 40, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 112, height: 112)
+                .editorGlass(in: .rect(cornerRadius: 32, style: .continuous), isInteractive: false)
+                .accessibilityHidden(true)
+
+            Text("pick a track")
+                .font(.system(size: 30, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.top, 28)
+
+            Text("you choose 28 seconds of it. that is the most an alarm can play.")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+                .padding(.horizontal, 24)
+
+            Spacer(minLength: 24)
+
+            VStack(spacing: 12) {
+                sourceButtons
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 12)
+    }
 
+    /// Low on the screen, where the thumb already is.
+    @ViewBuilder
+    private var sourceButtons: some View {
             sourceButton(
                 symbol: "music.note.list",
                 title: "from my music",
@@ -199,11 +317,13 @@ struct SongTrimmerView: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
+                        .tint(.white)
                     Text("opening your track")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.inkSecondary)
+                        .foregroundStyle(.white.opacity(0.6))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
                 .transition(.opacity)
                 .accessibilityElement(children: .combine)
             }
@@ -211,11 +331,6 @@ struct SongTrimmerView: View {
             if let errorMessage {
                 errorText(errorMessage)
             }
-
-            Spacer()
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
     }
 
     /// Denied or restricted: say so, offer the way out, never an empty list.
@@ -223,29 +338,42 @@ struct SongTrimmerView: View {
         HStack(spacing: 10) {
             Text("music library access is off.")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.inkSecondary)
+                .foregroundStyle(.white.opacity(0.7))
 
             Spacer(minLength: 8)
 
-            Button("open settings") {
+            Button {
                 guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
                 UIApplication.shared.open(url)
+            } label: {
+                Text("open settings")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .background(.white, in: .capsule)
             }
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Theme.accent)
+            .buttonStyle(TrimmerPressStyle())
         }
-        .padding(14)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surfaceMuted, in: .rect(cornerRadius: 14))
+        .editorGlass(in: .rect(cornerRadius: 20, style: .continuous), isInteractive: false)
     }
 
+    /// Errors are said plainly in white with a mark, not shouted in colour.
     private func errorText(_ message: String) -> some View {
-        Text(message)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Theme.accent)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .transition(.opacity)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.system(size: 13, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .transition(.opacity)
     }
 
     private func sourceButton(
@@ -257,109 +385,158 @@ struct SongTrimmerView: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 Image(systemName: symbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.inkSecondary)
-                    .frame(width: 40, height: 40)
-                    .background(Theme.surfaceMuted, in: .circle)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.black)
+                    .frame(width: 44, height: 44)
+                    .background(.white, in: .circle)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Theme.ink)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
                     Text(detail)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.inkSecondary)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
                 }
 
                 Spacer(minLength: 8)
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.inkTertiary)
+                    .foregroundStyle(.white.opacity(0.4))
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(.rect(cornerRadius: 24, style: .continuous))
+            .editorGlass(in: .rect(cornerRadius: 24, style: .continuous))
         }
-        .buttonStyle(AlarmGlassCardButtonStyle(verticalPadding: 13))
+        .buttonStyle(TrimmerPressStyle())
     }
 
     // MARK: - Selecting
 
+    /// The track up top as the subject, the controls low where the thumb
+    /// is, and the waveform running edge to edge under a fixed white frame.
     private var selector: some View {
         VStack(spacing: 0) {
-            Text(sourceTitle)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.ink)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
+            Spacer(minLength: 12)
 
-            Text(rangeLabel)
-                .font(.system(size: 30, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(Theme.ink)
-                .padding(.top, 10)
-                .accessibilityLabel(accessibleRange)
+            trackHero
 
-            Text(lengthLabel)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.inkTertiary)
-                .padding(.top, 2)
+            Spacer(minLength: 20)
+
+            transportRow
+                .padding(.horizontal, 20)
 
             waveformStrip
-                .padding(.top, 26)
+                .padding(.top, 20)
 
             Text("drag to choose")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.inkTertiary)
-                .padding(.top, 12)
+                .foregroundStyle(.white.opacity(0.45))
+                .padding(.top, 14)
 
-            HStack(spacing: 12) {
-                Button {
-                    togglePreview()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: isPreviewing ? "pause.fill" : "play.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .contentTransition(.symbolEffect(.replace))
-                        Text(isPreviewing ? "stop" : "hear it")
-                            .font(.system(size: 15, weight: .semibold))
-                            .contentTransition(.opacity)
-                    }
-                    .foregroundStyle(Theme.ink)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .animation(Theme.stateChange, value: isPreviewing)
+            VStack(spacing: 12) {
+                honestNote
+
+                if let errorMessage {
+                    errorText(errorMessage)
                 }
-                .buttonStyle(AlarmGlassCapsuleButtonStyle())
-                .disabled(isLoadingWaveform)
-
-                Button {
-                    Task { await save() }
-                } label: {
-                    Text(isExporting ? "saving" : "use this")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .contentTransition(.opacity)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .animation(Theme.stateChange, value: isExporting)
-                }
-                .buttonStyle(AlarmGlassCapsuleButtonStyle(role: .prominent))
-                .disabled(isExporting || isLoadingWaveform)
-                .opacity(isExporting || isLoadingWaveform ? 0.5 : 1)
             }
-            .padding(.top, 26)
-
-            honestNote
-                .padding(.top, 18)
-
-            if let errorMessage {
-                errorText(errorMessage)
-                    .padding(.top, 12)
-            }
-
-            Spacer()
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
+        .padding(.bottom, 12)
+    }
+
+    /// The song as the subject of the page: a glass tile that pulses with
+    /// the preview, its name, and the selected range set large.
+    private var trackHero: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "waveform")
+                .font(.system(size: 44, weight: .medium))
+                .foregroundStyle(.white)
+                .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isPreviewing && !reduceMotion)
+                .frame(width: 128, height: 128)
+                .editorGlass(in: .rect(cornerRadius: 34, style: .continuous), isInteractive: false)
+                .scaleEffect(isPreviewing && !reduceMotion ? 1.04 : 1)
+                .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.7), value: isPreviewing)
+                .accessibilityHidden(true)
+
+            Text(sourceTitle)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.top, 28)
+                .padding(.horizontal, 28)
+
+            Text(rangeLabel)
+                .font(.system(size: 44, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .padding(.top, 8)
+                .padding(.horizontal, 20)
+                .accessibilityLabel(accessibleRange)
+        }
+    }
+
+    /// Clip length on the left, where the clip sits in the whole song in
+    /// the middle, play on the right.
+    private var transportRow: some View {
+        HStack(spacing: 14) {
+            Text("\(Int(window.clipLength.rounded(.down)))")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .overlay { Circle().strokeBorder(.white, lineWidth: 2) }
+                .accessibilityLabel(lengthLabel)
+
+            trackOverview
+
+            Button {
+                Haptics.tap()
+                togglePreview()
+            } label: {
+                Image(systemName: isPreviewing ? "pause.fill" : "play.fill")
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.black)
+                    .contentTransition(.symbolEffect(.replace))
+                    .offset(x: isPreviewing ? 0 : 1.5)
+                    .frame(width: 52, height: 52)
+                    .background(.white, in: .circle)
+            }
+            .buttonStyle(TrimmerPressStyle())
+            .disabled(isLoadingWaveform)
+            .accessibilityLabel(isPreviewing ? "Stop preview" : "Play selection")
+        }
+    }
+
+    /// The whole song as a hairline, the selected 28 seconds as a white
+    /// segment on it, so a long track never loses its sense of place.
+    private var trackOverview: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let total = max(trackDuration, 0.001)
+            let span = min(width, max(6, CGFloat(window.clipLength / total) * width))
+            let lower = min(width - span, max(0, CGFloat(shownRange.lowerBound / total) * width))
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.2))
+                    .frame(height: 3)
+                Capsule()
+                    .fill(.white)
+                    .frame(width: span, height: 3)
+                    .offset(x: lower)
+            }
+            .frame(width: width, height: geometry.size.height, alignment: .leading)
+        }
+        .frame(height: 44)
+        .accessibilityHidden(true)
     }
 
     /// What the user is actually told, which is exactly what happens.
@@ -373,16 +550,16 @@ struct SongTrimmerView: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "info.circle.fill")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.inkTertiary)
+                    .foregroundStyle(.white.opacity(0.5))
 
                 Text("your selected clip plays with the system alarm.")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.inkSecondary)
+                    .foregroundStyle(.white.opacity(0.7))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surfaceMuted, in: .rect(cornerRadius: 14))
+            .editorGlass(in: .rect(cornerRadius: 18, style: .continuous), isInteractive: false)
         }
     }
 
@@ -407,8 +584,9 @@ struct SongTrimmerView: View {
 
     // MARK: - The waveform
 
-    private static let stripHeight: CGFloat = 112
-    private static let barsHeight: CGFloat = 92
+    private static let stripHeight: CGFloat = 96
+    private static let barsHeight: CGFloat = 68
+    private static let windowRadius: CGFloat = 14
 
     private var waveformStrip: some View {
         GeometryReader { geometry in
@@ -419,16 +597,6 @@ struct SongTrimmerView: View {
             let originX = windowMinX - CGFloat(start) * pointsPerSecond
 
             ZStack(alignment: .topLeading) {
-                // The window: fixed, restrained, never moves.
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Theme.ink.opacity(0.04))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Theme.ink.opacity(0.16), lineWidth: 1.5)
-                    }
-                    .frame(width: windowWidth, height: Self.stripHeight)
-                    .offset(x: windowMinX)
-
                 let shape = ScrollingWaveformShape(
                     peaks: peaks,
                     duration: trackDuration,
@@ -436,13 +604,14 @@ struct SongTrimmerView: View {
                     pointsPerSecond: pointsPerSecond
                 )
 
+                // Outside the window: quiet grey. Inside: full white.
                 shape
-                    .fill(Theme.inkTertiary.opacity(0.45))
+                    .fill(Color.white.opacity(0.3))
                     .frame(width: width, height: Self.barsHeight)
                     .offset(y: (Self.stripHeight - Self.barsHeight) / 2)
 
                 shape
-                    .fill(Theme.accent)
+                    .fill(Color.white)
                     .frame(width: width, height: Self.barsHeight)
                     .mask(alignment: .topLeading) {
                         Rectangle()
@@ -452,17 +621,31 @@ struct SongTrimmerView: View {
                     .offset(y: (Self.stripHeight - Self.barsHeight) / 2)
 
                 if let preview, isPreviewing {
-                    PreviewPlayhead(
+                    PreviewSweep(
                         player: preview,
+                        bars: shape,
+                        width: width,
                         windowStart: shownRange.lowerBound,
                         windowMinX: windowMinX,
+                        windowWidth: windowWidth,
                         pointsPerSecond: pointsPerSecond,
-                        height: Self.stripHeight
+                        stripHeight: Self.stripHeight,
+                        barsHeight: Self.barsHeight,
+                        cornerRadius: Self.windowRadius
                     )
+                    .transition(.opacity)
                 }
+
+                // The window: fixed, a bold white frame, never moves.
+                RoundedRectangle(cornerRadius: Self.windowRadius, style: .continuous)
+                    .strokeBorder(Color.white, lineWidth: 3)
+                    .frame(width: windowWidth, height: Self.stripHeight)
+                    .offset(x: windowMinX)
+                    .allowsHitTesting(false)
 
                 if isLoadingWaveform {
                     ProgressView()
+                        .tint(.white)
                         .frame(width: width, height: Self.stripHeight)
                 }
             }
@@ -800,26 +983,68 @@ struct SongTrimmerView: View {
     }
 }
 
-// MARK: - Preview playhead
+// MARK: - Preview sweep
 
-/// A thin line inside the window showing where the preview is.
-private struct PreviewPlayhead: View {
+/// While the clip plays, the window fills with white from its left edge to
+/// the playhead and the bars it has passed turn black, the way story music
+/// pickers show progress, in black and white.
+private struct PreviewSweep: View {
     let player: AVAudioPlayer
+    let bars: ScrollingWaveformShape
+    let width: CGFloat
     let windowStart: Double
     let windowMinX: CGFloat
+    let windowWidth: CGFloat
     let pointsPerSecond: CGFloat
-    let height: CGFloat
+    let stripHeight: CGFloat
+    let barsHeight: CGFloat
+    let cornerRadius: CGFloat
 
     var body: some View {
         TimelineView(.animation) { _ in
             let elapsed = max(0, player.currentTime - windowStart)
-            Capsule()
-                .fill(Theme.ink)
-                .frame(width: 2, height: height - 16)
-                .offset(x: windowMinX + CGFloat(elapsed) * pointsPerSecond - 1, y: 8)
+            let filled = min(windowWidth, max(0, CGFloat(elapsed) * pointsPerSecond))
+
+            ZStack(alignment: .topLeading) {
+                Rectangle()
+                    .fill(Color.white)
+                    .frame(width: filled, height: stripHeight)
+                    .offset(x: windowMinX)
+
+                bars
+                    .fill(Color.black)
+                    .frame(width: width, height: barsHeight)
+                    .mask(alignment: .topLeading) {
+                        Rectangle()
+                            .frame(width: filled, height: barsHeight)
+                            .offset(x: windowMinX)
+                    }
+                    .offset(y: (stripHeight - barsHeight) / 2)
+            }
+            .frame(width: width, height: stripHeight, alignment: .topLeading)
+            .mask(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .frame(width: windowWidth, height: stripHeight)
+                    .offset(x: windowMinX)
+            }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Press feedback
+
+/// Gives under the finger; a plain fade under Reduce Motion.
+private struct TrimmerPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.5)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 

@@ -24,6 +24,10 @@ struct AlarmSoundListView: View {
 
     @Namespace private var checkSpace
 
+    /// The trimmer is media, so it takes the whole screen rather than
+    /// being pushed into the light Alarm stack.
+    @State private var isTrimming = false
+
     var body: some View {
         AlarmSubpage(title: "Sound") {
             NavigationLink(value: AlarmOptionRoute.haptics) {
@@ -45,17 +49,17 @@ struct AlarmSoundListView: View {
             }
             .padding(.top, 6)
 
-            NavigationLink(value: AlarmOptionRoute.song) {
+            Button {
+                Haptics.press(intensity: 0.4)
+                player?.stop()
+                isTrimming = true
+            } label: {
                 AlarmValueRow(
                     title: hasCustomSong ? "choose a different song" : "choose your own song",
                     value: ""
                 )
             }
             .buttonStyle(AlarmGlassCardButtonStyle())
-            .simultaneousGesture(TapGesture().onEnded {
-                Haptics.press(intensity: 0.4)
-                player?.stop()
-            })
             .padding(.top, 6)
 
             Text("tap a track to hear it. your own song uses 28 seconds of a track GymLock can access.")
@@ -66,6 +70,9 @@ struct AlarmSoundListView: View {
         }
         .onAppear { Haptics.preparePress() }
         .onDisappear { player?.stop() }
+        .fullScreenCover(isPresented: $isTrimming) {
+            SongTrimmerView(presentation: .cover)
+        }
     }
 
     /// Width of the leading checkmark column, so names line up whether or
