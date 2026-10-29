@@ -2,12 +2,11 @@ import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Picks a track and chooses the thirty seconds of it that will wake the user.
+/// Picks a track and chooses the 28 seconds of it that will wake the user.
 ///
-/// The window is a fixed length that slides, rather than two handles: the
-/// thirty seconds is dictated by the platform, and a handle that cannot move
-/// is worse than no handle at all. So there is exactly one thing to do here,
-/// and it is done with one finger.
+/// The window is fixed and the track moves under it, the way a story music
+/// picker works: the length is dictated by the platform, so the only thing
+/// left to choose is where, and that is done by dragging the song itself.
 struct SongTrimmerView: View {
     /// How the page arrived, which decides its corner button: a back chevron
     /// when pushed from the Sound page, a close X when presented full screen.
@@ -23,36 +22,36 @@ struct SongTrimmerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The track being trimmed, once one has been chosen.
+    /// The local, GymLock-owned copy of the track being trimmed.
     @State private var sourceURL: URL?
     @State private var sourceTitle = ""
     @State private var trackDuration: Double = 0
     @State private var peaks: [Double] = []
     @State private var isLoadingWaveform = false
 
-    /// Where the window starts, in seconds.
+    /// Where the window starts, in seconds. Moves 1:1 with the finger.
     @State private var start: Double = 0
-    /// Live drag offset in seconds, added to `start` while a finger is down.
-    @State private var dragSeconds: Double = 0
-    @State private var isDragging = false
-    @State private var lastHapticBucket: Int?
+    /// `start` when the current drag began; nil when no finger is down.
+    @State private var dragBase: Double?
+    @State private var settleTask: Task<Void, Never>?
+    @State private var settleTarget: Double?
 
     @State private var isImportingFile = false
     @State private var isPickingFromLibrary = false
+    @State private var isPreparingSource = false
+    @State private var libraryBlocked = false
+    @State private var loadTask: Task<Void, Never>?
     @State private var isExporting = false
     @State private var errorMessage: String?
 
     @State private var preview: AVAudioPlayer?
     @State private var previewLoop: Task<Void, Never>?
-    @State private var isPreviewing = false
+    @State private var previewWindowStart: Double?
 
-    /// Where the window sits right now, including the live drag.
-    private var effectiveStart: Double {
-        clampedStart(start + dragSeconds)
-    }
+    private var isPreviewing: Bool { preview != nil }
 
-    private var maximumStart: Double {
-        max(0, trackDuration - SongTrimService.clipDuration)
+    private var window: SongTrimWindow {
+        SongTrimWindow(duration: trackDuration)
     }
 
     var body: some View {
@@ -86,14 +85,21 @@ struct SongTrimmerView: View {
             }
             .ignoresSafeArea()
         }
-        .onDisappear { stopPreview() }
+        .onChange(of: start) { _, newValue in
+            // Whatever moved the window, the preview never keeps playing a
+            // section that is no longer selected.
+            if let previewWindowStart, abs(previewWindowStart - newValue) > 0.0001 {
+                stopPreview()
+            }
+        }
+        .onDisappear {
+            stopPreview()
+            settleTask?.cancel()
+            loadTask?.cancel()
+        }
     }
 
     /// The page itself, under the same glass header as the Alarm screen.
-    ///
-    /// Choosing a track swaps the picker for the trimmer in place: the
-    /// picker settles back and fades while the trimmer rises in, so it reads
-    /// as the next step of one task rather than a new screen.
     private var page: some View {
         ZStack(alignment: .top) {
             Theme.canvas.ignoresSafeArea()
@@ -104,10 +110,10 @@ struct SongTrimmerView: View {
                 ZStack(alignment: .top) {
                     if sourceURL == nil {
                         sourcePicker
-                            .transition(stepTransition(isForward: false))
+                            .transition(sourceTransition)
                     } else {
-                        trimmer
-                            .transition(stepTransition(isForward: true))
+                        selector
+                            .transition(selectorTransition)
                     }
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
@@ -122,24 +128,28 @@ struct SongTrimmerView: View {
                 dismiss()
             }
         }
-        .animation(stepAnimation, value: sourceURL == nil)
         .animation(Theme.stateChange, value: errorMessage)
+        .animation(Theme.stateChange, value: isPreparingSource)
+        .animation(Theme.stateChange, value: libraryBlocked)
     }
 
+    /// Under 300 ms either way. Reduce Motion: a plain crossfade.
     private var stepAnimation: Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.46, dampingFraction: 0.86)
+        reduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: 0.3, bounce: 0)
     }
 
-    private func stepTransition(isForward: Bool) -> AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        return isForward
-            ? .asymmetric(
-                insertion: .offset(y: 28).combined(with: .opacity),
-                removal: .opacity
-            )
+    private var sourceTransition: AnyTransition {
+        reduceMotion
+            ? .opacity
+            : .scale(scale: 0.97, anchor: .top).combined(with: .opacity)
+    }
+
+    private var selectorTransition: AnyTransition {
+        reduceMotion
+            ? .opacity
             : .asymmetric(
-                insertion: .scale(scale: 0.97, anchor: .top).combined(with: .opacity),
-                removal: .scale(scale: 0.97, anchor: .top).combined(with: .opacity)
+                insertion: .offset(y: 24).combined(with: .opacity),
+                removal: .opacity
             )
     }
 
@@ -162,10 +172,16 @@ struct SongTrimmerView: View {
             sourceButton(
                 symbol: "music.note.list",
                 title: "from my music",
-                detail: "songs you own or downloaded"
+                detail: "purchased or synced songs you own"
             ) {
                 Haptics.tap()
-                isPickingFromLibrary = true
+                openLibrary()
+            }
+            .disabled(isPreparingSource)
+
+            if libraryBlocked {
+                libraryBlockedRow
+                    .transition(.opacity)
             }
 
             sourceButton(
@@ -174,21 +190,62 @@ struct SongTrimmerView: View {
                 detail: "any audio file on this iPhone"
             ) {
                 Haptics.tap()
+                errorMessage = nil
                 isImportingFile = true
+            }
+            .disabled(isPreparingSource)
+
+            if isPreparingSource {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("opening your track")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.inkSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.opacity)
+                .accessibilityElement(children: .combine)
             }
 
             if let errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                errorText(errorMessage)
             }
 
             Spacer()
         }
         .padding(.horizontal, 20)
         .padding(.top, 18)
+    }
+
+    /// Denied or restricted: say so, offer the way out, never an empty list.
+    private var libraryBlockedRow: some View {
+        HStack(spacing: 10) {
+            Text("music library access is off.")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.inkSecondary)
+
+            Spacer(minLength: 8)
+
+            Button("open settings") {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Theme.accent)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surfaceMuted, in: .rect(cornerRadius: 14))
+    }
+
+    private func errorText(_ message: String) -> some View {
+        Text(message)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Theme.accent)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .transition(.opacity)
     }
 
     private func sourceButton(
@@ -224,24 +281,35 @@ struct SongTrimmerView: View {
         .buttonStyle(AlarmGlassCardButtonStyle(verticalPadding: 13))
     }
 
-    // MARK: - Trimming
+    // MARK: - Selecting
 
-    private var trimmer: some View {
-        VStack(spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(sourceTitle)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
+    private var selector: some View {
+        VStack(spacing: 0) {
+            Text(sourceTitle)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
 
-                Text(windowSummary)
-                    .font(.system(size: 13, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.inkSecondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(rangeLabel)
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Theme.ink)
+                .padding(.top, 10)
+                .accessibilityLabel(accessibleRange)
+
+            Text(lengthLabel)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.inkTertiary)
+                .padding(.top, 2)
 
             waveformStrip
+                .padding(.top, 26)
+
+            Text("drag to choose")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.inkTertiary)
+                .padding(.top, 12)
 
             HStack(spacing: 12) {
                 Button {
@@ -261,6 +329,7 @@ struct SongTrimmerView: View {
                     .animation(Theme.stateChange, value: isPreviewing)
                 }
                 .buttonStyle(AlarmGlassCapsuleButtonStyle())
+                .disabled(isLoadingWaveform)
 
                 Button {
                     Task { await save() }
@@ -277,21 +346,20 @@ struct SongTrimmerView: View {
                 .disabled(isExporting || isLoadingWaveform)
                 .opacity(isExporting || isLoadingWaveform ? 0.5 : 1)
             }
+            .padding(.top, 26)
 
             honestNote
+                .padding(.top, 18)
 
             if let errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                errorText(errorMessage)
+                    .padding(.top, 12)
             }
 
             Spacer()
         }
         .padding(.horizontal, 20)
-        .padding(.top, 14)
+        .padding(.top, 18)
     }
 
     /// What the user is actually told, which is exactly what happens.
@@ -318,163 +386,249 @@ struct SongTrimmerView: View {
         }
     }
 
-    private var windowSummary: String {
-        let from = timeLabel(effectiveStart)
-        let to = timeLabel(effectiveStart + SongTrimService.clipDuration)
-        return "\(from) to \(to) · \(Int(SongTrimService.clipDuration)) seconds"
+    /// The selection, clamped: rubber banding past the ends never shows a
+    /// time the clip cannot have.
+    private var shownRange: ClosedRange<Double> {
+        window.range(startingAt: start)
     }
 
-    private func timeLabel(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded())
-        return String(format: "%d:%02d", total / 60, total % 60)
+    private var rangeLabel: String {
+        "\(SongTrimWindow.timeLabel(shownRange.lowerBound)) – \(SongTrimWindow.timeLabel(shownRange.upperBound))"
+    }
+
+    private var accessibleRange: String {
+        "\(SongTrimWindow.timeLabel(shownRange.lowerBound)) to \(SongTrimWindow.timeLabel(shownRange.upperBound))"
+    }
+
+    private var lengthLabel: String {
+        let seconds = Int(window.clipLength.rounded(.down))
+        return seconds == 1 ? "1 second" : "\(seconds) seconds"
     }
 
     // MARK: - The waveform
 
+    private static let stripHeight: CGFloat = 112
+    private static let barsHeight: CGFloat = 92
+
     private var waveformStrip: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
-            let fraction = trackDuration > 0
-                ? SongTrimService.clipDuration / trackDuration
-                : 1
-            let windowWidth = max(48, width * min(1, fraction))
-            let travel = max(1, width - windowWidth)
-            let progress = maximumStart > 0 ? effectiveStart / maximumStart : 0
-            let offset = travel * progress
+            let windowWidth = (width * 0.6).rounded()
+            let windowMinX = ((width - windowWidth) / 2).rounded()
+            let pointsPerSecond = windowWidth / CGFloat(max(window.clipLength, 0.5))
+            let originX = windowMinX - CGFloat(start) * pointsPerSecond
 
-            ZStack(alignment: .leading) {
-                WaveformShape(peaks: peaks)
-                    .fill(Theme.border)
-                    .frame(height: 96)
+            ZStack(alignment: .topLeading) {
+                // The window: fixed, restrained, never moves.
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Theme.ink.opacity(0.04))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Theme.ink.opacity(0.16), lineWidth: 1.5)
+                    }
+                    .frame(width: windowWidth, height: Self.stripHeight)
+                    .offset(x: windowMinX)
 
-                WaveformShape(peaks: peaks)
+                let shape = ScrollingWaveformShape(
+                    peaks: peaks,
+                    duration: trackDuration,
+                    originX: originX,
+                    pointsPerSecond: pointsPerSecond
+                )
+
+                shape
+                    .fill(Theme.inkTertiary.opacity(0.45))
+                    .frame(width: width, height: Self.barsHeight)
+                    .offset(y: (Self.stripHeight - Self.barsHeight) / 2)
+
+                shape
                     .fill(Theme.accent)
-                    .frame(width: windowWidth, height: 96)
-                    .mask(alignment: .leading) {
+                    .frame(width: width, height: Self.barsHeight)
+                    .mask(alignment: .topLeading) {
                         Rectangle()
-                            .frame(width: windowWidth)
-                            .offset(x: offset)
+                            .frame(width: windowWidth, height: Self.barsHeight)
+                            .offset(x: windowMinX)
                     }
-                    .allowsHitTesting(false)
+                    .offset(y: (Self.stripHeight - Self.barsHeight) / 2)
 
-                // The window itself, which is the only thing that moves.
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Theme.ink, lineWidth: 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Theme.ink.opacity(0.06))
+                if let preview, isPreviewing {
+                    PreviewPlayhead(
+                        player: preview,
+                        windowStart: shownRange.lowerBound,
+                        windowMinX: windowMinX,
+                        pointsPerSecond: pointsPerSecond,
+                        height: Self.stripHeight
                     )
-                    .frame(width: windowWidth, height: 104)
-                    .offset(x: offset)
-                    .overlay(alignment: .leading) {
-                        grip.offset(x: offset + 8)
-                    }
-                    .overlay(alignment: .leading) {
-                        grip.offset(x: offset + windowWidth - 14)
-                    }
+                }
+
+                if isLoadingWaveform {
+                    ProgressView()
+                        .frame(width: width, height: Self.stripHeight)
+                }
             }
-            .frame(height: 112)
+            .frame(width: width, height: Self.stripHeight, alignment: .topLeading)
+            .clipped()
             .contentShape(.rect)
-            .gesture(dragGesture(travel: travel))
+            .gesture(dragGesture(pointsPerSecond: pointsPerSecond))
             .accessibilityElement()
             .accessibilityLabel("clip start")
-            .accessibilityValue(timeLabel(effectiveStart))
+            .accessibilityValue(SongTrimWindow.timeLabel(shownRange.lowerBound))
+            .accessibilityHint("swipe up or down to move by five seconds")
             .accessibilityAdjustableAction { direction in
-                // Five-second steps, so a VoiceOver user can place the window
-                // without a drag at all.
+                finishSettle()
+                stopPreview()
                 let delta: Double = direction == .increment ? 5 : -5
-                start = clampedStart(start + delta)
+                start = window.clamp(start + delta)
                 Haptics.selection()
             }
-
-            if isLoadingWaveform {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
         }
-        .frame(height: 112)
+        .frame(height: Self.stripHeight)
     }
 
-    private var grip: some View {
-        Capsule()
-            .fill(Theme.ink)
-            .frame(width: 6, height: 34)
-    }
-
-    private func dragGesture(travel: CGFloat) -> some Gesture {
+    /// The song follows the finger 1:1; the window never moves. A new touch
+    /// catches a gliding track exactly where it is.
+    private func dragGesture(pointsPerSecond: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                isDragging = true
-                stopPreview()
-
-                // 1:1 tracking: the window is under the finger at every frame,
-                // with no animation between the touch and the position.
-                let perPoint = maximumStart / Double(max(travel, 1))
-                let proposed = start + Double(value.translation.width) * perPoint
-
-                dragSeconds = rubberBanded(proposed) - start
-                tickIfCrossedFiveSeconds()
+                if dragBase == nil {
+                    settleTask?.cancel()
+                    settleTask = nil
+                    settleTarget = nil
+                    stopPreview()
+                    dragBase = start
+                }
+                start = window.start(
+                    dragBase: dragBase ?? start,
+                    translation: value.translation.width,
+                    pointsPerSecond: pointsPerSecond
+                )
             }
             .onEnded { value in
-                let perPoint = maximumStart / Double(max(travel, 1))
+                let base = dragBase ?? start
+                dragBase = nil
 
-                // Flicks project where the gesture was going rather than
-                // stopping dead under the finger.
-                let projected = start
-                    + Double(value.predictedEndTranslation.width) * perPoint
-                let settled = clampedStart(projected)
+                let projected = window.start(
+                    dragBase: base,
+                    translation: value.predictedEndTranslation.width,
+                    pointsPerSecond: pointsPerSecond
+                )
+                let settle = window.settle(
+                    current: start,
+                    projected: projected,
+                    reduceMotion: reduceMotion
+                )
 
-                isDragging = false
-                dragSeconds = 0
-                lastHapticBucket = nil
-
-                if reduceMotion {
-                    // Same outcome, no travel.
-                    withAnimation(.easeInOut(duration: 0.2)) { start = settled }
+                if settle.animated {
+                    glide(to: settle.target)
                 } else {
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-                        start = settled
-                    }
+                    start = settle.target
                 }
             }
     }
 
-    private func clampedStart(_ value: Double) -> Double {
-        min(max(0, value), maximumStart)
+    /// Exponential decay toward the projected resting point. Driven by hand
+    /// rather than `withAnimation`, so `start` is always the true position
+    /// and the next touch can take over from it mid-flight.
+    private func glide(to target: Double) {
+        settleTask?.cancel()
+        settleTarget = target
+
+        settleTask = Task { @MainActor in
+            let timeConstant = 0.14
+            var last = ContinuousClock.now
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(8))
+                guard !Task.isCancelled else { return }
+
+                let now = ContinuousClock.now
+                let elapsed = now - last
+                last = now
+                let seconds = Double(elapsed.components.seconds)
+                    + Double(elapsed.components.attoseconds) / 1e18
+
+                let next = target + (start - target) * exp(-seconds / timeConstant)
+                if abs(next - target) < 0.005 {
+                    start = target
+                    break
+                }
+                start = next
+            }
+
+            settleTarget = nil
+            settleTask = nil
+        }
     }
 
-    /// Past either end the window still follows the finger, but reluctantly.
-    private func rubberBanded(_ value: Double) -> Double {
-        if value < 0 { return value * 0.55 }
-        if value > maximumStart { return maximumStart + (value - maximumStart) * 0.55 }
-        return value
-    }
-
-    /// One tick per five seconds crossed. Per-frame haptics are a rattle.
-    private func tickIfCrossedFiveSeconds() {
-        let bucket = Int(effectiveStart / 5)
-        guard bucket != lastHapticBucket else { return }
-        lastHapticBucket = bucket
-        Haptics.selection()
+    /// Lands any glide immediately, so preview and export use the resting point.
+    private func finishSettle() {
+        guard let settleTarget else { return }
+        settleTask?.cancel()
+        settleTask = nil
+        start = settleTarget
+        self.settleTarget = nil
     }
 
     // MARK: - Loading
 
     private func handleFileImport(_ result: Result<[URL], Error>) {
         errorMessage = nil
-        guard case let .success(urls) = result, let source = urls.first else { return }
 
-        let didAccess = source.startAccessingSecurityScopedResource()
-        defer { if didAccess { source.stopAccessingSecurityScopedResource() } }
-
-        // Copied into the app's own storage straight away: the picker's URL is
-        // security scoped and will not survive a relaunch.
-        guard let cached = copyToCache(source) else {
-            errorMessage = SongTrimService.TrimError.unreadable.errorDescription
+        let source: URL
+        switch result {
+        case let .success(urls):
+            guard let first = urls.first else { return }
+            source = first
+        case let .failure(error):
+            if (error as? CocoaError)?.code == .userCancelled { return }
+            errorMessage = SongTrimService.TrimError.fileInaccessible.errorDescription
             return
         }
 
-        load(url: cached, title: source.deletingPathExtension().lastPathComponent)
+        let title = source.deletingPathExtension().lastPathComponent
+        isPreparingSource = true
+
+        loadTask?.cancel()
+        loadTask = Task {
+            do {
+                let cached = try await SongTrimService.copyIntoCache(from: source)
+                let duration = try await SongTrimService.validatedDuration(
+                    of: cached,
+                    failure: .unsupportedFormat
+                )
+                guard !Task.isCancelled else { return }
+                isPreparingSource = false
+                present(url: cached, title: title, duration: duration)
+            } catch {
+                guard !Task.isCancelled else { return }
+                isPreparingSource = false
+                errorMessage = (error as? SongTrimService.TrimError)?.errorDescription
+                    ?? SongTrimService.TrimError.fileInaccessible.errorDescription
+            }
+        }
+    }
+
+    /// Checks library access before anything is shown.
+    private func openLibrary() {
+        errorMessage = nil
+
+        switch MusicLibraryAccess.decision(for: MusicLibraryAccess.currentStatus) {
+        case .present:
+            libraryBlocked = false
+            isPickingFromLibrary = true
+        case .blocked:
+            libraryBlocked = true
+        case .request:
+            Task {
+                let status = await MusicLibraryAccess.requestAuthorization()
+                if MusicLibraryAccess.decision(for: status) == .present {
+                    libraryBlocked = false
+                    isPickingFromLibrary = true
+                } else {
+                    libraryBlocked = true
+                }
+            }
+        }
     }
 
     private func handleLibraryPick(_ picked: MediaPicker.Picked?) {
@@ -483,64 +637,81 @@ struct SongTrimmerView: View {
 
         guard let picked else { return }
 
-        // DRM-protected Apple Music tracks have no exportable asset at all.
-        // Saying so now is the whole point: letting someone trim for thirty
-        // seconds and then fail at export would be worse than not offering it.
-        guard let url = picked.assetURL else {
+        // No asset URL means DRM: say so now, not after the user has chosen.
+        guard let url = MediaPicker.trimmableURL(for: picked) else {
             errorMessage = SongTrimService.TrimError.protectedTrack.errorDescription
             return
         }
 
-        load(url: url, title: picked.title)
-    }
-
-    private func copyToCache(_ source: URL) -> URL? {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-        guard let caches else { return nil }
-
-        let destination = caches.appendingPathComponent(
-            "trim-source.\(source.pathExtension.isEmpty ? "m4a" : source.pathExtension)"
-        )
-        try? FileManager.default.removeItem(at: destination)
-
-        do {
-            try FileManager.default.copyItem(at: source, to: destination)
-            return destination
-        } catch {
-            return nil
+        isPreparingSource = true
+        loadTask?.cancel()
+        loadTask = Task {
+            do {
+                let duration = try await SongTrimService.validatedDuration(
+                    of: url,
+                    failure: .protectedTrack
+                )
+                guard !Task.isCancelled else { return }
+                isPreparingSource = false
+                present(url: url, title: picked.title, duration: duration)
+            } catch {
+                guard !Task.isCancelled else { return }
+                isPreparingSource = false
+                errorMessage = SongTrimService.TrimError.protectedTrack.errorDescription
+            }
         }
     }
 
-    private func load(url: URL, title: String) {
-        sourceURL = url
+    /// Moves straight to the selector, then draws the waveform into it.
+    private func present(url: URL, title: String, duration: Double) {
+        stopPreview()
+        settleTask?.cancel()
+        settleTask = nil
+        settleTarget = nil
+        dragBase = nil
+
         sourceTitle = title.isEmpty ? "your track" : title
-        isLoadingWaveform = true
+        trackDuration = duration
         peaks = []
+        isLoadingWaveform = true
 
         // Reopening a previously trimmed song puts the window back where it
         // was left, rather than snapping to the beginning.
-        start = store.profile.customAlarmTrimStart ?? 0
+        start = SongTrimWindow(duration: duration).clamp(store.profile.customAlarmTrimStart ?? 0)
 
-        Task {
-            do {
-                let duration = try await SongTrimService.duration(of: url)
-                trackDuration = duration
-                start = clampedStart(start)
-
-                let rendered = try await SongTrimService.waveform(for: url)
-                peaks = rendered
-            } catch {
-                errorMessage = (error as? SongTrimService.TrimError)?.errorDescription
-                    ?? SongTrimService.TrimError.unreadable.errorDescription
-            }
-            isLoadingWaveform = false
+        withAnimation(stepAnimation) {
+            sourceURL = url
         }
+
+        loadTask = Task {
+            do {
+                let rendered = try await SongTrimService.waveform(
+                    for: url,
+                    buckets: SongTrimWindow.waveformBuckets(forDuration: duration)
+                )
+                guard !Task.isCancelled else { return }
+                peaks = rendered
+                isLoadingWaveform = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                isLoadingWaveform = false
+                returnToSources(with: .unsupportedFormat)
+            }
+        }
+    }
+
+    private func returnToSources(with error: SongTrimService.TrimError) {
+        stopPreview()
+        withAnimation(stepAnimation) {
+            sourceURL = nil
+        }
+        errorMessage = error.errorDescription
     }
 
     // MARK: - Preview
 
-    /// Plays exactly the selected window, looping, so what the user hears is
-    /// what will ring.
+    /// Plays exactly the selected window, looping at its end, so what the
+    /// user hears is what will ring.
     private func togglePreview() {
         if isPreviewing {
             stopPreview()
@@ -548,28 +719,41 @@ struct SongTrimmerView: View {
         }
 
         guard let sourceURL else { return }
+        finishSettle()
 
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
             try AVAudioSession.sharedInstance().setActive(true)
 
             let player = try AVAudioPlayer(contentsOf: sourceURL)
-            player.currentTime = effectiveStart
+            let selected = start
+            let currentWindow = window
+            player.currentTime = currentWindow.previewStart(for: selected)
             player.prepareToPlay()
             player.play()
 
             preview = player
-            isPreviewing = true
+            previewWindowStart = selected
+            errorMessage = nil
 
-            let windowStart = effectiveStart
-            previewLoop = Task {
+            previewLoop?.cancel()
+            previewLoop = Task { @MainActor in
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(SongTrimService.clipDuration))
-                    guard !Task.isCancelled, let preview, preview.isPlaying else { return }
-                    preview.currentTime = windowStart
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard !Task.isCancelled, let preview, preview === player else { return }
+
+                    if let restart = currentWindow.previewRestart(
+                        currentTime: player.currentTime,
+                        isPlaying: player.isPlaying,
+                        start: selected
+                    ) {
+                        player.currentTime = restart
+                        if !player.isPlaying { player.play() }
+                    }
                 }
             }
         } catch {
+            stopPreview()
             errorMessage = SongTrimService.TrimError.unreadable.errorDescription
         }
     }
@@ -579,14 +763,15 @@ struct SongTrimmerView: View {
         previewLoop = nil
         preview?.stop()
         preview = nil
-        isPreviewing = false
+        previewWindowStart = nil
     }
 
     // MARK: - Saving
 
     private func save() async {
-        guard let sourceURL else { return }
+        guard let sourceURL, !isExporting else { return }
 
+        finishSettle()
         stopPreview()
         isExporting = true
         errorMessage = nil
@@ -594,7 +779,7 @@ struct SongTrimmerView: View {
         do {
             let clip = try await SongTrimService.export(
                 from: sourceURL,
-                startSeconds: effectiveStart,
+                startSeconds: window.clamp(start),
                 title: sourceTitle
             )
 
@@ -623,34 +808,61 @@ struct SongTrimmerView: View {
     }
 }
 
+// MARK: - Preview playhead
+
+/// A thin line inside the window showing where the preview is.
+private struct PreviewPlayhead: View {
+    let player: AVAudioPlayer
+    let windowStart: Double
+    let windowMinX: CGFloat
+    let pointsPerSecond: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        TimelineView(.animation) { _ in
+            let elapsed = max(0, player.currentTime - windowStart)
+            Capsule()
+                .fill(Theme.ink)
+                .frame(width: 2, height: height - 16)
+                .offset(x: windowMinX + CGFloat(elapsed) * pointsPerSecond - 1, y: 8)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Waveform shape
 
-/// The track's loudness, mirrored around the centre line.
-///
-/// A `Shape` rather than a stack of bars: this is drawn twice, over the whole
-/// track, and a few hundred views would cost more than the picture is worth.
-private struct WaveformShape: Shape {
+/// The track's loudness at a fixed time scale, positioned so `originX` is
+/// 0:00. Only bars inside the visible rect are added to the path, so a long
+/// track costs no more per frame than a short one.
+private struct ScrollingWaveformShape: Shape {
     let peaks: [Double]
+    let duration: Double
+    let originX: CGFloat
+    let pointsPerSecond: CGFloat
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        guard !peaks.isEmpty else { return path }
+        guard !peaks.isEmpty, duration > 0, pointsPerSecond > 0 else { return path }
 
-        let barWidth = rect.width / CGFloat(peaks.count)
+        let count = peaks.count
+        let slot = CGFloat(duration / Double(count)) * pointsPerSecond
+        guard slot > 0 else { return path }
+
+        let barWidth = max(1.5, slot * 0.55)
         let centre = rect.midY
 
-        for (index, peak) in peaks.enumerated() {
-            let height = max(2, CGFloat(peak) * rect.height)
-            let x = CGFloat(index) * barWidth
+        let first = max(0, Int(floor((rect.minX - originX) / slot)) - 1)
+        let last = min(count - 1, Int(ceil((rect.maxX - originX) / slot)) + 1)
+        guard first <= last else { return path }
 
+        for index in first...last {
+            let height = max(3, CGFloat(peaks[index]) * rect.height)
+            let x = originX + CGFloat(index) * slot
             path.addRoundedRect(
-                in: CGRect(
-                    x: x,
-                    y: centre - height / 2,
-                    width: max(1, barWidth * 0.6),
-                    height: height
-                ),
-                cornerSize: CGSize(width: 0.5, height: 0.5)
+                in: CGRect(x: x, y: centre - height / 2, width: barWidth, height: height),
+                cornerSize: CGSize(width: barWidth / 2, height: barWidth / 2)
             )
         }
 

@@ -221,6 +221,8 @@ struct AlarmSoundTests {
             SongTrimService.TrimError.unreadable.errorDescription ?? "",
             SongTrimService.TrimError.exportFailed.errorDescription ?? "",
             SongTrimService.TrimError.noSoundsDirectory.errorDescription ?? "",
+            SongTrimService.TrimError.fileInaccessible.errorDescription ?? "",
+            SongTrimService.TrimError.unsupportedFormat.errorDescription ?? "",
         ]
 
         for message in messages {

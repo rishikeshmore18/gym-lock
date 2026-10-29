@@ -58,7 +58,7 @@ struct AlarmSoundListView: View {
             })
             .padding(.top, 6)
 
-            Text("tap a track to hear it. your own song plays 28 seconds of any track you own.")
+            Text("tap a track to hear it. your own song uses 28 seconds of a track GymLock can access.")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.inkTertiary)
                 .fixedSize(horizontal: false, vertical: true)
