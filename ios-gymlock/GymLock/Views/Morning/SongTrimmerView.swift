@@ -72,12 +72,12 @@ struct SongTrimmerView: View {
             }
         }
         .tint(Theme.accent)
-        .fileImporter(
-            isPresented: $isImportingFile,
-            allowedContentTypes: [.audio],
-            allowsMultipleSelection: false
-        ) { result in
-            handleFileImport(result)
+        .sheet(isPresented: $isImportingFile) {
+            AudioFilePicker { url in
+                isImportingFile = false
+                handleFileImport(url)
+            }
+            .ignoresSafeArea()
         }
         .sheet(isPresented: $isPickingFromLibrary) {
             MediaPicker { picked in
@@ -571,19 +571,9 @@ struct SongTrimmerView: View {
 
     // MARK: - Loading
 
-    private func handleFileImport(_ result: Result<[URL], Error>) {
+    private func handleFileImport(_ picked: URL?) {
         errorMessage = nil
-
-        let source: URL
-        switch result {
-        case let .success(urls):
-            guard let first = urls.first else { return }
-            source = first
-        case let .failure(error):
-            if (error as? CocoaError)?.code == .userCancelled { return }
-            errorMessage = SongTrimService.TrimError.fileInaccessible.errorDescription
-            return
-        }
+        guard let source = picked else { return }
 
         let title = source.deletingPathExtension().lastPathComponent
         isPreparingSource = true
@@ -592,6 +582,8 @@ struct SongTrimmerView: View {
         loadTask = Task {
             do {
                 let cached = try await SongTrimService.copyIntoCache(from: source)
+                // The picker's own copy sits in our tmp; ours replaces it.
+                try? FileManager.default.removeItem(at: source)
                 let duration = try await SongTrimService.validatedDuration(
                     of: cached,
                     failure: .unsupportedFormat
