@@ -17,6 +17,12 @@ import SwiftUI
 struct OnboardingFlowView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The "break the chains" intro plays before the first scene.
+    @State private var isIntroShowing = true
+    /// The intro waits for the launch cover to lift so it never starts unseen.
+    @State private var introCanStart = false
 
     private enum Scene: Int, CaseIterable {
         // The story.
@@ -119,9 +125,32 @@ struct OnboardingFlowView: View {
                 .allowsHitTesting(false)
             }
         }
+        .accessibilityHidden(isIntroShowing)
+        .overlay {
+            if isIntroShowing {
+                intro
+                    .transition(.opacity)
+            }
+        }
         .environment(pagerLock)
         .environment(alarmPlayer)
         .environment(subscriptions)
+        .onChange(of: LaunchCover.shared.isHoldingApp, initial: true) { _, isHolding in
+            if !isHolding { introCanStart = true }
+        }
+    }
+
+    /// Full screen, edge to edge, with nothing on top of it.
+    @ViewBuilder
+    private var intro: some View {
+        if introCanStart {
+            IntroTestPages(onDone: {
+                withAnimation(.easeInOut(duration: 0.35)) { isIntroShowing = false }
+            })
+        } else {
+            (colorScheme == .dark ? GymLockIntroView.darkBackground : GymLockIntroView.lightBackground)
+                .ignoresSafeArea()
+        }
     }
 
     @ViewBuilder
@@ -129,7 +158,7 @@ struct OnboardingFlowView: View {
         // A held scene is mounted but not yet running. Starting a scene's
         // timeline while it is buried under falling glass would mean the user
         // misses the opening of it entirely.
-        let isActive = index == pageIndex && heldScene != pageIndex
+        let isActive = index == pageIndex && heldScene != pageIndex && !isIntroShowing
 
         switch Scene(rawValue: pageIndex) ?? .logo {
         // MARK: The story
