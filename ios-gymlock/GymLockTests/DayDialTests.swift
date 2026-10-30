@@ -7,6 +7,7 @@ import Testing
 ///
 /// These rules decide what a user's morning looks like, so they are pinned to
 /// numbers rather than to however the dial happens to behave on a simulator.
+@MainActor
 struct DayDialTests {
     private let centre = CGPoint(x: 150, y: 150)
     private let radius: CGFloat = 100
@@ -16,16 +17,18 @@ struct DayDialTests {
         return CGPoint(x: centre.x + offset.width, y: centre.y + offset.height)
     }
 
-    // The real dial at 320pt: a gutter radius of about 131pt, a bar 49.5pt
-    // wide, a glyph 23.8pt wide, and therefore a round cap 43 minutes of arc
-    // deep. Every geometry test below uses these so the numbers mean what
-    // they mean on a real screen.
-    private static let ring: CGFloat = 131.2
-    private static let barWidth: CGFloat = 49.536
-    private static let glyph: CGFloat = 23.777
-    private static let cap = 43
-    private static let tolerance = 86
-    private static let slop = 24
+    // The real dial at 320pt, measured by the same geometry the view draws
+    // with: a gutter radius of about 131pt, a bar 44.6pt wide (the old 49.5
+    // made 10% thinner), a glyph that scales with it, and a round cap about
+    // 39 minutes of arc deep. Every geometry test below uses these so the
+    // numbers mean what they mean on a real screen.
+    private static let metrics = DayDialModel.Metrics(size: 320)
+    private static let ring: CGFloat = metrics.gutterRadius
+    private static let barWidth: CGFloat = metrics.barWidth
+    private static let glyph: CGFloat = metrics.iconSize
+    private static let cap = metrics.capMinutesRounded
+    private static let tolerance = metrics.grabTolerance
+    private static let slop = metrics.grabSlop
 
     // MARK: - Angle to minutes
 
@@ -280,7 +283,7 @@ struct DayDialTests {
     // MARK: - Drawn geometry
 
     /// A stroke with round caps cannot draw shorter than it is wide, so a
-    /// one-hour visit occupies 86 minutes of arc even though it means 60.
+    /// one-hour visit occupies about 78 minutes of arc even though it means 60.
     /// Everything the finger touches has to be measured against this, which
     /// is the whole reason the grab zones were landing in the wrong place.
     @Test func aShortBarIsDrawnWiderThanItsValue() {
@@ -419,7 +422,7 @@ struct DayDialTests {
 
     /// The bug the user hit: on a one-hour visit, a finger on the visible end
     /// of the pill must resize it, not slide the whole thing. The end is
-    /// where it *looks*, which is 43 minutes past the value.
+    /// where it *looks*, which is a cap's depth past the value.
     @Test func theVisibleEndOfAShortBarResizesIt() {
         let gym = 7 * 60 + 30
         let bars = [gymBar(gym, 60), sleepBar(23 * 60, 450)]
@@ -427,7 +430,7 @@ struct DayDialTests {
             DayDialModel.grab(fingerMinutes: finger, bars: bars, tolerance: Self.tolerance, slop: Self.slop)
         }
 
-        // The drawn pill runs from gym-13 to gym+73 around a 60-minute value.
+        // The drawn pill runs from gym-9 to gym+69 around a 60-minute value.
         #expect(grab(gym + 70) == .gymEnd)
         #expect(grab(gym - 10) == .gymStart)
         // And its middle still slides the visit.
@@ -447,7 +450,7 @@ struct DayDialTests {
     }
 
     /// A long night does not get two-hour handles: the end zones are capped
-    /// at one bar width however long the bar is.
+    /// at one touch-band width however long the bar is.
     @Test func aLongBarHasProportionateHandles() {
         let pill = sleepBar(23 * 60, 450)
         // A third of the way in is comfortably body, not an end.
@@ -544,5 +547,211 @@ struct DayDialTests {
         #expect(DayDialModel.durationText(minutes: 495) == "8 hr 15 min")
         #expect(DayDialModel.durationText(minutes: 480) == "8 hr")
         #expect(DayDialModel.durationText(minutes: 45) == "45 min")
+    }
+
+    // MARK: - Touches on the real dial
+
+    private static let dialCentre = CGPoint(x: 160, y: 160)
+    private static let bedtime = 23 * 60
+    private static let wake = 6 * 60 + 30
+    private static let gym = 8 * 60
+
+    private var dialBars: [DayDialModel.Bar] {
+        [
+            Self.metrics.bar(start: Self.gym, span: 60, startGrab: .gymStart, endGrab: .gymEnd, bodyGrab: .gymBody),
+            Self.metrics.bar(start: Self.bedtime, span: 450, startGrab: .bedtime, endGrab: .wake, bodyGrab: .sleepBody),
+        ]
+    }
+
+    private func dialPoint(minutes: Int, radius: CGFloat) -> CGPoint {
+        let offset = DayDialModel.offset(minutes: minutes, radius: radius)
+        return CGPoint(x: Self.dialCentre.x + offset.width, y: Self.dialCentre.y + offset.height)
+    }
+
+    private func touch(_ minutes: Int, radius: CGFloat = metrics.gutterRadius) -> DayDialModel.Grab? {
+        DayDialModel.grab(
+            at: dialPoint(minutes: minutes, radius: radius),
+            centre: Self.dialCentre,
+            metrics: Self.metrics,
+            bars: dialBars
+        )
+    }
+
+    @Test func aTouchOnTheBedtimeEndTakesBedtime() {
+        #expect(touch(Self.bedtime + 10) == .bedtime)
+        // The moon icon sits half a cap inside the end; touching it is the end.
+        #expect(touch(Self.bedtime + 40) == .bedtime)
+    }
+
+    @Test func aTouchOnTheWakeEndTakesWake() {
+        #expect(touch(Self.wake - 10) == .wake)
+        // The sun icon, half a cap inside the alarm end.
+        #expect(touch(Self.wake - 40) == .wake)
+    }
+
+    @Test func aTouchInTheMiddleOfTheNightTakesTheWholeNight() {
+        #expect(touch(2 * 60 + 45) == .sleepBody)
+    }
+
+    /// The bug: a finger on the clock face, its ticks or its numerals picked
+    /// up the night, because the live band reached in past the face edge.
+    @Test func theFaceTicksAndNumeralsAreNeverLive() {
+        let m = Self.metrics
+        let oldInnerEdge = m.gutterRadius - (m.gutterWidth / 2 + 12)
+        // Straight up is midnight, under the bedtime handle, and 02:45 is the
+        // night's body: both live in the gutter, dead on the face.
+        for radius in [
+            m.tickOuterRadius,
+            m.tickInnerRadius,
+            m.numeralRadius(hour: 0),
+            m.faceRadius - 0.5,
+            oldInnerEdge + 0.5,
+            m.celestialRadius,
+            0,
+        ] {
+            #expect(touch(0, radius: radius) == nil)
+            #expect(touch(2 * 60 + 45, radius: radius) == nil)
+        }
+        #expect(touch(0) == .bedtime)
+        #expect(touch(2 * 60 + 45) == .sleepBody)
+        // And by the alarm end, which is what people aim near.
+        #expect(touch(Self.wake - 10, radius: m.tickOuterRadius) == nil)
+        #expect(touch(Self.wake - 10, radius: m.numeralRadius(hour: 6)) == nil)
+    }
+
+    @Test func theEdgeOfTheTouchBandStillGrabs() {
+        let m = Self.metrics
+        // 02:45 is the night's body; midnight is still inside the bedtime
+        // handle, which reaches a touch-band width past 23:00.
+        let middle = 2 * 60 + 45
+        #expect(touch(middle, radius: m.gutterRadius - m.hitHalfWidth + 0.5) == .sleepBody)
+        #expect(touch(middle, radius: m.gutterRadius + m.hitHalfWidth - 0.5) == .sleepBody)
+        #expect(touch(middle, radius: m.gutterRadius - m.hitHalfWidth - 1) == nil)
+        #expect(touch(middle, radius: m.gutterRadius + m.hitHalfWidth + 1) == nil)
+    }
+
+    /// At every phone width the band is a real 44pt target and still stops
+    /// short of the face.
+    @Test(arguments: [260.0, 275.0, 320.0, 350.0, 390.0, 430.0])
+    func theTouchBandIsThickEnoughAndClearOfTheFace(size: Double) {
+        let m = DayDialModel.Metrics(size: CGFloat(size))
+        #expect(2 * m.hitHalfWidth >= DayDialModel.Metrics.minimumTouchThickness)
+        #expect(2 * m.hitHalfWidth >= m.barWidth)
+        #expect(m.gutterRadius - m.hitHalfWidth > m.faceRadius)
+    }
+
+    @Test func aTouchOnTheGymStartTakesTheStartOrTheCollapsedHandle() throws {
+        let pill = try #require(dialBars.first)
+        let grabbed = touch((pill.drawnStart + 5) % 1440)
+        #expect(grabbed == .gymStart || grabbed == .gymBody)
+        // A visit long enough for two icons has a real start handle.
+        let long = [
+            Self.metrics.bar(start: Self.gym, span: 180, startGrab: .gymStart, endGrab: .gymEnd, bodyGrab: .gymBody),
+        ]
+        let point = dialPoint(minutes: Self.gym + 10, radius: Self.metrics.gutterRadius)
+        #expect(DayDialModel.grab(at: point, centre: Self.dialCentre, metrics: Self.metrics, bars: long) == .gymStart)
+    }
+
+    @Test func aTouchOnTheGymEndTakesTheEnd() throws {
+        let pill = try #require(dialBars.first)
+        #expect(touch((pill.drawnStart + pill.drawnSpan - 5) % 1440) == .gymEnd)
+    }
+
+    // MARK: - What each drag moves
+
+    private var plan: MorningRhythm {
+        var rhythm = MorningRhythm.default
+        rhythm.bedtime = TimeOfDay(hour: 23, minute: 0)
+        rhythm.wakeTime = TimeOfDay(hour: 6, minute: 30)
+        rhythm.gymTime = TimeOfDay(hour: 8, minute: 0)
+        rhythm.gymSessionMinutes = 60
+        return rhythm
+    }
+
+    @Test func draggingTheNightKeepsItsLength() {
+        let base = plan
+        for delta in [-45, -30, 15, 30] {
+            let next = DayDialModel.applying(.sleepBody, delta: delta, base: base, current: base).rhythm
+            #expect(next.sleepMinutes == base.sleepMinutes)
+            #expect(next.bedtime == base.bedtime.offset(byMinutes: delta))
+            #expect(next.wakeTime == base.wakeTime.offset(byMinutes: delta))
+            #expect(next.gymByTime == base.gymByTime)
+        }
+    }
+
+    @Test func draggingTheAlarmLeavesBedtimeAlone() {
+        let base = plan
+        for delta in [-60, -15, 15, 45] {
+            let next = DayDialModel.applying(.wake, delta: delta, base: base, current: base).rhythm
+            #expect(next.bedtime == base.bedtime)
+            #expect(next.wakeTime == base.wakeTime.offset(byMinutes: delta))
+            #expect(next.gymByTime == base.gymByTime)
+        }
+    }
+
+    @Test func draggingBedtimeLeavesTheAlarmAlone() {
+        let base = plan
+        for delta in [-90, -30, 30, 60] {
+            let next = DayDialModel.applying(.bedtime, delta: delta, base: base, current: base).rhythm
+            #expect(next.wakeTime == base.wakeTime)
+            #expect(next.bedtime == base.bedtime.offset(byMinutes: delta))
+            #expect(next.gymByTime == base.gymByTime)
+        }
+    }
+
+    /// The pure drag still honours the clamps, with the excess reported as
+    /// overshoot for the rubber-band.
+    @Test func aDragPastALimitStopsAndReportsTheOvershoot() {
+        let base = plan
+        let applied = DayDialModel.applying(.wake, delta: 300, base: base, current: base)
+        let allowed = 90 - DayDialModel.minimumLeadMinutes
+        #expect(applied.rhythm.wakeTime == base.wakeTime.offset(byMinutes: allowed))
+        #expect(applied.overshoot == 300 - allowed)
+    }
+
+    // MARK: - Bar width and the face
+
+    @Test func theBarIsTenPercentThinnerAndKeepsItsIconMargin() {
+        let old: CGFloat = 49.536
+        #expect(abs(Self.barWidth - old * 0.9) < 0.001)
+        #expect(abs(Self.glyph / Self.barWidth - 0.48) < 0.0001)
+        #expect(abs(Self.metrics.hatchLength / Self.barWidth - 0.42) < 0.0001)
+        #expect(Self.cap == 39)
+    }
+
+    /// Every numeral's farthest corner sits a clear gap inside the longest
+    /// tick, at every phone width.
+    @Test(arguments: [260.0, 320.0, 430.0])
+    func numeralsSitInsideTheTickRing(size: Double) {
+        let m = DayDialModel.Metrics(size: CGFloat(size))
+        let limit = m.tickInnerRadius - m.numeralClearance
+        for hour in stride(from: 0, to: 24, by: 2) {
+            let r = m.numeralRadius(hour: hour)
+            let angle = DayDialModel.Metrics.hourAngle(hour)
+            let half = m.numeralHalfExtent(hour: hour)
+            let cx = r * cos(angle)
+            let cy = r * sin(angle)
+            var farthest: CGFloat = 0
+            for sx in [-1.0, 1.0] {
+                for sy in [-1.0, 1.0] {
+                    let x = cx + CGFloat(sx) * half.width
+                    let y = cy + CGFloat(sy) * half.height
+                    farthest = max(farthest, sqrt(x * x + y * y))
+                }
+            }
+            #expect(farthest <= limit + 0.01)
+            #expect(r > m.faceRadius * 0.5)
+        }
+    }
+
+    @Test(arguments: [260.0, 320.0, 430.0])
+    func theMoonAndSunClearTheNumerals(size: Double) {
+        let m = DayDialModel.Metrics(size: CGFloat(size))
+        let symbolHalf = max(m.moonSize, m.sunSize) * 0.6
+        for hour in [0, 12] {
+            let innerEdge = m.numeralRadius(hour: hour) - m.numeralHalfExtent(hour: hour).height
+            #expect(m.celestialRadius + symbolHalf + m.numeralClearance <= innerEdge + 0.01)
+        }
+        #expect(m.celestialRadius > symbolHalf)
     }
 }

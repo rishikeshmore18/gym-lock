@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Pure model
 
@@ -355,6 +356,147 @@ enum DayDialModel {
         )
     }
 
+    /// What one drag frame did to the rhythm.
+    struct Applied: Equatable {
+        let rhythm: MorningRhythm
+        /// Minutes the finger asked for beyond a clamp; drives rubber-banding.
+        let overshoot: Int
+        /// Whether a gym drag has the night pushed later.
+        let pushesNight: Bool
+    }
+
+    /// Wraps any minute count onto the clock.
+    static func time(at minutes: Int) -> TimeOfDay {
+        TimeOfDay(hour: ((minutes % 1440) + 1440) % 1440 / 60, minute: ((minutes % 60) + 60) % 60)
+    }
+
+    /// The meaning of every grab, as a pure function so it is testable.
+    ///
+    /// `base` is the rhythm when the finger went down; `delta` is how far the
+    /// finger has travelled since, in minutes. Each frame is applied from the
+    /// base, so the bar stays glued to the point it was picked up.
+    static func applying(
+        _ grab: Grab,
+        delta: Int,
+        base: MorningRhythm,
+        current: MorningRhythm
+    ) -> Applied {
+        let baseBed = base.bedtime.minutesFromMidnight
+        let baseWake = base.wakeTime.minutesFromMidnight
+        let baseSleep = clockwiseSpan(from: baseBed, to: baseWake)
+        let baseAwake = 1440 - baseSleep
+        let baseGym = base.gymByTime.minutesFromMidnight
+        let baseGap = clockwiseSpan(from: baseWake, to: baseGym)
+        let baseSession = base.gymSessionMinutes
+        var next = current
+        var overshoot = 0
+        var pushesNight = false
+
+        // Both bars are written explicitly on every drag, even the one that is
+        // not moving. Pinning the still bar is what guarantees it cannot drift
+        // as a side effect of the other one, and it also gives a plan saved
+        // before the gym bar had its own value a real value the first time it
+        // is touched.
+        next.gymTime = time(at: baseGym)
+
+        /// In Wake & Go the lock window follows the gap the user drew (get
+        /// ready plus travel). In Go Later (gap over 2 hours) get ready and
+        /// travel are the user's own numbers, so the gap leaves them alone.
+        func syncWindow(gap: Int) {
+            guard gap <= MorningRhythm.absoluteMaximumWindow else { return }
+            next.travelMinutes = travelMinutes(
+                gapMinutes: gap,
+                getReadyMinutes: base.getReadyMinutes
+            )
+        }
+
+        /// Writes a gym drag into the rhythm: the night slides by the push,
+        /// and the visit is placed relative to the (possibly moved) alarm.
+        func applyPush(_ push: GymPush) {
+            let newWake = baseWake + push.nightShift
+            next.bedtime = time(at: baseBed + push.nightShift + 1440)
+            next.wakeTime = time(at: newWake + 1440)
+            next.gymTime = time(at: newWake + push.gapMinutes)
+            pushesNight = push.nightShift != 0
+        }
+
+        switch grab {
+        case .bedtime:
+            // Bedtime sets the length of the night; the alarm stays put, so
+            // the gap to the gym is untouched. Pulling bedtime earlier runs
+            // into the end of the gym visit, and stops there.
+            let desired = baseSleep - delta
+            let sleep = clampedSleep(desired, gapMinutes: baseGap, sessionMinutes: baseSession)
+            overshoot = desired - sleep
+            next.bedtime = time(at: baseWake - sleep + 1440)
+
+        case .wake:
+            // The alarm moves on its own. Later eats into the run-up to a gym
+            // time that is standing still, so it stops a few minutes short of
+            // the visit rather than shoving it along.
+            let shift = clampedWakeShift(delta, sleepMinutes: baseSleep, gapMinutes: baseGap)
+            overshoot = delta - shift
+            next.wakeTime = time(at: baseWake + shift)
+            syncWindow(gap: baseGap - shift)
+
+        case .sleepBody:
+            // The whole night slides with its length intact. The gym visit
+            // does not come with it: the alarm closing on the visit stops the
+            // drag one way, bedtime closing on it stops the drag the other.
+            let shift = clampedNightShift(
+                delta,
+                awakeSpan: baseAwake,
+                gapMinutes: baseGap,
+                sessionMinutes: baseSession
+            )
+            overshoot = delta - shift
+            next.bedtime = time(at: baseBed + shift + 1440)
+            next.wakeTime = time(at: baseWake + shift + 1440)
+            syncWindow(gap: baseGap - shift)
+
+        case .gymStart:
+            // This end says where the visit begins; the far end stays put. So
+            // pulling it later shortens the visit and pulling it earlier
+            // lengthens it, until the visit hits its own limits.
+            let endGap = baseGap + baseSession
+            let desiredGap = baseGap + delta
+            let session = min(
+                max(endGap - desiredGap, MorningRhythm.sessionRange.lowerBound),
+                max(min(MorningRhythm.sessionRange.upperBound, endGap - minimumLeadMinutes), MorningRhythm.sessionRange.lowerBound)
+            )
+            let gap = endGap - session
+            overshoot = desiredGap - gap
+            next.gymSessionMinutes = session
+            next.gymTime = time(at: baseWake + gap)
+            syncWindow(gap: gap)
+
+        case .gymBody:
+            // The whole visit slides anywhere in the day. Dragged into the
+            // night it pushes the night later, keeping its length.
+            let push = pushedGymBody(
+                desiredGap: baseGap + delta,
+                awakeSpan: baseAwake,
+                sessionMinutes: baseSession
+            )
+            overshoot = push.overshoot
+            applyPush(push)
+            syncWindow(gap: push.gapMinutes)
+
+        case .gymEnd:
+            let push = pushedGymEnd(
+                desiredSession: baseSession + delta,
+                awakeSpan: baseAwake,
+                gapMinutes: baseGap
+            )
+            overshoot = push.overshoot
+            next.gymSessionMinutes = push.sessionMinutes
+            applyPush(push)
+            if push.nightShift != 0 { syncWindow(gap: push.gapMinutes) }
+        }
+
+        return Applied(rhythm: next, overshoot: overshoot, pushesNight: pushesNight)
+    }
+
     /// The note after a push, with the real times. 24-hour, as in FLOW.
     static func pushMessage(bedtime: TimeOfDay, wake: TimeOfDay) -> String {
         "moved your sleep to \(bedtime.clockString)–\(wake.clockString) so it starts after the gym."
@@ -389,6 +531,166 @@ enum DayDialModel {
         if hours == 0 { return "\(rest) min" }
         if rest == 0 { return "\(hours) hr" }
         return "\(hours) hr \(rest) min"
+    }
+}
+
+// MARK: - Geometry
+
+extension DayDialModel {
+    /// Every length on the dial, derived from its diameter and nothing else,
+    /// so an SE and a Pro Max get the same proportions and the tests measure
+    /// the same dial the user touches.
+    ///
+    /// Read outside in: gutter, bar, face edge, tick ring, a deliberate gap,
+    /// hour numerals, then the moon and sun with room around them.
+    struct Metrics: Equatable {
+        let size: CGFloat
+
+        /// The bar was 86% of the gutter; it is now 10% thinner than that.
+        static let barFraction: CGFloat = 0.86 * 0.90
+        /// The thinnest band, measured across the bar, that may pick it up.
+        static let minimumTouchThickness: CGFloat = 44
+
+        // MARK: Ring
+
+        var gutterWidth: CGFloat { size * 0.18 }
+        var gutterRadius: CGFloat { (size - gutterWidth) / 2 }
+        var barWidth: CGFloat { gutterWidth * Self.barFraction }
+        /// Glyph size inside the bar, so the icon keeps the same margin to the
+        /// pill's edges at any bar width.
+        var iconSize: CGFloat { barWidth * 0.48 }
+        var hatchLength: CGFloat { barWidth * 0.42 }
+        var faceRadius: CGFloat { gutterRadius - gutterWidth / 2 - size * 0.012 }
+
+        /// Minutes of arc per point along the bar centreline.
+        var minutesPerPoint: Double { 1440 / (2 * .pi * Double(gutterRadius)) }
+        /// Half a round cap, in minutes: how far the stroke centreline stops
+        /// short of a bar's true ends so the cap lands exactly on them.
+        var capMinutes: Double { Double(barWidth / 2) * minutesPerPoint }
+        var capMinutesRounded: Int { max(1, Int(capMinutes.rounded())) }
+
+        // MARK: Touch
+
+        /// The little invisible margin either side of the visible bar.
+        var touchPadding: CGFloat { max(4, size * 0.015) }
+        /// Half the radial thickness of the band that picks up a bar: the bar
+        /// plus a small margin, never under 22 pt (a 44 pt target). Visual
+        /// thinning does not shrink it below that.
+        var hitHalfWidth: CGFloat {
+            max(Self.minimumTouchThickness / 2, barWidth / 2 + touchPadding)
+        }
+        /// End zones along the arc: as long as the touch band is thick, so a
+        /// handle is a square-ish target, not a sliver.
+        var grabTolerance: Int { max(30, Int(Double(2 * hitHalfWidth) * minutesPerPoint)) }
+        /// How far past a pill's end, along the arc, still counts.
+        var grabSlop: Int { max(8, Int(Double(2 * hitHalfWidth) * 0.25 * minutesPerPoint)) }
+
+        func isOnBarBand(distanceFromCentre distance: CGFloat) -> Bool {
+            abs(distance - gutterRadius) <= hitHalfWidth
+        }
+
+        // MARK: Face
+
+        var tickOuterRadius: CGFloat { faceRadius - size * 0.02 }
+        var majorTickLength: CGFloat { size * 0.024 }
+        var minorTickLength: CGFloat { size * 0.012 }
+        /// Where the longest tick ends. Numerals stay inside this.
+        var tickInnerRadius: CGFloat { tickOuterRadius - majorTickLength }
+        /// White space kept between that and the nearest point of a numeral.
+        var numeralClearance: CGFloat { max(4, size * 0.018) }
+
+        static func isMajorHour(_ hour: Int) -> Bool { hour % 6 == 0 }
+
+        func numeralFontSize(hour: Int) -> CGFloat {
+            Self.isMajorHour(hour) ? size * 0.056 : size * 0.05
+        }
+
+        func numeralWeight(hour: Int) -> UIFont.Weight {
+            Self.isMajorHour(hour) ? .bold : .semibold
+        }
+
+        /// Half the numeral's ink box: its measured width in the face it is
+        /// drawn in, and half the cap height (digits stand on the baseline
+        /// and reach the cap height, centred in the line box).
+        func numeralHalfExtent(hour: Int) -> CGSize {
+            let font = UIFont.monospacedDigitSystemFont(
+                ofSize: numeralFontSize(hour: hour),
+                weight: numeralWeight(hour: hour)
+            )
+            let width = ("\(hour)" as NSString).size(withAttributes: [.font: font]).width
+            return CGSize(width: width / 2, height: font.capHeight / 2 + 0.5)
+        }
+
+        /// Where a numeral's centre sits so its farthest corner is exactly
+        /// `numeralClearance` inside the longest tick.
+        ///
+        /// Solves |r·u + corner| = tickInnerRadius − clearance for the corner
+        /// pointing outward, so wide two-digit numbers at 6 and 18 move in
+        /// further than narrow ones at 0 and 12, and every numeral keeps the
+        /// same gap to the ring.
+        func numeralRadius(hour: Int) -> CGFloat {
+            let half = numeralHalfExtent(hour: hour)
+            let angle = Self.hourAngle(hour)
+            let ux = abs(cos(angle))
+            let uy = abs(sin(angle))
+            let limit = tickInnerRadius - numeralClearance
+            let b = half.width * ux + half.height * uy
+            let c = half.width * half.width + half.height * half.height - limit * limit
+            return max(0, -b + sqrt(max(0, b * b - c)))
+        }
+
+        static func hourAngle(_ hour: Int) -> Double {
+            (Double(hour) / 24 * 360 - 90) * .pi / 180
+        }
+
+        var moonSize: CGFloat { size * 0.05 }
+        var sunSize: CGFloat { size * 0.055 }
+
+        /// Moon above the centre, sun below, each kept a clearance away from
+        /// the inner edge of the numeral above or below it.
+        var celestialRadius: CGFloat {
+            let innerEdge = [0, 12].map { numeralRadius(hour: $0) - numeralHalfExtent(hour: $0).height }.min() ?? 0
+            let symbolHalf = max(moonSize, sunSize) * 0.6
+            return min(faceRadius * 0.52, innerEdge - numeralClearance - symbolHalf)
+        }
+
+        // MARK: Bars
+
+        func bar(
+            start: Int,
+            span: Int,
+            startGrab: Grab,
+            endGrab: Grab,
+            bodyGrab: Grab
+        ) -> Bar {
+            let drawn = drawnExtent(start: start, span: span, capMinutes: capMinutesRounded)
+            return Bar(
+                start: start,
+                span: span,
+                drawnStart: drawn.start,
+                drawnSpan: drawn.span,
+                startGrab: startGrab,
+                endGrab: endGrab,
+                bodyGrab: bodyGrab
+            )
+        }
+    }
+
+    /// What a touch at `point` picks up, or nil.
+    ///
+    /// Only the band around the visible bar is live, measured from the bar's
+    /// centreline. The face, its ticks and numerals are a clock, not a
+    /// control, so a touch there moves nothing.
+    static func grab(at point: CGPoint, centre: CGPoint, metrics: Metrics, bars: [Bar]) -> Grab? {
+        let dx = point.x - centre.x
+        let dy = point.y - centre.y
+        guard metrics.isOnBarBand(distanceFromCentre: sqrt(dx * dx + dy * dy)) else { return nil }
+        return grab(
+            fingerMinutes: minutes(at: point, centre: centre),
+            bars: bars,
+            tolerance: metrics.grabTolerance,
+            slop: metrics.grabSlop
+        )
     }
 }
 
@@ -466,36 +768,20 @@ struct DayDial: View {
 
     // MARK: Metrics
 
-    private var gutterWidth: CGFloat { size * 0.18 }
-    private var gutterRadius: CGFloat { (size - gutterWidth) / 2 }
-    private var barWidth: CGFloat { gutterWidth * 0.86 }
-    private var iconSize: CGFloat { barWidth * 0.48 }
-    private var faceRadius: CGFloat { gutterRadius - gutterWidth / 2 - size * 0.012 }
-
-    /// Minutes of arc per point along the bar centreline.
-    private var minutesPerPoint: Double { 1440 / (2 * .pi * Double(gutterRadius)) }
-    /// Half a round cap, in minutes: how far the stroke centreline must stop
-    /// short of a bar's true start and end so the cap lands exactly on them,
-    /// and therefore also how far a too-short pill spills past its own value.
-    private var capMinutes: Double { Double(barWidth / 2) * minutesPerPoint }
-    private var capMinutesRounded: Int { max(1, Int(capMinutes.rounded())) }
-
-    /// The widest an end zone may be: one bar width, the size of the icon
-    /// that sits there.
-    private var grabTolerance: Int {
-        max(30, Int(Double(barWidth) * minutesPerPoint))
-    }
-
-    /// How far outside a pill still counts as touching it. A fingertip is
-    /// bigger than a hairline.
-    private var grabSlop: Int {
-        max(8, Int(Double(barWidth) * 0.28 * minutesPerPoint))
-    }
+    /// All geometry comes from one place, shared with the tests.
+    private var metrics: DayDialModel.Metrics { DayDialModel.Metrics(size: size) }
+    private var gutterWidth: CGFloat { metrics.gutterWidth }
+    private var gutterRadius: CGFloat { metrics.gutterRadius }
+    private var barWidth: CGFloat { metrics.barWidth }
+    private var iconSize: CGFloat { metrics.iconSize }
+    private var faceRadius: CGFloat { metrics.faceRadius }
+    private var capMinutes: Double { metrics.capMinutes }
+    private var capMinutesRounded: Int { metrics.capMinutesRounded }
 
     /// The spring the icons use when a bar crosses the two-icon threshold.
-    /// Slightly bouncy, because something appearing should look alive.
+    /// Quick and only just alive: a control, not a toy.
     private var iconFitAnimation: Animation {
-        reduceMotion ? .easeOut(duration: 0.16) : .bouncy(duration: 0.42, extraBounce: 0.2)
+        reduceMotion ? .easeOut(duration: 0.16) : .snappy(duration: 0.3, extraBounce: 0.06)
     }
 
     // MARK: Derived
@@ -519,46 +805,29 @@ struct DayDial: View {
     }
 
     private var overshootDegrees: Double {
-        Double(DayDialModel.rubberband(overshootMinutes * 0.25, dimension: size))
+        // Stiffer than before so a clamp reads as a firm stop with a little
+        // give, not a stretch.
+        Double(DayDialModel.rubberband(overshootMinutes * 0.18, dimension: size))
     }
 
     private var settleAnimation: Animation {
         reduceMotion
             ? .easeOut(duration: 0.16)
-            : .spring(response: 0.28, dampingFraction: 0.92)
-    }
-
-    private func makeBar(
-        start: Int,
-        span: Int,
-        startGrab: DayDialModel.Grab,
-        endGrab: DayDialModel.Grab,
-        bodyGrab: DayDialModel.Grab
-    ) -> DayDialModel.Bar {
-        let drawn = DayDialModel.drawnExtent(start: start, span: span, capMinutes: capMinutesRounded)
-        return DayDialModel.Bar(
-            start: start,
-            span: span,
-            drawnStart: drawn.start,
-            drawnSpan: drawn.span,
-            startGrab: startGrab,
-            endGrab: endGrab,
-            bodyGrab: bodyGrab
-        )
+            : .spring(response: 0.22, dampingFraction: 1)
     }
 
     /// The bars, topmost first. The gym bar is drawn over the night, so it is
     /// also the one a touch on an overlap goes to.
     private var bars: [DayDialModel.Bar] {
         [
-            makeBar(
+            metrics.bar(
                 start: gymByMinutes,
                 span: sessionMinutes,
                 startGrab: .gymStart,
                 endGrab: .gymEnd,
                 bodyGrab: .gymBody
             ),
-            makeBar(
+            metrics.bar(
                 start: bedtimeMinutes,
                 span: sleepMinutes,
                 startGrab: .bedtime,
@@ -686,11 +955,11 @@ struct DayDial: View {
 
             Canvas { context, canvasSize in
                 let centre = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-                let outer = faceRadius - size * 0.02
+                let outer = metrics.tickOuterRadius
 
                 for tick in 0..<96 {
                     let isHour = tick % 4 == 0
-                    let length: CGFloat = isHour ? size * 0.024 : size * 0.012
+                    let length: CGFloat = isHour ? metrics.majorTickLength : metrics.minorTickLength
                     let angle = (Double(tick) / 96 * 360 - 90) * .pi / 180
                     var path = Path()
                     path.move(to: CGPoint(
@@ -713,31 +982,34 @@ struct DayDial: View {
             hourNumbers
 
             Image(systemName: "moon.fill")
-                .font(.system(size: size * 0.05, weight: .bold))
+                .font(.system(size: metrics.moonSize, weight: .bold))
                 .foregroundStyle(Theme.night)
-                .offset(y: -faceRadius * 0.52)
+                .offset(y: -metrics.celestialRadius)
 
             // Yellow, not coral: the single accent on this screen belongs to
             // the gym bar, and a sun is the one thing nobody reads as an
             // accent anyway.
             Image(systemName: "sun.max.fill")
-                .font(.system(size: size * 0.055, weight: .bold))
+                .font(.system(size: metrics.sunSize, weight: .bold))
                 .foregroundStyle(Theme.sun)
-                .offset(y: faceRadius * 0.52)
+                .offset(y: metrics.celestialRadius)
         }
         .allowsHitTesting(false)
     }
 
+    /// Each numeral sits so its farthest corner is a fixed clearance inside
+    /// the longest tick, measured in the font it is drawn in.
     private var hourNumbers: some View {
-        let radius = faceRadius * 0.80
+        let metrics = metrics
 
         return ZStack {
             ForEach(Array(stride(from: 0, to: 24, by: 2)), id: \.self) { hour in
-                let angle = (Double(hour) / 24 * 360 - 90) * .pi / 180
-                let isMajor = hour % 6 == 0
+                let angle = DayDialModel.Metrics.hourAngle(hour)
+                let isMajor = DayDialModel.Metrics.isMajorHour(hour)
+                let radius = metrics.numeralRadius(hour: hour)
 
                 Text("\(hour)")
-                    .font(.system(size: isMajor ? size * 0.056 : size * 0.05, weight: isMajor ? .bold : .semibold))
+                    .font(.system(size: metrics.numeralFontSize(hour: hour), weight: isMajor ? .bold : .semibold))
                     .monospacedDigit()
                     .foregroundStyle(isMajor ? Theme.ink : Theme.inkTertiary)
                     .offset(x: radius * cos(angle), y: radius * sin(angle))
@@ -758,7 +1030,7 @@ struct DayDial: View {
     private var hatching: some View {
         Canvas { context, canvasSize in
             let centre = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-            let length = barWidth * 0.42
+            let length = metrics.hatchLength
             // Kept clear of whichever icons the bar is showing.
             let clearance = capMinutesRounded + 8
 
@@ -878,8 +1150,8 @@ struct DayDial: View {
             .font(.system(size: iconSize, weight: .bold))
             .foregroundStyle(Theme.surface)
             .frame(width: barWidth, height: barWidth)
-            .scaleEffect(held && !reduceMotion ? 1.16 : 1)
-            .animation(.spring(response: 0.26, dampingFraction: 0.72), value: held)
+            .scaleEffect(held && !reduceMotion ? 1.1 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.86), value: held)
             .offset(DayDialModel.offset(minutes: spec.minutes, radius: gutterRadius))
             // Only the collapse crossing animates. Everything else tracks the
             // finger with no lag.
@@ -905,7 +1177,7 @@ struct DayDial: View {
     }
 
     private func time(at minutes: Int) -> TimeOfDay {
-        TimeOfDay(hour: ((minutes % 1440) + 1440) % 1440 / 60, minute: ((minutes % 60) + 60) % 60)
+        DayDialModel.time(at: minutes)
     }
 
     // MARK: - Gesture
@@ -926,8 +1198,7 @@ struct DayDial: View {
                     didKnock = false
                     isPushingNight = false
                     lastTickKey = valueKey(for: picked)
-                    Haptics.prepareSelection()
-                    Haptics.press(intensity: 0.7)
+                    DialFeel.grab()
                     onGrabChange?(picked)
                 }
 
@@ -940,135 +1211,19 @@ struct DayDial: View {
             }
     }
 
-    /// Only the gutter is live. The face is a clock, not a control.
+    /// Only the band around the visible bar is live. The face is a clock, not
+    /// a control.
     private func grab(at point: CGPoint, centre: CGPoint) -> DayDialModel.Grab? {
-        let dx = point.x - centre.x
-        let dy = point.y - centre.y
-        let distance = sqrt(dx * dx + dy * dy)
-        guard abs(distance - gutterRadius) <= gutterWidth / 2 + 12 else { return nil }
-
-        return DayDialModel.grab(
-            fingerMinutes: DayDialModel.minutes(at: point, centre: centre),
-            bars: bars,
-            tolerance: grabTolerance,
-            slop: grabSlop
-        )
+        DayDialModel.grab(at: point, centre: centre, metrics: metrics, bars: bars)
     }
 
     private func apply(_ grab: DayDialModel.Grab, delta: Int) {
-        let base = grabRhythm
-        let baseBed = base.bedtime.minutesFromMidnight
-        let baseWake = base.wakeTime.minutesFromMidnight
-        let baseSleep = DayDialModel.clockwiseSpan(from: baseBed, to: baseWake)
-        let baseAwake = 1440 - baseSleep
-        let baseGym = base.gymByTime.minutesFromMidnight
-        let baseGap = DayDialModel.clockwiseSpan(from: baseWake, to: baseGym)
-        let baseSession = base.gymSessionMinutes
-        var next = rhythm
-        var overshoot = 0
+        let applied = DayDialModel.applying(grab, delta: delta, base: grabRhythm, current: rhythm)
+        let overshoot = applied.overshoot
 
-        // Both bars are written explicitly on every drag, even the one that is
-        // not moving. Pinning the still bar is what guarantees it cannot drift
-        // as a side effect of the other one, and it also gives a plan saved
-        // before the gym bar had its own value a real value the first time it
-        // is touched.
-        next.gymTime = time(at: baseGym)
-
-        /// In Wake & Go the lock window follows the gap the user drew (get
-        /// ready plus travel). In Go Later (gap over 2 hours) get ready and
-        /// travel are the user's own numbers, so the gap leaves them alone.
-        func syncWindow(gap: Int) {
-            guard gap <= MorningRhythm.absoluteMaximumWindow else { return }
-            next.travelMinutes = DayDialModel.travelMinutes(
-                gapMinutes: gap,
-                getReadyMinutes: base.getReadyMinutes
-            )
-        }
-
-        switch grab {
-        case .bedtime:
-            // Bedtime sets the length of the night; the alarm stays put, so
-            // the gap to the gym is untouched. Pulling bedtime earlier runs
-            // into the end of the gym visit, and stops there.
-            let desired = baseSleep - delta
-            let sleep = DayDialModel.clampedSleep(
-                desired,
-                gapMinutes: baseGap,
-                sessionMinutes: baseSession
-            )
-            overshoot = desired - sleep
-            next.bedtime = time(at: baseWake - sleep + 1440)
-
-        case .wake:
-            // The alarm moves on its own. Later eats into the run-up to a gym
-            // time that is standing still, so it stops a few minutes short of
-            // the visit rather than shoving it along.
-            let shift = DayDialModel.clampedWakeShift(
-                delta,
-                sleepMinutes: baseSleep,
-                gapMinutes: baseGap
-            )
-            overshoot = delta - shift
-            next.wakeTime = time(at: baseWake + shift)
-            syncWindow(gap: baseGap - shift)
-
-        case .sleepBody:
-            // The whole night slides with its length intact. The gym visit
-            // does not come with it: the alarm closing on the visit stops the
-            // drag one way, bedtime closing on it stops the drag the other.
-            let shift = DayDialModel.clampedNightShift(
-                delta,
-                awakeSpan: baseAwake,
-                gapMinutes: baseGap,
-                sessionMinutes: baseSession
-            )
-            overshoot = delta - shift
-            next.bedtime = time(at: baseBed + shift + 1440)
-            next.wakeTime = time(at: baseWake + shift + 1440)
-            syncWindow(gap: baseGap - shift)
-
-        case .gymStart:
-            // This end says where the visit begins; the far end stays put. So
-            // pulling it later shortens the visit and pulling it earlier
-            // lengthens it, until the visit hits its own limits.
-            let endGap = baseGap + baseSession
-            let desiredGap = baseGap + delta
-            let session = min(
-                max(endGap - desiredGap, MorningRhythm.sessionRange.lowerBound),
-                max(min(MorningRhythm.sessionRange.upperBound, endGap - DayDialModel.minimumLeadMinutes), MorningRhythm.sessionRange.lowerBound)
-            )
-            let gap = endGap - session
-            overshoot = desiredGap - gap
-            next.gymSessionMinutes = session
-            next.gymTime = time(at: baseWake + gap)
-            syncWindow(gap: gap)
-
-        case .gymBody:
-            // The whole visit slides anywhere in the day. Dragged into the
-            // night it pushes the night later, keeping its length.
-            let push = DayDialModel.pushedGymBody(
-                desiredGap: baseGap + delta,
-                awakeSpan: baseAwake,
-                sessionMinutes: baseSession
-            )
-            overshoot = push.overshoot
-            applyPush(push, to: &next, baseBed: baseBed, baseWake: baseWake)
-            syncWindow(gap: push.gapMinutes)
-
-        case .gymEnd:
-            let push = DayDialModel.pushedGymEnd(
-                desiredSession: baseSession + delta,
-                awakeSpan: baseAwake,
-                gapMinutes: baseGap
-            )
-            overshoot = push.overshoot
-            next.gymSessionMinutes = push.sessionMinutes
-            applyPush(push, to: &next, baseBed: baseBed, baseWake: baseWake)
-            if push.nightShift != 0 { syncWindow(gap: push.gapMinutes) }
-        }
-
-        if next != rhythm { rhythm = next }
+        if applied.rhythm != rhythm { rhythm = applied.rhythm }
         overshootMinutes = CGFloat(overshoot)
+        if grab == .gymBody || grab == .gymEnd { isPushingNight = applied.pushesNight }
 
         // One tick per five-minute step of value, never per frame: a finger
         // pinned against a limit spins without changing anything and must not
@@ -1076,7 +1231,7 @@ struct DayDial: View {
         let key = valueKey(for: grab)
         if key != lastTickKey {
             lastTickKey = key
-            Haptics.selection()
+            DialFeel.step()
         }
 
         // One knock the moment the limit is first reached, then silence until
@@ -1089,21 +1244,6 @@ struct DayDial: View {
         } else {
             didKnock = false
         }
-    }
-
-    /// Writes a gym drag into the rhythm: the night slides by the push, and
-    /// the visit is placed relative to the (possibly moved) alarm.
-    private func applyPush(
-        _ push: DayDialModel.GymPush,
-        to next: inout MorningRhythm,
-        baseBed: Int,
-        baseWake: Int
-    ) {
-        let newWake = baseWake + push.nightShift
-        next.bedtime = time(at: baseBed + push.nightShift + 1440)
-        next.wakeTime = time(at: newWake + 1440)
-        next.gymTime = time(at: newWake + push.gapMinutes)
-        isPushingNight = push.nightShift != 0
     }
 
     private func valueKey(for grab: DayDialModel.Grab) -> Int {
@@ -1125,7 +1265,7 @@ struct DayDial: View {
         lastTickKey = -1
         didKnock = false
         onGrabChange?(nil)
-        Haptics.tap(intensity: 0.6)
+        DialFeel.release()
 
         withAnimation(settleAnimation) {
             overshootMinutes = 0
@@ -1271,5 +1411,28 @@ struct DayDial: View {
             overshootMinutes = 0
         }
         onSettle?()
+    }
+}
+
+/// The dial's own haptics: firmer than the app's soft defaults, because
+/// this is a mechanical control. Grab lands with a solid click, each value
+/// step is a short rigid detent, release is a lighter seat.
+private enum DialFeel {
+    private static let grabGenerator = UIImpactFeedbackGenerator(style: .medium)
+    private static let stepGenerator = UIImpactFeedbackGenerator(style: .rigid)
+
+    static func grab() {
+        grabGenerator.impactOccurred(intensity: 0.9)
+        stepGenerator.prepare()
+        grabGenerator.prepare()
+    }
+
+    static func step() {
+        stepGenerator.impactOccurred(intensity: 0.45)
+        stepGenerator.prepare()
+    }
+
+    static func release() {
+        grabGenerator.impactOccurred(intensity: 0.65)
     }
 }
