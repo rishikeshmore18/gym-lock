@@ -870,10 +870,6 @@ struct AlarmSettingsView: View {
                 }
             }
 
-            AlarmRowDivider()
-
-            plainWakeRow
-
             if plan.rhythm.flowMode == .goLater {
                 AlarmRowDivider()
                 goLaterTimesRow
@@ -967,25 +963,6 @@ struct AlarmSettingsView: View {
                 }
             }
         )
-    }
-
-    // PLACEHOLDER UI: designed in Step 3
-    /// The plain wake alarm: no lock, no session (FLOW, Flow 1 and 2).
-    private var plainWakeRow: some View {
-        Toggle(isOn: Binding(
-            get: { plan.plainWakeAlarmEnabled },
-            set: { isOn in
-                Haptics.tap()
-                store.plan.plainWakeAlarmEnabled = isOn
-                resyncAlarms()
-            }
-        )) {
-            Text("wake alarm on other days")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.ink)
-        }
-        .tint(Theme.ink)
-        .frame(minHeight: 50)
     }
 
     // PLACEHOLDER UI: designed in Step 3
