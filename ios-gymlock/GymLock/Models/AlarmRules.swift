@@ -209,9 +209,12 @@ struct PlannedAlarm: Hashable {
 /// alarm rules).
 ///
 /// - Wake & Go: the gym alarm at wake time on gym days; the plain wake alarm
-///   at the same time on the other days.
+///   at the same time on the sleep schedule's other days.
 /// - Go Later: the "time to go" alarm on gym days, and the plain wake alarm
-///   at wake time on every day.
+///   at wake time on every sleep-schedule day.
+///
+/// The plain wake days always start from `effectiveSleepDays()` (the days
+/// you wake on), never from the whole week. There is no separate switch.
 ///
 /// Exactly one lock alarm per gym day. Pure: the coordinator adds the sound
 /// and sends the result to the OS.
@@ -296,10 +299,14 @@ enum AlarmPlan {
             )
         }
 
+        // The sleep schedule's days alone decide the plain wake alarm. In
+        // Wake & Go the gym alarm is that morning's wake alarm, so gym days
+        // drop out; in Go Later the wake alarm rings before time to go.
         let gymDays = plan.enabledSlots.reduce(into: Set<Weekday>()) { $0.formUnion($1.days) }
+        let activeWakeDays = plan.effectiveSleepDays()
         var wakeDays = mode == .wakeAndGo
-            ? Set(Weekday.allCases).subtracting(gymDays)
-            : Set(Weekday.allCases)
+            ? activeWakeDays.subtracting(gymDays)
+            : activeWakeDays
         var oneOffs: [PlannedAlarm] = []
 
         for oneOff in plan.oneOffAlarms where oneOff.isActive(at: now) && oneOff.fireDate > now {
@@ -319,7 +326,9 @@ enum AlarmPlan {
                 }
                 // That day's wake-up follows the one-off's own rhythm.
                 wakeDays.remove(day)
-                if plan.plainWakeAlarmEnabled, oneOffMode == .goLater,
+                // Only on an active wake day: a one-off never creates a wake
+                // alarm the sleep schedule does not have.
+                if oneOffMode == .goLater, activeWakeDays.contains(day),
                    let wakeDate = calendar.date(
                        bySettingHour: rhythm.wakeTime.hour,
                        minute: rhythm.wakeTime.minute,
@@ -353,7 +362,7 @@ enum AlarmPlan {
         }
 
         // Only once there is a plan: nobody in onboarding gets a wake alarm.
-        if plan.plainWakeAlarmEnabled, !plan.enabledSlots.isEmpty, !wakeDays.isEmpty {
+        if !plan.enabledSlots.isEmpty, !wakeDays.isEmpty {
             alarms.append(
                 PlannedAlarm(
                     id: WakeAlarmID.weekly,

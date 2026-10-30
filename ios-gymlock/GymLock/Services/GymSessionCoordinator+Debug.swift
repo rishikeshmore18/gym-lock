@@ -720,8 +720,8 @@ extension GymSessionCoordinator {
                 "tonight locks at \(tonightLabel) · \(pending) starts tomorrow night"
 
         case .bedtimeAfterMidnightGymMonday:
-            // Sleep 00:30 to 08:30, gym Mon/Wed/Fri, every night switched off.
-            // Monday's own night (Monday 00:30) must still lock.
+            // Sleep 00:30 to 08:30, gym Mon/Wed/Fri, every day switched off.
+            // Monday is required, so Monday 00:30 to 08:30 must still lock.
             guard let store = debugStore else { return }
             store.debugSetGymDays([.monday, .wednesday, .friday])
             var plan = store.plan
@@ -732,7 +732,7 @@ extension GymSessionCoordinator {
             store.plan = plan
 
             let calendar = Calendar.current
-            let required = store.plan.requiredSleepNights()
+            let required = store.plan.requiredSleepDays()
             let nextMondayOne = calendar.nextDate(
                 after: Date(),
                 matching: DateComponents(hour: 1, minute: 0, weekday: Weekday.monday.rawValue),

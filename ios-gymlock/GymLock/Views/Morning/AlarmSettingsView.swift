@@ -719,18 +719,17 @@ struct AlarmSettingsView: View {
         }
     }
 
-    /// Nights the gym days require, measured against what the dial is
-    /// showing. An unsaved draft that stops crossing midnight frees them at
-    /// once, and cancelling the draft brings them back, with nothing stored.
-    private var requiredNights: Set<Weekday> {
-        plan.requiredSleepNights(for: shown)
+    /// Sleep days the gym days require: the gym days themselves, whatever
+    /// the dial shows, because a sleep day is the day you wake.
+    private var requiredSleepDays: Set<Weekday> {
+        plan.requiredSleepDays()
     }
 
     /// The circles that read as filled in the current context.
     private var dayCardDays: Set<Weekday> {
         switch dialContext {
         case .gym: plan.gymDays
-        case .sleep: plan.effectiveSleepDays(for: shown)
+        case .sleep: plan.effectiveSleepDays()
         }
     }
 
@@ -749,12 +748,12 @@ struct AlarmSettingsView: View {
 
     private func dayCircle(_ day: Weekday) -> some View {
         let isOn = dayCardDays.contains(day)
-        let isRequired = dialContext == .sleep && requiredNights.contains(day)
+        let isRequired = dialContext == .sleep && requiredSleepDays.contains(day)
 
         return Button {
             switch dialContext {
             case .gym: toggleGymDay(day)
-            case .sleep: toggleSleepNight(day)
+            case .sleep: toggleSleepDay(day)
             }
         } label: {
             Text(String(day.shortLabel.prefix(1)))
@@ -767,12 +766,12 @@ struct AlarmSettingsView: View {
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isOn)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(dialContext == .sleep ? "\(day.spokenName) night" : day.shortLabel)
-        .accessibilityHint(
-            isRequired
-                ? "needed for \(SleepSchedule.gymDay(protectedBy: day, bedtime: shown.bedtime, wake: shown.wakeTime).spokenName)'s gym day"
-                : ""
+        .accessibilityLabel(
+            dialContext == .sleep
+                ? "\(day.spokenName.capitalized), sleep schedule"
+                : day.shortLabel
         )
+        .accessibilityHint(isRequired ? "gym day, stays active" : "")
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
@@ -793,24 +792,25 @@ struct AlarmSettingsView: View {
         apply(result.effects)
     }
 
-    /// Turns a sleep night on or off, or says quietly why it cannot.
-    private func toggleSleepNight(_ night: Weekday) {
-        let result = store.plan.toggleSleepNight(night, rhythm: shown)
+    /// Turns a sleep day on or off, or says quietly why it cannot.
+    private func toggleSleepDay(_ day: Weekday) {
+        let result = store.plan.toggleSleepDay(day)
         switch result.outcome {
         case .updated:
             Haptics.selection()
             clearRequiredNightNote()
-        case let .required(night, gymDay):
+        case let .required(day):
             // A tap that explains rather than selects.
             Haptics.soft()
-            showRequiredNightNote(SleepSchedule.requiredMessage(night: night, gymDay: gymDay))
+            showRequiredNightNote(SleepSchedule.requiredMessage(day: day))
         }
         apply(result.effects)
     }
 
-    /// Gym days rebuild the OS alarms; sleep nights only touch wind-down.
+    /// Gym days and sleep days both rebuild the OS alarms (sleep days decide
+    /// the plain wake alarm) and the Night Lock.
     private func apply(_ effects: MorningPlan.DayEditEffects) {
-        if effects.contains(.resyncGymAlarms) { resyncAlarms() }
+        if effects.contains(.resyncAlarms) { resyncAlarms() }
         if effects.contains(.reconcileWindDown) { coordinator.reconcileWindDown() }
     }
 

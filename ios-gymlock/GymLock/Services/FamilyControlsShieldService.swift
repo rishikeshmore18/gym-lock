@@ -275,20 +275,26 @@ final class FamilyControlsShieldService: AppShielding {
         let rhythm = plan.scheduledRhythm
         var desired = Set<DeviceActivityName>()
 
-        for night in plan.effectiveSleepDays(for: rhythm) {
-            let activity = DeviceActivityName(GymLockScreenTime.nightActivityName(for: night.rawValue))
-            let endDay = SleepSchedule.crossesMidnight(
+        // Each sleep day is the morning the night ends on. An overnight
+        // schedule starts the evening before; one that starts after midnight
+        // starts the same day. Bedtime equal to wake time is no night at all.
+        let nightDays = rhythm.bedtime.minutesFromMidnight == rhythm.wakeTime.minutesFromMidnight
+            ? Set<Weekday>()
+            : plan.effectiveSleepDays()
+        for wakeDay in nightDays {
+            let activity = DeviceActivityName(GymLockScreenTime.nightActivityName(for: wakeDay.rawValue))
+            let startDay = SleepSchedule.crossesMidnight(
                 bedtime: rhythm.bedtime,
                 wake: rhythm.wakeTime
-            ) ? night.next : night
+            ) ? wakeDay.previous : wakeDay
             let schedule = DeviceActivitySchedule(
                 intervalStart: components(
-                    weekday: night.rawValue,
+                    weekday: startDay.rawValue,
                     time: rhythm.bedtime,
                     calendar: calendar
                 ),
                 intervalEnd: components(
-                    weekday: endDay.rawValue,
+                    weekday: wakeDay.rawValue,
                     time: rhythm.wakeTime,
                     calendar: calendar
                 ),

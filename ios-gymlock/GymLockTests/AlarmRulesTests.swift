@@ -112,14 +112,124 @@ struct AlarmRulesTests {
         #expect(wake.first?.weekdays == Set(Weekday.allCases))
     }
 
-    @Test func switchingThePlainAlarmOffLeavesOnlyTheLockAlarm() {
+    // MARK: - The sleep days decide the plain wake alarm
+
+    private let weekdaysOnly: Set<Weekday> = [.monday, .tuesday, .wednesday, .thursday, .friday]
+
+    private func plainWakeDays(_ alarms: [PlannedAlarm]) -> Set<Weekday> {
+        alarms.filter { $0.kind == .plainWake && $0.fireDate == nil }
+            .reduce(into: Set<Weekday>()) { $0.formUnion($1.weekdays) }
+    }
+
+    @Test func wakeAndGoRingsGymOnGymDaysPlainOnTheRestAndNothingOnTheWeekend() {
+        var plan = plan(wakeAndGo)
+        plan.sleepScheduleDays = weekdaysOnly
+        let alarms = AlarmPlan.alarms(for: plan, now: date(day: 27, 12), calendar: calendar)
+
+        #expect(alarms.first { $0.kind == .gym }?.weekdays == [.monday, .wednesday, .friday])
+        #expect(plainWakeDays(alarms) == [.tuesday, .thursday])
+        for day in [Weekday.saturday, .sunday] {
+            #expect(!alarms.contains { $0.weekdays.contains(day) })
+        }
+    }
+
+    @Test func goLaterRingsPlainOnEverySleepDayAndTimeToGoOnGymDays() {
+        var plan = plan(goLater)
+        plan.sleepScheduleDays = weekdaysOnly
+        let alarms = AlarmPlan.alarms(for: plan, now: date(day: 27, 12), calendar: calendar)
+
+        #expect(alarms.first { $0.kind == .timeToGo }?.weekdays == [.monday, .wednesday, .friday])
+        #expect(plainWakeDays(alarms) == weekdaysOnly)
+    }
+
+    @Test func saturdayOnAndOffDecidesSaturdaysWakeAlarm() {
         for rhythm in [wakeAndGo, goLater] {
             var plan = plan(rhythm)
-            plan.plainWakeAlarmEnabled = false
-            let alarms = AlarmPlan.alarms(for: plan, now: date(day: 27, 12), calendar: calendar)
-            #expect(!alarms.contains { $0.kind == .plainWake })
-            #expect(alarms.count == 1)
+            plan.sleepScheduleDays = weekdaysOnly
+            #expect(!plainWakeDays(AlarmPlan.alarms(for: plan, now: date(day: 27, 12), calendar: calendar)).contains(.saturday))
+
+            _ = plan.toggleSleepDay(.saturday)
+            #expect(plainWakeDays(AlarmPlan.alarms(for: plan, now: date(day: 27, 12), calendar: calendar)).contains(.saturday))
+
+            _ = plan.toggleSleepDay(.saturday)
+            #expect(!plainWakeDays(AlarmPlan.alarms(for: plan, now: date(day: 27, 12), calendar: calendar)).contains(.saturday))
         }
+    }
+
+    @Test func noActiveDaysMeansNoPlainWakeAlarmOutsideGymDays() {
+        var plan = plan(goLater)
+        plan.sleepScheduleDays = []
+        // Gym days are still required, so they keep their wake alarm.
+        #expect(plainWakeDays(AlarmPlan.alarms(for: plan, now: date(day: 27, 12), calendar: calendar)) == [.monday, .wednesday, .friday])
+
+        plan.rhythm = wakeAndGo
+        #expect(plainWakeDays(AlarmPlan.alarms(for: plan, now: date(day: 27, 12), calendar: calendar)).isEmpty)
+    }
+
+    @Test func wakeAndGoNeverRingsAWakeAndAGymAlarmOnTheSameMorning() {
+        for sleep in [Set(Weekday.allCases), weekdaysOnly, []] {
+            var plan = plan(wakeAndGo)
+            plan.sleepScheduleDays = sleep
+            let alarms = AlarmPlan.alarms(for: plan, now: date(day: 27, 12), calendar: calendar)
+            for day in Weekday.allCases {
+                let ringing = alarms.filter { $0.weekdays.contains(day) && $0.time == wakeAndGo.wakeTime }
+                #expect(ringing.count <= 1, "\(day)")
+            }
+        }
+    }
+
+    @Test func aGoLaterOneOffAddsAWakeAlarmOnlyOnAnActiveDay() {
+        var plan = plan(goLater)
+        plan.sleepScheduleDays = weekdaysOnly
+        let slotID = plan.slots[0].id
+        let now = date(day: 25, 12) // Friday
+        let saturday = date(day: 26, 17, 30)
+        let monday = date(day: 28, 17)
+        plan.oneOffAlarms = [
+            OneOffAlarm(kind: .reschedule, slotID: slotID, fireDate: saturday),
+            OneOffAlarm(kind: .nextAlarmChange, slotID: slotID, fireDate: monday, rhythm: goLater),
+        ]
+
+        let alarms = AlarmPlan.alarms(for: plan, now: now, calendar: calendar)
+        let datedWake = alarms.filter { $0.kind == .plainWake && $0.fireDate != nil }
+        // Saturday is not a sleep day: the reschedule rings, no wake alarm.
+        #expect(alarms.contains { $0.fireDate == saturday && $0.kind == .timeToGo })
+        #expect(!datedWake.contains { $0.weekdays.contains(.saturday) })
+        // Monday is active: its wake alarm follows the one-off's rhythm.
+        #expect(datedWake.first { $0.weekdays.contains(.monday) }?.fireDate == date(day: 28, 7))
+        #expect(!plainWakeDays(alarms).contains(.monday))
+
+        // Switching Saturday on gives the reschedule day its wake alarm.
+        plan.sleepScheduleDays.insert(.saturday)
+        let withSaturday = AlarmPlan.alarms(for: plan, now: now, calendar: calendar)
+        #expect(withSaturday.contains { $0.kind == .plainWake && $0.fireDate == date(day: 26, 7) })
+    }
+
+    @Test func aFrozenWeekKeepsWakeAlarmsOnlyOnSelectedDays() {
+        var plan = plan(goLater)
+        plan.sleepScheduleDays = weekdaysOnly
+        let now = date(day: 22, 12) // Tuesday
+        let paused = AlarmPlan.alarms(for: plan, now: now, calendar: calendar, pausedUntil: date(day: 28, 0))
+
+        #expect(plainWakeDays(paused) == weekdaysOnly)
+        #expect(!paused.contains { $0.kind.locks && ($0.fireDate.map { $0 < date(day: 28, 0) } ?? true) })
+    }
+
+    @Test func anOldPlainWakeSwitchSetToOffIsIgnored() throws {
+        var plan = plan(goLater)
+        plan.sleepScheduleDays = weekdaysOnly
+        var object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)) as? [String: Any]
+        )
+        object["plainWakeAlarmEnabled"] = false
+        let decoded = try JSONDecoder().decode(MorningPlan.self, from: JSONSerialization.data(withJSONObject: object))
+
+        #expect(plainWakeDays(AlarmPlan.alarms(for: decoded, now: date(day: 27, 12), calendar: calendar)) == weekdaysOnly)
+        // And it is not written back.
+        let reencoded = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any]
+        )
+        #expect(reencoded["plainWakeAlarmEnabled"] == nil)
     }
 
     @Test func exactlyOneLockAlarmPerGymDayAndNoneOnOtherDays() {
@@ -460,7 +570,6 @@ struct AlarmRulesTests {
         #expect(plan.oneOffAlarms.first?.kind == .nextAlarmChange)
         #expect(plan.oneOffAlarms.first?.id == overrideID)
         #expect(plan.nextAlarmOverride?.rhythm?.wakeTime == t(5, 45))
-        #expect(plan.plainWakeAlarmEnabled)
     }
 
     @Test func anOldPlanWithNoOverrideDecodesEmpty() throws {
@@ -470,16 +579,13 @@ struct AlarmRulesTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)) as? [String: Any]
         )
         object.removeValue(forKey: "oneOffAlarms")
-        object.removeValue(forKey: "plainWakeAlarmEnabled")
         let data = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(MorningPlan.self, from: data)
         #expect(decoded.oneOffAlarms.isEmpty)
-        #expect(decoded.plainWakeAlarmEnabled)
     }
 
     @Test func oneOffAlarmsRoundTrip() throws {
         var plan = plan(goLater)
-        plan.plainWakeAlarmEnabled = false
         plan.oneOffAlarms = [
             OneOffAlarm(kind: .runningLate, slotID: plan.slots[0].id, fireDate: date(day: 28, 18)),
             OneOffAlarm(kind: .nextAlarmChange, slotID: plan.slots[0].id, fireDate: date(day: 29, 6), rhythm: wakeAndGo),

@@ -28,23 +28,79 @@ struct SleepRulesTests {
 
     private let monWedFri: Set<Weekday> = [.monday, .wednesday, .friday]
 
-    // MARK: - Required nights
+    // MARK: - Required days
 
-    @Test func anOvernightScheduleProtectsTheNightsBeforeGymDays() {
-        let required = SleepSchedule.requiredNights(gymDays: monWedFri, bedtime: t(23), wake: t(7))
-        #expect(required == [.sunday, .tuesday, .thursday])
+    /// A sleep day is the day you wake, so gym M/W/F requires M/W/F,
+    /// overnight or not.
+    @Test func gymDaysRequireTheSameWeekdays() {
+        #expect(SleepSchedule.requiredDays(gymDays: monWedFri) == monWedFri)
+        var plan = MorningPlan.default
+        plan.slots = [AlarmSlot(days: monWedFri, alarmTime: t(7))]
+        plan.sleepScheduleDays = []
+        for (bed, wake) in [(t(23), t(7)), (t(0, 30), t(8, 30))] {
+            plan.rhythm = rhythm(bed: bed, wake: wake)
+            #expect(plan.requiredSleepDays() == monWedFri)
+            #expect(plan.effectiveSleepDays() == monWedFri)
+        }
     }
 
-    @Test func anAfterMidnightScheduleProtectsTheGymDaysOwnNights() {
-        let required = SleepSchedule.requiredNights(gymDays: monWedFri, bedtime: t(0, 30), wake: t(8, 30))
-        #expect(required == monWedFri)
+    @Test func theRefusalNamesTheGymDay() {
+        let outcome = SleepSchedule.toggle(.monday, chosen: [], gymDays: [.monday])
+        #expect(outcome == .required(day: .monday))
+        let message = SleepSchedule.requiredMessage(day: .monday)
+        #expect(message == "monday is a gym day, so monday stays active.")
+        #expect(!message.contains("\u{2014}"))
+        #expect(!message.contains("night"))
     }
 
-    @Test func theRefusalNoteKeepsItsWordingAfterMidnight() {
-        let outcome = SleepSchedule.toggle(.monday, chosen: [], gymDays: [.monday], bedtime: t(0, 30), wake: t(8, 30))
-        #expect(outcome == .required(night: .monday, gymDay: .monday))
-        #expect(SleepSchedule.requiredMessage(night: .monday, gymDay: .monday)
-            == "monday is a gym day. keep monday night on for rest.")
+    // MARK: - Wake day to Night Lock
+
+    /// Monday 23:00 to 07:00: Sunday 23:00 to Monday 07:00 locks; Monday
+    /// 23:00 to Tuesday 07:00 does not (Tuesday is off).
+    @Test func anOvernightMondayLocksFromSundayEvening() {
+        var plan = MorningPlan.default
+        plan.rhythm = rhythm(bed: t(23), wake: t(7))
+        plan.slots = []
+        plan.sleepScheduleDays = [.monday]
+
+        let window = plan.nightLockWindow(at: date(day: 8, 23, 30), calendar: calendar)
+        #expect(window?.start == date(day: 8, 23))
+        #expect(window?.end == date(day: 9, 7))
+        #expect(plan.nightLockWindow(at: date(day: 9, 3), calendar: calendar) != nil)
+        #expect(plan.nightLockWindow(at: date(day: 9, 7), calendar: calendar) == nil)
+        #expect(plan.nightLockWindow(at: date(day: 9, 23, 30), calendar: calendar) == nil)
+        #expect(plan.nightLockWindow(at: date(day: 10, 3), calendar: calendar) == nil)
+        // The next lock to start, seen from Monday morning, is next Sunday.
+        #expect(plan.nextNightLockStart(after: date(day: 9, 8), calendar: calendar) == date(day: 15, 23))
+
+        // Selecting Tuesday too adds Monday 23:00 to Tuesday 07:00.
+        plan.sleepScheduleDays = [.monday, .tuesday]
+        #expect(plan.nightLockWindow(at: date(day: 9, 23, 30), calendar: calendar)?.end == date(day: 10, 7))
+    }
+
+    /// 00:30 to 08:30 with Monday selected: Monday 00:30 to Monday 08:30.
+    @Test func aSameDayMondayLocksFromMondayAfterMidnight() {
+        var plan = MorningPlan.default
+        plan.rhythm = rhythm(bed: t(0, 30), wake: t(8, 30))
+        plan.slots = []
+        plan.sleepScheduleDays = [.monday]
+
+        let window = plan.nightLockWindow(at: date(day: 9, 1), calendar: calendar)
+        #expect(window?.start == date(day: 9, 0, 30))
+        #expect(window?.end == date(day: 9, 8, 30))
+        #expect(plan.nightLockWindow(at: date(day: 8, 1), calendar: calendar) == nil)
+        #expect(plan.nightLockWindow(at: date(day: 10, 1), calendar: calendar) == nil)
+    }
+
+    @Test func theNightIsKeyedByItsWakeDay() {
+        let night = SleepRules.night(
+            endingOnMorningOf: date(day: 9, 0),
+            rhythm: rhythm(bed: t(23), wake: t(7)),
+            pending: nil,
+            calendar: calendar
+        )
+        #expect(night?.weekday == .monday)
+        #expect(night?.start == date(day: 8, 23))
     }
 
     @Test func mondaysAfterMidnightNightLocksEvenWhenSwitchedOff() {

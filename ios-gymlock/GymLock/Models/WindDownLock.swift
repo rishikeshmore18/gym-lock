@@ -56,24 +56,24 @@ enum WindDownLock {
         return nil
     }
 
-    /// The window containing `now`, but only if the night it belongs to is
+    /// The window containing `now`, but only if the day it belongs to is
     /// switched on.
     ///
-    /// A night belongs to the calendar day it **starts** on, so 02:00 on a
-    /// Tuesday inside a 23:00 → 07:00 window is Monday's night and is
-    /// checked against Monday. `nil` nights means every night, which is how
-    /// the lock behaved before the sleep schedule had days.
+    /// A night belongs to the calendar day it **ends** on (the day you
+    /// wake), so 23:30 on a Monday inside a 23:00 → 07:00 window is
+    /// Tuesday's night and is checked against Tuesday. `nil` means every
+    /// day, which is how the lock behaved before the sleep schedule had days.
     static func window(
         start: TimeOfDay,
         end: TimeOfDay,
         at now: Date,
         calendar: Calendar,
-        nights: Set<Weekday>?
+        wakeDays: Set<Weekday>?
     ) -> (start: Date, end: Date)? {
         guard let found = window(start: start, end: end, at: now, calendar: calendar) else { return nil }
-        guard let nights else { return found }
-        guard let startDay = Weekday(rawValue: calendar.component(.weekday, from: found.start)),
-              nights.contains(startDay)
+        guard let wakeDays else { return found }
+        guard let wakeDay = Weekday(rawValue: calendar.component(.weekday, from: found.end)),
+              wakeDays.contains(wakeDay)
         else { return nil }
         return found
     }

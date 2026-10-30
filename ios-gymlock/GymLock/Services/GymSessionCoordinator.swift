@@ -516,8 +516,8 @@ final class GymSessionCoordinator {
     private func syncWindDownNotification(plan: MorningPlan, now: Date) {
         let notifier = self.notifier
 
-        // Only a night the sleep schedule is in force on, keyed by the day
-        // the night starts. Tonight keeps its bedtime even when a new one is
+        // Only a night ending on a sleep-schedule day (the day you wake), so
+        // it starts the evening before an overnight wake day. Tonight keeps its bedtime even when a new one is
         // pending, so the heads-up fires when tonight's lock really starts.
         let start = plan.nextNightLockStart(after: now, calendar: .current)
         Task {

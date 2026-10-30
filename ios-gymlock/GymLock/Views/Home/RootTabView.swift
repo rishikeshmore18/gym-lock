@@ -126,7 +126,7 @@ struct RootTabView: View {
         .sheet(isPresented: $isAskingToAddGymDay) {
             AddGymDaySheet(
                 onChange: { effects in
-                    if effects.contains(.resyncGymAlarms) {
+                    if effects.contains(.resyncAlarms) {
                         Task { await coordinator.syncAlarms() }
                     }
                     if effects.contains(.reconcileWindDown) { coordinator.reconcileWindDown() }

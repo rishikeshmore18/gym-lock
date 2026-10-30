@@ -41,7 +41,7 @@ enum AlarmDialContext: Equatable {
     }
 
     /// The day card's summary for `count` selected days. For sleep this is
-    /// the effective count, required nights included.
+    /// the effective count of wake days, required gym days included.
     func daySummary(count: Int) -> String {
         switch self {
         case .gym:
@@ -53,10 +53,10 @@ enum AlarmDialContext: Equatable {
             }
         case .sleep:
             switch count {
-            case 0: "no sleep schedule"
-            case 1: "1 night a week"
-            case 7: "every night"
-            default: "\(count) nights a week"
+            case 0: "no active days"
+            case 1: "1 day a week"
+            case 7: "every day"
+            default: "\(count) days a week"
             }
         }
     }

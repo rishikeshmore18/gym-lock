@@ -94,7 +94,7 @@ struct DebugMorningPanel: View {
             row("at the gym result", gymSummary)
             row("flow", store.plan.rhythm.flowMode.label)
             row("lock alarm", store.plan.rhythm.lockAlarmTime.clockString)
-            row("plain wake alarm", store.plan.plainWakeAlarmEnabled ? "on" : "off")
+            row("sleep days (wake)", Weekday.allCases.filter { store.plan.effectiveSleepDays().contains($0) }.map(\.shortLabel).joined(separator: " "))
             row("one-off alarms", "\(store.plan.oneOffAlarms.count)")
             row("alarm rules result", alarmRulesSummary)
             row("sleep", "\(store.plan.rhythm.bedtime.clockString) to \(store.plan.rhythm.wakeTime.clockString)")

@@ -297,9 +297,6 @@ struct MorningPlan: Hashable {
     /// (with the skip screen) reschedules. Old plans decode their single
     /// `nextAlarmOverride` into this list.
     var oneOffAlarms: [OneOffAlarm] = []
-    /// The plain wake alarm: no lock, no session. On by default
-    /// (FLOW, Flow 1 rest days and Flow 2 every morning).
-    var plainWakeAlarmEnabled: Bool = true
     /// Whether the morning alarm offers its single snooze at all.
     var snoozeEnabled: Bool = true
     /// How long that snooze lasts. Five until the user says otherwise, which
@@ -310,10 +307,16 @@ struct MorningPlan: Hashable {
     /// Which screen the user wakes up to. Stored now, read by the ringing
     /// screen once the two styles exist.
     var alarmScreenStyle: AlarmScreenStyle = .sunrise
-    /// The nights the user chose for the sleep schedule, keyed by the day the
-    /// night starts on. Only the user's own choice: nights a gym morning
-    /// requires are derived, never written here. See `SleepSchedule`.
+    /// The days the user chose for the sleep schedule, keyed by the day they
+    /// wake on. The Night Lock runs on the night ending that morning, and the
+    /// same days decide the plain wake alarms. Only the user's own choice:
+    /// gym days are required and derived, never written here. See
+    /// `SleepSchedule`.
     var sleepScheduleDays: Set<Weekday> = Set(Weekday.allCases)
+    /// Whether `sleepScheduleDays` already uses wake-day keys. True for any
+    /// plan built by this version; false on plans saved before, until
+    /// `SleepSchedule.migrateToWakeDays` has run once.
+    var sleepDaysAreWakeDays: Bool = true
     /// A bedtime change that starts on a later night. See `SleepRules`.
     var pendingBedtime: PendingBedtime? = nil
     /// Set for an existing user whose wake time was really their gym alarm,
@@ -516,10 +519,10 @@ struct MorningPlan: Hashable {
 extension MorningPlan: Codable {
     private enum CodingKeys: String, CodingKey {
         case rhythm, nightLock, slots, missionsEnabled, recentMissions, hasBeenReviewed
-        case oneOffAlarms, plainWakeAlarmEnabled
+        case oneOffAlarms
         case snoozeEnabled, snoozeMinutes, alarmHaptic
         case alarmScreenStyle
-        case sleepScheduleDays
+        case sleepScheduleDays, sleepDaysAreWakeDays
         case pendingBedtime, needsWakeTimeAnswer, hasCheckedWakeTime
     }
 
@@ -546,7 +549,8 @@ extension MorningPlan: Codable {
                 .flatMap { $0 }
                 .map { [$0] } ?? []
         }
-        plainWakeAlarmEnabled = (try? container.decodeIfPresent(Bool.self, forKey: .plainWakeAlarmEnabled)) ?? true
+        // `plainWakeAlarmEnabled` from older builds is deliberately not read:
+        // the sleep days alone decide the plain wake alarms now.
         // Plans saved before these options existed decode to exactly what
         // the alarm already did: a five minute snooze and the original pulse.
         snoozeEnabled = try container.decodeIfPresent(Bool.self, forKey: .snoozeEnabled) ?? true
@@ -560,6 +564,8 @@ extension MorningPlan: Codable {
         // without the key keeps doing exactly that.
         sleepScheduleDays = (try? container.decodeIfPresent(Set<Weekday>.self, forKey: .sleepScheduleDays))
             ?? Set(Weekday.allCases)
+        // Missing means the days were saved as night-start days.
+        sleepDaysAreWakeDays = (try? container.decodeIfPresent(Bool.self, forKey: .sleepDaysAreWakeDays)) ?? false
         pendingBedtime = try? container.decodeIfPresent(PendingBedtime.self, forKey: .pendingBedtime)
         needsWakeTimeAnswer = (try? container.decodeIfPresent(Bool.self, forKey: .needsWakeTimeAnswer)) ?? false
         // Missing means the plan predates the check, so it still has to run.
@@ -575,12 +581,12 @@ extension MorningPlan: Codable {
         try container.encode(recentMissions, forKey: .recentMissions)
         try container.encode(hasBeenReviewed, forKey: .hasBeenReviewed)
         try container.encode(oneOffAlarms, forKey: .oneOffAlarms)
-        try container.encode(plainWakeAlarmEnabled, forKey: .plainWakeAlarmEnabled)
         try container.encode(snoozeEnabled, forKey: .snoozeEnabled)
         try container.encode(snoozeMinutes, forKey: .snoozeMinutes)
         try container.encode(alarmHaptic, forKey: .alarmHaptic)
         try container.encode(alarmScreenStyle, forKey: .alarmScreenStyle)
         try container.encode(sleepScheduleDays, forKey: .sleepScheduleDays)
+        try container.encode(sleepDaysAreWakeDays, forKey: .sleepDaysAreWakeDays)
         try container.encodeIfPresent(pendingBedtime, forKey: .pendingBedtime)
         try container.encode(needsWakeTimeAnswer, forKey: .needsWakeTimeAnswer)
         try container.encode(hasCheckedWakeTime, forKey: .hasCheckedWakeTime)

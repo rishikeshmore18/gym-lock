@@ -194,7 +194,19 @@ final class AppStore {
         lastDepartureMessageIndex = defaults.object(forKey: Key.departureMessage) as? Int
 
         refreshStreak()
+        // Before the wake-time repair, so the shift reads the rhythm the days
+        // were chosen against.
+        migrateSleepDaysToWakeDaysIfNeeded()
         migrateLegacyWakeTimeIfNeeded()
+    }
+
+    /// One-time move of sleep days from night-start keys to wake-day keys.
+    /// The marker is saved with the plan, so it never shifts twice.
+    func migrateSleepDaysToWakeDaysIfNeeded() {
+        var migrated = plan
+        guard SleepSchedule.migrateToWakeDays(&migrated) else { return }
+        plan = migrated
+        persist(plan, forKey: Key.plan)
     }
 
     /// One-time repair for plans whose wake time was really their gym alarm.

@@ -107,7 +107,7 @@ struct WindDownWindowTests {
     private func isLocked(_ rhythm: MorningRhythm, at now: Date) -> Bool {
         SleepRules.lockWindow(
             at: now, rhythm: rhythm, pending: nil,
-            nights: Set(Weekday.allCases), calendar: calendar
+            wakeDays: Set(Weekday.allCases), calendar: calendar
         ) != nil
     }
 

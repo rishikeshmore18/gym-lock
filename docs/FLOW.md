@@ -90,17 +90,23 @@ So the design is **strict in the moment** (apps lock), **forgiving across the we
                       └─ any other day        ──► apps unlocked
 ```
 
-### Which nights (the day card on the Alarm screen)
+### Which days (the day card on the Alarm screen)
 
 ```text
- tap the sleep bar ──► "sleep schedule" · every night by default
+ tap the sleep bar ──► "sleep schedule" · every day by default
  tap the gym bar   ──► "gym days" · e.g. Mon · Wed · Fri · 3 minimum
 
- the night before a gym day is always on
-   try to turn it off ──► short note (disappears after ~3 s):
-   "monday is a gym day. keep sunday night on for rest."
+ a sleep day is the day you WAKE
+   "Mon" + 23:00 → 06:30  = night lock Sunday 23:00 → Monday 06:30
+   "Mon" + 00:30 → 08:30  = night lock Monday 00:30 → Monday 08:30
+   (night lock begins the evening before when the night crosses midnight)
 
- a night belongs to the day it starts: "Sun" = Sunday 23:00 → Monday 06:30
+ a gym day is always on as a sleep day (gym Mon/Wed/Fri ──► Mon/Wed/Fri on)
+   try to turn it off ──► short note (disappears after ~3 s):
+   "monday is a gym day, so monday stays active."
+
+ the same selected days decide the plain wake alarm (see Flow 1 and Flow 2).
+ there is no separate "wake alarm on other days" setting.
 ```
 
 This is already built, except:
@@ -149,7 +155,7 @@ This is already built, except:
 | Moves bedtime to 3am to dodge the lock tonight | A new bedtime starts from **tomorrow night**. *(Change)* |
 | Sets a 5-minute "sleep" to dodge it | The sleep schedule must be at least 5 hours. *(Change)* |
 | Works nights and sleeps 09:00 to 16:00 | The lock follows their own sleep hours, whatever they are. |
-| Turns off a night that isn't before a gym day | Allowed. No night lock that night. Already built. |
+| Turns off a sleep day that isn't a gym day | Allowed. No night lock the night before that morning, and no plain wake alarm that morning. |
 | Wakes at 5:00 on a rest day | The lock stays until wake time. No button unlocks it. |
 | Hasn't picked any apps to block | Nothing to lock. The app says so and asks them to pick apps. |
 
@@ -184,9 +190,11 @@ GYM DAY (Mon / Wed / Fri)
                           └─ 🔔 "missed this morning. pick a day to make it up."
                                └─ SKIP FLOW (same options as "can't today")
 
-REST DAY (Tue / Thu / Sat / Sun)
+REST DAY (a selected sleep day that isn't a gym day)
  06:30  night lock ends ──► apps unlocked
- 06:30  ⏰ plain alarm, same time, NO lock (optional)
+ 06:30  ⏰ plain alarm, same time, NO lock
+        (on gym days the gym alarm replaces it, never both)
+        (a day that isn't selected gets no plain alarm)
 ```
 
 **Built (`2026-09-26`):** today an ignored alarm never ends. Nothing is recorded, no reschedule is offered, and if the app stays open in the background the next day's alarm can't start.
@@ -209,7 +217,7 @@ REST DAY (Tue / Thu / Sat / Sun)
 
 ```text
 EVERY NIGHT     23:00  night lock ON ──► ends 07:00
-EVERY MORNING   07:00  plain wake alarm (optional, NO lock)
+EVERY SLEEP DAY 07:00  plain wake alarm (NO lock), gym days included
 DAYTIME                nothing locked
 
 GYM DAY
@@ -543,7 +551,7 @@ Using a freeze automatically, planning one ahead, and the refund are already bui
 6. Add the "time to go" alarm for go-later users. **(Built: `2026-09-26`)**
 7. An ignored alarm ends when the lock lifts and sends the "pick a day to make it up" notification. **(Built: `2026-09-26`)**
 8. "Running late" keeps the lock and sets a real alarm. Options that run into sleep hours are hidden. **(Built: `2026-09-26`)**
-9. Optional plain wake alarm on rest days. **(Built: `2026-09-26`)**
+9. Plain wake alarm on the selected sleep days (the gym alarm replaces it on Wake & Go gym days; no separate setting). **(Built: `2026-09-26`)**
 
 **At the gym**
 
@@ -617,10 +625,10 @@ Paths are under `ios-gymlock/GymLock/`, as of commit `40b723c`. This map is for 
 | Word | Meaning |
 | --- | --- |
 | Gym day | A weekday on the gym days card. The gym alarm rings and the gym lock runs on these days. |
-| Sleep night | A night the sleep schedule runs, so the night lock runs. A night belongs to the day it starts: "Sun" means Sunday 23:00 to Monday 06:30. |
+| Sleep day | A day the sleep schedule runs: the day you wake. "Mon" means the night ending Monday morning (Sunday 23:00 to Monday 06:30) and Monday's plain wake alarm. |
 | Required night | The night before a gym day. It cannot be turned off. |
 | Wake & Go / Go Later | Which flow a user gets, decided in Step 0. |
-| Night lock | Distracting apps locked from bedtime to wake time on sleep nights. |
+| Night lock | Distracting apps locked from bedtime to wake time on the night ending each sleep day. |
 | Gym lock | Distracting apps locked from the gym alarm until the user arrives at the gym, or until the lock lifts. |
 | Snooze | The one delay after the first alarm ring, before the second ring. Length is editable by the user (1–15 min), default 5 minutes. Diagrams in this file show the 5-minute default. |
 | Session | One run from a gym alarm to its result. |

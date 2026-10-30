@@ -69,10 +69,13 @@ struct SleepScheduleTests {
         #expect(AlarmDialContext.gym.daySummary(count: 1) == "1 day a week")
         #expect(AlarmDialContext.gym.daySummary(count: 3) == "3 days a week")
         #expect(AlarmDialContext.gym.daySummary(count: 7) == "every day")
-        #expect(AlarmDialContext.sleep.daySummary(count: 0) == "no sleep schedule")
-        #expect(AlarmDialContext.sleep.daySummary(count: 1) == "1 night a week")
-        #expect(AlarmDialContext.sleep.daySummary(count: 5) == "5 nights a week")
-        #expect(AlarmDialContext.sleep.daySummary(count: 7) == "every night")
+        #expect(AlarmDialContext.sleep.daySummary(count: 0) == "no active days")
+        #expect(AlarmDialContext.sleep.daySummary(count: 1) == "1 day a week")
+        #expect(AlarmDialContext.sleep.daySummary(count: 5) == "5 days a week")
+        #expect(AlarmDialContext.sleep.daySummary(count: 7) == "every day")
+        for count in 0...7 {
+            #expect(!AlarmDialContext.sleep.daySummary(count: count).contains("night"))
+        }
     }
 
     // MARK: - Crossing midnight
@@ -83,100 +86,135 @@ struct SleepScheduleTests {
         #expect(!SleepSchedule.crossesMidnight(bedtime: seven, wake: seven))
     }
 
-    // MARK: - Required nights
+    // MARK: - Required days
 
-    @Test func tuesdayGymOvernightRequiresMondayNight() {
-        let required = SleepSchedule.requiredNights(gymDays: [.tuesday], bedtime: eleven, wake: seven)
-        #expect(required == [.monday])
+    private let monWedFri: Set<Weekday> = [.monday, .wednesday, .friday]
+
+    @Test func gymMondayWednesdayFridayRequireTheSameDays() {
+        for (bed, wake) in [(eleven, seven), (one, eight)] {
+            let plan = plan(gymDays: monWedFri, bedtime: bed, wake: wake, sleep: [])
+            #expect(plan.requiredSleepDays() == monWedFri)
+            #expect(plan.effectiveSleepDays() == monWedFri)
+        }
     }
 
-    @Test func mondayGymWrapsBackToSunday() {
-        #expect(Weekday.monday.previous == .sunday)
-        #expect(Weekday.sunday.next == .monday)
-        let required = SleepSchedule.requiredNights(gymDays: [.monday], bedtime: eleven, wake: seven)
-        #expect(required == [.sunday])
-    }
-
-    @Test func mondayWednesdayFridayRequireSundayTuesdayThursday() {
-        let required = SleepSchedule.requiredNights(
-            gymDays: [.monday, .wednesday, .friday], bedtime: eleven, wake: seven
-        )
-        #expect(required == [.sunday, .tuesday, .thursday])
-    }
-
-    /// A night that starts after midnight starts on the gym day itself, so
-    /// that day's own night is the one protected.
-    @Test func aSameDayNightProtectsTheGymDaysOwnNight() {
-        let required = SleepSchedule.requiredNights(gymDays: [.tuesday], bedtime: one, wake: eight)
-        #expect(required == [.tuesday])
-    }
-
-    @Test func requiredNightsCountInTheEffectiveSchedule() {
+    @Test func requiredDaysCountInTheEffectiveSchedule() {
         let plan = plan(gymDays: [.tuesday], bedtime: eleven, wake: seven, sleep: [.friday])
-        #expect(plan.effectiveSleepDays() == [.monday, .friday])
-        #expect(AlarmDialContext.sleep.daySummary(count: plan.effectiveSleepDays().count) == "2 nights a week")
+        #expect(plan.effectiveSleepDays() == [.tuesday, .friday])
+        #expect(AlarmDialContext.sleep.daySummary(count: plan.effectiveSleepDays().count) == "2 days a week")
     }
 
-    // MARK: - Tapping a required night
+    // MARK: - Tapping a required day
 
-    @Test func turningOffARequiredNightChangesNothing() {
-        var plan = plan(gymDays: [.tuesday], bedtime: eleven, wake: seven, sleep: [])
+    @Test func turningOffARequiredDayChangesNothing() {
+        var plan = plan(gymDays: monWedFri, bedtime: eleven, wake: seven, sleep: [])
         let before = plan
 
-        let result = plan.toggleSleepNight(.monday)
+        let result = plan.toggleSleepDay(.monday)
 
-        #expect(result.outcome == .required(night: .monday, gymDay: .tuesday))
+        #expect(result.outcome == .required(day: .monday))
         #expect(result.effects.isEmpty)
         #expect(plan == before)
         #expect(plan.effectiveSleepDays().contains(.monday))
+        #expect(SleepSchedule.requiredMessage(day: .monday) == "monday is a gym day, so monday stays active.")
     }
 
-    @Test func theRefusalNamesBothDays() {
-        let message = SleepSchedule.requiredMessage(night: .monday, gymDay: .tuesday)
-        #expect(message == "tuesday is a gym day. keep monday night on for rest.")
-        #expect(!message.contains("\u{2014}"))
+    @Test func theDayBeforeAGymDayIsFree() {
+        var plan = plan(gymDays: monWedFri, bedtime: eleven, wake: seven, sleep: [])
+        let result = plan.toggleSleepDay(.sunday)
+        #expect(result.outcome == .updated([.sunday]))
     }
 
     // Four gym days, so one can come off without going under the minimum.
-    // Tue/Thu/Sat/Sun need Mon/Wed/Fri/Sat nights.
     private let fourGymDays: Set<Weekday> = [.tuesday, .thursday, .saturday, .sunday]
 
     @Test func removingTheGymDayRemovesTheRequirement() {
         var plan = plan(gymDays: fourGymDays, bedtime: eleven, wake: seven, sleep: [])
-        #expect(plan.effectiveSleepDays() == [.monday, .wednesday, .friday, .saturday])
+        #expect(plan.effectiveSleepDays() == fourGymDays)
 
         let result = plan.toggleGymDay(.tuesday, newAlarmTime: seven)
 
         #expect(result.outcome == .updated)
-        #expect(plan.requiredSleepNights() == [.wednesday, .friday, .saturday])
-        // Monday was only there because of Tuesday, so it goes with it.
-        #expect(!plan.effectiveSleepDays().contains(.monday))
+        #expect(plan.requiredSleepDays() == [.thursday, .saturday, .sunday])
+        // Tuesday was only there because it was a gym day.
+        #expect(!plan.effectiveSleepDays().contains(.tuesday))
         #expect(plan.sleepScheduleDays.isEmpty)
+
+        // And it is editable again.
+        let toggled = plan.toggleSleepDay(.tuesday)
+        #expect(toggled.outcome == .updated([.tuesday]))
     }
 
-    @Test func aChosenNightStaysAfterItStopsBeingRequired() {
-        var plan = plan(gymDays: fourGymDays, bedtime: eleven, wake: seven, sleep: [.monday])
+    @Test func aChosenDayStaysAfterItStopsBeingRequired() {
+        var plan = plan(gymDays: fourGymDays, bedtime: eleven, wake: seven, sleep: [.tuesday])
 
         _ = plan.toggleGymDay(.tuesday, newAlarmTime: seven)
 
-        #expect(plan.effectiveSleepDays().contains(.monday))
-        // And it is editable again.
-        let result = plan.toggleSleepNight(.monday)
+        #expect(plan.effectiveSleepDays().contains(.tuesday))
+        let result = plan.toggleSleepDay(.tuesday)
         #expect(result.outcome == .updated([]))
     }
 
-    @Test func aDraftThatStopsCrossingMidnightMovesTheRequirementWithoutStoringAnything() {
-        var plan = plan(gymDays: [.tuesday], bedtime: eleven, wake: seven, sleep: [])
-        var draft = plan.rhythm
-        draft.bedtime = one
-        draft.wakeTime = eight
+    // MARK: - Migration to wake days
 
-        // Monday night is no longer the one that ends on Tuesday's morning.
-        #expect(plan.requiredSleepNights(for: draft) == [.tuesday])
-        #expect(plan.requiredSleepNights() == [.monday])
+    private func legacyPlan(bed: TimeOfDay, wake: TimeOfDay, sleep: Set<Weekday>) throws -> MorningPlan {
+        var plan = plan(gymDays: monWedFri, bedtime: bed, wake: wake, sleep: sleep)
+        plan.sleepDaysAreWakeDays = true
+        let data = try JSONEncoder().encode(plan)
+        var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json.removeValue(forKey: "sleepDaysAreWakeDays")
+        return try JSONDecoder().decode(MorningPlan.self, from: JSONSerialization.data(withJSONObject: json))
+    }
 
-        let result = plan.toggleSleepNight(.monday, rhythm: draft)
-        #expect(result.outcome == .updated([.monday]))
+    @Test func newPlansAlreadyUseWakeDays() {
+        var plan = MorningPlan.default
+        #expect(plan.sleepDaysAreWakeDays)
+        let before = plan
+        #expect(!SleepSchedule.migrateToWakeDays(&plan))
+        #expect(plan == before)
+    }
+
+    @Test func overnightNightStartDaysShiftOnceToTheWakeDay() throws {
+        var plan = try legacyPlan(bed: eleven, wake: seven, sleep: [.sunday, .saturday])
+        #expect(!plan.sleepDaysAreWakeDays)
+
+        #expect(SleepSchedule.migrateToWakeDays(&plan))
+        #expect(plan.sleepScheduleDays == [.monday, .sunday])
+        #expect(plan.sleepDaysAreWakeDays)
+
+        // Never twice, including after a round trip.
+        #expect(!SleepSchedule.migrateToWakeDays(&plan))
+        var reloaded = try JSONDecoder().decode(MorningPlan.self, from: JSONEncoder().encode(plan))
+        #expect(!SleepSchedule.migrateToWakeDays(&reloaded))
+        #expect(reloaded.sleepScheduleDays == [.monday, .sunday])
+    }
+
+    @Test func sameDaySchedulesKeepTheirWeekday() throws {
+        var plan = try legacyPlan(bed: one, wake: eight, sleep: [.monday, .thursday])
+        #expect(SleepSchedule.migrateToWakeDays(&plan))
+        #expect(plan.sleepScheduleDays == [.monday, .thursday])
+    }
+
+    @Test func theStoreMigratesOnceAcrossRelaunches() throws {
+        let suite = "SleepScheduleTests.migration.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        // Seed an old plan (night-start Sunday) directly into storage.
+        var seeded = plan(gymDays: monWedFri, bedtime: eleven, wake: seven, sleep: [.sunday])
+        seeded.hasCheckedWakeTime = true
+        var json = try #require(
+            JSONSerialization.jsonObject(with: try JSONEncoder().encode(seeded)) as? [String: Any]
+        )
+        json.removeValue(forKey: "sleepDaysAreWakeDays")
+        defaults.set(try JSONSerialization.data(withJSONObject: json), forKey: "gymlock.morningPlan")
+
+        let second = AppStore(defaults: defaults)
+        #expect(second.plan.sleepScheduleDays == [.monday])
+        #expect(second.plan.sleepDaysAreWakeDays)
+
+        let third = AppStore(defaults: defaults)
+        #expect(third.plan.sleepScheduleDays == [.monday])
     }
 
     // MARK: - Resync responsibilities
@@ -186,7 +224,7 @@ struct SleepScheduleTests {
 
         let effects = plan.toggleGymDay(.wednesday, newAlarmTime: seven).effects
 
-        #expect(effects.contains(.resyncGymAlarms))
+        #expect(effects.contains(.resyncAlarms))
         #expect(plan.slots[0].days == [.monday, .wednesday])
     }
 
@@ -203,19 +241,21 @@ struct SleepScheduleTests {
     @Test func theFirstGymDayCreatesAnAlarmAtTheShownTime() {
         var plan = MorningPlan.default
         let effects = plan.toggleGymDay(.thursday, newAlarmTime: seven).effects
-        #expect(effects.contains(.resyncGymAlarms))
+        #expect(effects.contains(.resyncAlarms))
         #expect(plan.slots.count == 1)
         #expect(plan.slots[0].days == [.thursday])
         #expect(plan.slots[0].alarmTime == seven)
     }
 
-    @Test func sleepDayChangesDoNotRescheduleGymAlarms() {
+    /// A sleep day decides that morning's plain wake alarm, so the alarms
+    /// are rebuilt too. The gym slots themselves never change.
+    @Test func sleepDayChangesResyncAlarmsAndTheNightLock() {
         var plan = plan(gymDays: [.tuesday], bedtime: eleven, wake: seven, sleep: [])
         let slotsBefore = plan.slots
 
-        let result = plan.toggleSleepNight(.friday)
+        let result = plan.toggleSleepDay(.friday)
 
-        #expect(!result.effects.contains(.resyncGymAlarms))
+        #expect(result.effects.contains(.resyncAlarms))
         #expect(result.effects.contains(.reconcileWindDown))
         #expect(plan.slots == slotsBefore)
     }
@@ -264,31 +304,35 @@ struct SleepScheduleTests {
         return rhythm
     }
 
-    private func isLocked(_ rhythm: MorningRhythm, at now: Date, nights: Set<Weekday>) -> Bool {
-        SleepRules.lockWindow(at: now, rhythm: rhythm, pending: nil, nights: nights, calendar: calendar) != nil
+    private func isLocked(_ rhythm: MorningRhythm, at now: Date, wakeDays: Set<Weekday>) -> Bool {
+        SleepRules.lockWindow(at: now, rhythm: rhythm, pending: nil, wakeDays: wakeDays, calendar: calendar) != nil
     }
 
-    @Test func aSelectedMondayHoldsFromMondayNightIntoTuesdayMorning() {
-        let nights: Set<Weekday> = [.monday]
-        #expect(isLocked(overnight, at: date(day: 9, 23, 30), nights: nights))
-        // 02:00 Tuesday still belongs to Monday's night.
-        #expect(isLocked(overnight, at: date(day: 10, 2), nights: nights))
+    @Test func aSelectedMondayHoldsFromSundayNightIntoMondayMorning() {
+        let days: Set<Weekday> = [.monday]
+        #expect(isLocked(overnight, at: date(day: 8, 23, 30), wakeDays: days))
+        #expect(isLocked(overnight, at: date(day: 9, 2), wakeDays: days))
+        // Monday 23:00 to Tuesday 07:00 is Tuesday's, which is off.
+        #expect(!isLocked(overnight, at: date(day: 9, 23, 30), wakeDays: days))
+        #expect(!isLocked(overnight, at: date(day: 10, 2), wakeDays: days))
     }
 
-    @Test func anUnselectedMondayDoesNotActivate() {
-        let nights: Set<Weekday> = [.tuesday]
-        #expect(!isLocked(overnight, at: date(day: 9, 23, 30), nights: nights))
-        #expect(!isLocked(overnight, at: date(day: 10, 2), nights: nights))
-        // Tuesday's own night still does.
-        #expect(isLocked(overnight, at: date(day: 10, 23, 30), nights: nights))
+    @Test func aSelectedTuesdayHoldsFromMondayNight() {
+        let days: Set<Weekday> = [.tuesday]
+        #expect(!isLocked(overnight, at: date(day: 9, 2), wakeDays: days))
+        #expect(isLocked(overnight, at: date(day: 9, 23, 30), wakeDays: days))
+        #expect(isLocked(overnight, at: date(day: 10, 2), wakeDays: days))
     }
 
-    @Test func everyNightLocksWhenEveryNightIsOn() {
-        #expect(isLocked(overnight, at: date(day: 10, 2), nights: Set(Weekday.allCases)))
+    @Test func everyNightLocksWhenEveryDayIsOn() {
+        #expect(isLocked(overnight, at: date(day: 10, 2), wakeDays: Set(Weekday.allCases)))
     }
 
-    @Test func aRequiredNightCountsForWindDown() {
+    @Test func aRequiredGymDayCountsForWindDown() {
+        // Tuesday gym: Monday 23:00 to Tuesday 07:00 locks.
         let plan = plan(gymDays: [.tuesday], bedtime: eleven, wake: seven, sleep: [])
+        #expect(plan.nightLockWindow(at: date(day: 9, 23, 30), calendar: calendar) != nil)
         #expect(plan.nightLockWindow(at: date(day: 10, 2), calendar: calendar) != nil)
+        #expect(plan.nightLockWindow(at: date(day: 10, 23, 30), calendar: calendar) == nil)
     }
 }
