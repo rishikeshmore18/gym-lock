@@ -110,7 +110,7 @@ struct ProgressTabView: View {
                         appearanceDelay: 0.08,
                         action: { isShowingBadges = true }
                     ) {
-                        BadgeEmblem(isEarned: badges.earnedCount > 0)
+                        LatestBadgeEmblem(badge: badges.latestEarned)
                     }
                     .spotlightDimmed(spotlight.isActive, cornerRadius: statCardRadius)
                 }

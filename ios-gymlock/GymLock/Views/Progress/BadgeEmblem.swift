@@ -106,6 +106,42 @@ struct BadgeEmblem: View {
     }
 }
 
+/// The Badges Earned tile's emblem: the user's most recently earned badge,
+/// or the brushed-metal mark while nothing has been earned yet.
+///
+/// The art file has transparent margins (the medal fills about 80% of it), so
+/// it is drawn a little larger than the tile's 84 pt emblem slot to make the
+/// medal itself sit at the same visual size as the flame beside it.
+struct LatestBadgeEmblem: View {
+    let badge: BadgeDefinition?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            if let badge {
+                BadgeArtView(badge: badge, width: 92)
+                    .shadow(color: .black.opacity(0.14), radius: 6, y: 4)
+                    .id(badge.id)
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .scale(scale: 0.7).combined(with: .opacity)
+                    )
+            } else {
+                BadgeEmblem()
+                    .transition(.opacity)
+            }
+        }
+        .frame(height: 84)
+        .animation(
+            reduceMotion ? .easeInOut(duration: 0.25) : .spring(response: 0.5, dampingFraction: 0.7),
+            value: badge?.id
+        )
+        .accessibilityHidden(true)
+    }
+}
+
 #Preview("Unearned") {
     BadgeEmblem()
         .padding(40)

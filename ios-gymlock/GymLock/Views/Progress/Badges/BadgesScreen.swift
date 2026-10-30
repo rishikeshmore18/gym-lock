@@ -6,7 +6,9 @@ import SwiftUI
 /// last looked start muted and are revealed once: the kit's rank-up for the
 /// most prestigious of them (the others pop into place as it lands), or,
 /// with Reduce Motion on, a success haptic and a short crossfade. Either way
-/// they are marked seen the moment the reveal begins, so it never replays.
+/// they are marked seen the moment the reveal begins, so it never replays on
+/// its own. Tapping an earned badge replays its rank-up on demand, then opens
+/// its details; a locked badge opens its details directly.
 struct BadgesScreen: View {
     let badges: BadgeStore
 
@@ -19,6 +21,8 @@ struct BadgesScreen: View {
     @State private var request: BadgeRankUpRequest?
     @State private var selected: BadgeDefinition?
     @State private var hasRevealed = false
+    /// The rank-up on screen is a replay the user asked for, not a first reveal.
+    @State private var replaying: String?
 
     init(badges: BadgeStore) {
         self.badges = badges
@@ -36,7 +40,7 @@ struct BadgesScreen: View {
                 stateFor: { badges.state(for: $0) },
                 pops: pops,
                 focusBadgeId: request?.to.id,
-                onTap: { selected = $0 }
+                onTap: { tapped($0) }
             )
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -65,6 +69,23 @@ struct BadgesScreen: View {
         return pending.contains(id) ? .locked(nil) : state
     }
 
+    // MARK: Tap
+
+    private func tapped(_ badge: BadgeDefinition) {
+        guard request == nil else { return }
+        guard shownState(for: badge.id).isEarned else {
+            selected = badge
+            return
+        }
+        if reduceMotion {
+            Haptics.commit()
+            selected = badge
+            return
+        }
+        replaying = badge.id
+        request = BadgeRankUpRequest(unlocking: badge)
+    }
+
     // MARK: Reveal
 
     private func reveal() async {
@@ -89,6 +110,17 @@ struct BadgesScreen: View {
     }
 
     private func land(_ request: BadgeRankUpRequest) {
+        if replaying == request.to.id {
+            replaying = nil
+            pops = [request.to.id: 0]
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                selected = request.to
+                try? await Task.sleep(for: .milliseconds(950))
+                pops = [:]
+            }
+            return
+        }
         let others = BadgeCatalog.all.map(\.id).filter { pending.contains($0) && $0 != request.to.id }
         var next: [String: Double] = [request.to.id: 0]
         for (index, id) in others.enumerated() {

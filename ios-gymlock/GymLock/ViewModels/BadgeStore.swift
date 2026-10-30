@@ -42,6 +42,24 @@ final class BadgeStore {
         BadgeCatalog.all.filter { state(for: $0.id).isEarned }.count
     }
 
+    /// The most recently earned badge, shown on the Progress tile.
+    ///
+    /// Latest unlock date wins; a badge with no known date sorts before dated
+    /// ones. Ties (several unlocked the same day, or none dated) go to the
+    /// higher tier, then the later rung in the catalog.
+    var latestEarned: BadgeDefinition? {
+        let earned = BadgeCatalog.all.enumerated().compactMap { index, badge -> (BadgeDefinition, Date?, Int)? in
+            guard case let .earned(date) = state(for: badge.id) else { return nil }
+            return (badge, date, index)
+        }
+        return earned.max { lhs, rhs in
+            let l = lhs.1 ?? .distantPast, r = rhs.1 ?? .distantPast
+            if l != r { return l < r }
+            if lhs.0.tier.rank != rhs.0.tier.rank { return lhs.0.tier.rank < rhs.0.tier.rank }
+            return lhs.2 < rhs.2
+        }?.0
+    }
+
     /// Earned badges whose unlock the user has not seen yet.
     var unseenEarned: [String] {
         BadgeCatalog.all.map(\.id).filter { state(for: $0).isEarned && records[$0]?.seen != true }
