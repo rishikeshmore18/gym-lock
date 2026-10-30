@@ -5,8 +5,8 @@ import SwiftUI
 /// It opens with two stat tiles — the streak and the badges — before anything
 /// else, because progress on this screen is first a feeling ("am I actually
 /// doing this") and only then a chart. Every number here comes from the record:
-/// the streak is the ledger's, and badges stay at zero until a badge system
-/// exists. Nothing is estimated to make the page look fuller.
+/// the streak is the ledger's, and the badges are derived from that same
+/// ledger by `BadgeStore`. Nothing is estimated to make the page look fuller.
 ///
 /// Below them sits the progress chart, which answers the follow-up question —
 /// "am I doing what I planned" — and changes resolution between month and week
@@ -31,6 +31,8 @@ struct ProgressTabView: View {
     /// outlives the card that raised it.
     @State private var shareOrigin: ShareOrigin?
     @Namespace private var shareTransition
+    @State private var badges = BadgeStore()
+    @State private var isShowingBadges = false
 
     /// The zoom between the two levels of the chart.
     ///
@@ -74,6 +76,10 @@ struct ProgressTabView: View {
         .tint(Theme.accent)
         .storyEditor(origin: $shareOrigin, photos: photos, transitionNamespace: shareTransition)
         .task(id: refreshKey) { refresh() }
+        .task(id: badgeKey) { badges.refresh(store: store) }
+        .sheet(isPresented: $isShowingBadges) {
+            BadgesScreen(badges: badges)
+        }
         // The Day 0 photograph the user took during onboarding is their real
         // before-picture; the stack starts from it rather than asking for the
         // same thing a second time. Runs once — the store keeps its own flag.
@@ -99,11 +105,12 @@ struct ProgressTabView: View {
 
                     ProgressStatCard(
                         title: "Badges Earned",
-                        count: 0,
+                        count: badges.earnedCount,
                         digitStyle: .dark,
-                        appearanceDelay: 0.08
+                        appearanceDelay: 0.08,
+                        action: { isShowingBadges = true }
                     ) {
-                        BadgeEmblem()
+                        BadgeEmblem(isEarned: badges.earnedCount > 0)
                     }
                     .spotlightDimmed(spotlight.isActive, cornerRadius: statCardRadius)
                 }
@@ -246,6 +253,17 @@ struct ProgressTabView: View {
         hasher.combine(store.log)
         hasher.combine(store.plan)
         hasher.combine(store.schedule)
+        return hasher.finalize()
+    }
+
+    /// The badges read the ledger and the streak the engine ruled on it.
+    private var badgeKey: Int {
+        var hasher = Hasher()
+        hasher.combine(store.log)
+        hasher.combine(store.plan)
+        hasher.combine(store.schedule)
+        hasher.combine(store.streak)
+        hasher.combine(store.streakVault)
         return hasher.finalize()
     }
 
