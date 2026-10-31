@@ -657,14 +657,14 @@ struct AlarmSettingsView: View {
         VStack(spacing: 14) {
             HStack {
                 Button(action: switchDialContext) {
-                    // Up-and-down chevrons, like a menu picker: the title
-                    // switches between two lists, so it reads as tappable.
+                    // A sideways chevron after the title, so it reads as
+                    // tappable: the title switches between the two lists.
                     HStack(spacing: 6) {
                         Text(dialContext.dayCardTitle)
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Theme.ink)
                             .contentTransition(.opacity)
-                        Image(systemName: "chevron.up.chevron.down")
+                        Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Theme.inkTertiary)
                     }
