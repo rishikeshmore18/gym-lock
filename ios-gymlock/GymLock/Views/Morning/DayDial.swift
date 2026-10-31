@@ -887,6 +887,10 @@ struct DayDial: View {
     /// When the pulse begins. Nil when no intro is running.
     @State private var introBegins: Date?
     @State private var introIsRunning = false
+    /// Ticks once per screen refresh while the pulse runs. A display link
+    /// rather than a background `TimelineView`, which SwiftUI could pause
+    /// while the page was still zooming in, so the pulse never showed.
+    @State private var introClock = IntroFrameClock()
     /// Which half-hour step the far end is on, so each crossing ticks once.
     @State private var introTickStep: Int = 0
     /// Once per presentation, not again on coming back from Sound.
@@ -1012,11 +1016,11 @@ struct DayDial: View {
         .frame(width: size, height: size)
         .contentShape(.circle)
         .gesture(drag)
-        .background { introDriver }
         .onAppear {
             startIntroIfNeeded()
             refreshIconFit(animated: false)
         }
+        .onDisappear { introClock.stop() }
         .onChange(of: sleepMinutes) { _, _ in refreshIconFit() }
         .onChange(of: displayedSessionMinutes) { _, _ in refreshIconFit() }
         .onChange(of: size) { _, _ in refreshIconFit() }
@@ -1102,9 +1106,12 @@ struct DayDial: View {
                     if indicator?.tickIndex == tick { continue }
                     let isHour = tick % 4 == 0
                     let length: CGFloat = isHour ? metrics.majorTickLength : metrics.minorTickLength
+                    let colour = isUnderGym(Double(tick) * 15)
+                        ? Theme.accent
+                        : (isHour ? Theme.inkTertiary.opacity(0.9) : Theme.border)
                     context.stroke(
                         tickPath(minutes: Double(tick) * 15, length: length),
-                        with: .color(isHour ? Theme.inkTertiary.opacity(0.9) : Theme.border),
+                        with: .color(colour),
                         style: StrokeStyle(lineWidth: isHour ? 1.5 : 1, lineCap: .round)
                     )
                 }
@@ -1134,6 +1141,16 @@ struct DayDial: View {
     /// The single clock position lit by the drag in progress, if any.
     private var indicator: DayDialModel.ClockIndicator? {
         DayDialModel.indicator(grab: grab, rhythm: rhythm, fingerMinutes: tracker?.fingerMinutes ?? 0)
+    }
+
+    /// Whether a clock position sits inside the gym visit as it is drawn
+    /// right now, start and end included. The lines and numbers there take
+    /// the arc's colour, like a shadow the arc casts on the face, so it
+    /// follows every drag and the opening stretch.
+    private func isUnderGym(_ minutes: Double) -> Bool {
+        let span = max(Double(sessionMinutes) + introExtraMinutes, 0)
+        let into = (minutes - Double(gymByMinutes)).truncatingRemainder(dividingBy: 1440)
+        return (into < 0 ? into + 1440 : into) <= span
     }
 
     private var litColour: Color {
@@ -1186,7 +1203,11 @@ struct DayDial: View {
                 Text("\(hour)")
                     .font(.system(size: metrics.numeralFontSize(hour: hour), weight: isMajor ? .bold : .semibold))
                     .monospacedDigit()
-                    .foregroundStyle(indicator?.hour == hour ? litColour : (isMajor ? Theme.ink : Theme.inkTertiary))
+                    .foregroundStyle(
+                        indicator?.hour == hour
+                            ? litColour
+                            : (isUnderGym(Double(hour * 60)) ? Theme.accent : (isMajor ? Theme.ink : Theme.inkTertiary))
+                    )
                     // Pops a little when the dragged time lands on its hour.
                     .scaleEffect(indicator?.hour == hour ? 1.3 : 1)
                     .animation(popAnimation, value: indicator?.hour == hour)
@@ -1375,7 +1396,7 @@ struct DayDial: View {
                     guard let picked = grab(at: value.startLocation, centre: centre) else { return }
                     // A finger on the dial ends the intro at once, so what
                     // it picks up is exactly what it can see.
-                    if introBegins != nil { cancelIntro() }
+                    if introIsRunning { cancelIntro() }
                     grab = picked
                     tracker = DayDialModel.DragTracker(
                         startingAt: DayDialModel.rawMinutes(at: value.startLocation, centre: centre)
@@ -1500,21 +1521,6 @@ struct DayDial: View {
     /// One tick per half hour the end crosses, on the way out or back.
     private static let introTickMinutes: Double = 30
 
-    /// Drives the pulse frame by frame while it runs, and is gone otherwise,
-    /// so an idle dial costs nothing.
-    @ViewBuilder
-    private var introDriver: some View {
-        if introIsRunning, let begins = introBegins {
-            TimelineView(.animation) { context in
-                Color.clear
-                    .onChange(of: context.date) { _, now in
-                        stepIntro(now: now, begins: begins)
-                    }
-            }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
-    }
 
     /// Opens with the gym bar at the length the user chose, stretches it to
     /// its longest, then lets it settle back. Once per presentation, and not
@@ -1538,9 +1544,17 @@ struct DayDial: View {
         introAmount = extra
         introExtraMinutes = 0
         introTickStep = 0
-        introBegins = Date()
         introIsRunning = true
         Haptics.prepareSelection()
+        // The clock starts on the first frame actually drawn, so a slow
+        // first frame cannot eat into the pulse.
+        introBegins = nil
+        introClock.start { now in
+            guard introIsRunning else { return }
+            let begins = introBegins ?? now
+            if introBegins == nil { introBegins = begins }
+            stepIntro(now: now, begins: begins)
+        }
     }
 
     private func stepIntro(now: Date, begins: Date) {
@@ -1600,6 +1614,7 @@ struct DayDial: View {
     }
 
     private func finishIntro() {
+        introClock.stop()
         introIsRunning = false
         introBegins = nil
         introExtraMinutes = 0
@@ -1623,6 +1638,31 @@ struct DayDial: View {
         pushedMinutes = 0
         isTouchingOther = false
         onSettle?()
+    }
+}
+
+/// A screen-refresh clock for the opening pulse. Runs only while the pulse
+/// does, so an idle dial costs nothing.
+final class IntroFrameClock {
+    private var link: CADisplayLink?
+    private var onFrame: ((Date) -> Void)?
+
+    func start(_ onFrame: @escaping (Date) -> Void) {
+        stop()
+        self.onFrame = onFrame
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+        onFrame = nil
+    }
+
+    @objc private func tick() {
+        onFrame?(Date())
     }
 }
 
