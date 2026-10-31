@@ -61,7 +61,7 @@ struct SleepScheduleTests {
         let context = AlarmDialContext.sleep
         #expect(context.headerLabels.leading == "bedtime")
         #expect(context.headerLabels.trailing == "wake up")
-        #expect(context.dayCardTitle == "sleep schedule")
+        #expect(context.dayCardTitle == "alarm repeat")
     }
 
     @Test func summariesUseTheShortCopy() {

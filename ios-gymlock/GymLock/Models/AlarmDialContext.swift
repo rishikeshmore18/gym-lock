@@ -35,7 +35,7 @@ enum AlarmDialContext: Equatable {
     /// The day card's title.
     var dayCardTitle: String {
         switch self {
-        case .sleep: "sleep schedule"
+        case .sleep: "alarm repeat"
         case .gym: "gym days"
         }
     }

@@ -657,15 +657,22 @@ struct AlarmSettingsView: View {
         VStack(spacing: 14) {
             HStack {
                 Button(action: switchDialContext) {
-                    Text("\(dialContext.dayCardTitle) >")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.ink)
-                        .contentTransition(.opacity)
-                        .contentShape(.rect)
+                    // Up-and-down chevrons, like a menu picker: the title
+                    // switches between two lists, so it reads as tappable.
+                    HStack(spacing: 6) {
+                        Text(dialContext.dayCardTitle)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.ink)
+                            .contentTransition(.opacity)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.inkTertiary)
+                    }
+                    .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(dialContext.dayCardTitle)
-                .accessibilityHint(dialContext == .sleep ? "shows gym days" : "shows sleep schedule")
+                .accessibilityHint(dialContext == .sleep ? "shows gym days" : "shows alarm repeat")
 
                 Spacer(minLength: 8)
 
