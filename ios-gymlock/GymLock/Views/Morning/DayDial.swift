@@ -63,13 +63,50 @@ enum DayDialModel {
 
     /// Converts a touch point to a minute-of-day, snapped to five minutes.
     static func minutes(at point: CGPoint, centre: CGPoint) -> Int {
+        snapped(rawMinutes(at: point, centre: centre))
+    }
+
+    /// The unsnapped minute-of-day under a touch point, 0..<1440.
+    static func rawMinutes(at point: CGPoint, centre: CGPoint) -> Double {
         let dx = point.x - centre.x
         let dy = point.y - centre.y
         var degrees = atan2(dy, dx) * 180 / .pi + 90
         if degrees < 0 { degrees += 360 }
+        if degrees >= 360 { degrees -= 360 }
+        return degrees / 360 * 1440
+    }
 
-        let raw = degrees / 360 * 1440
-        return snapped(raw)
+    /// Follows a finger around the ring one update at a time.
+    ///
+    /// Each update only ever moves a few degrees, so the shortest way round
+    /// between two consecutive readings is always the real direction. Adding
+    /// those small steps up gives a signed travel that keeps counting past
+    /// midnight, past half a day and past a full turn, without the flip a
+    /// single "start to now" measurement suffers once it passes 12 hours.
+    struct DragTracker: Equatable {
+        private(set) var lastMinutes: Double
+        private(set) var travelled: Double = 0
+
+        init(startingAt minutes: Double) {
+            lastMinutes = minutes
+        }
+
+        /// Feeds the next finger reading and returns the travel so far,
+        /// snapped to five minutes.
+        @discardableResult
+        mutating func advance(to minutes: Double) -> Int {
+            var step = (minutes - lastMinutes).truncatingRemainder(dividingBy: 1440)
+            if step > 720 { step -= 1440 }
+            if step <= -720 { step += 1440 }
+            travelled += step
+            lastMinutes = minutes
+            return delta
+        }
+
+        var delta: Int { Int((travelled / 5).rounded()) * 5 }
+
+        /// The five-minute mark currently under the finger.
+        var fingerMinutes: Int { DayDialModel.snapped(lastMinutes) }
     }
 
     /// Snaps to the five-minute grid, wrapping 23:58 back through midnight.
@@ -227,10 +264,8 @@ enum DayDialModel {
     /// from the alarm. `awakeSpan` is the stretch between getting up and going
     /// to bed, `gap` is alarm to gym, `session` is the length of the visit.
     ///
-    /// Nothing here moves anything. Each bar is clamped against where the
-    /// other one already is, so a drag that runs out of room stops — it never
-    /// pushes or tows the other bar. That independence is the point: the two
-    /// bars are two separate decisions.
+    /// These are the no-push limits. `applying` uses them as its earlier-side
+    /// stops and adds the forward-only push on top.
 
     /// The longest night allowed alongside this gym plan: the visit must
     /// still end a gap before the next bedtime.
@@ -363,6 +398,12 @@ enum DayDialModel {
         let overshoot: Int
         /// Whether a gym drag has the night pushed later.
         let pushesNight: Bool
+        /// How far the other bar has been pushed later during this gesture.
+        /// Feed it back into the next frame: it only ever grows, which is
+        /// what stops a reverse drag towing the other bar back.
+        var pushed: Int = 0
+        /// Whether the dragged bar is pressed against the bar it pushed.
+        var inContact: Bool = false
     }
 
     /// Wraps any minute count onto the clock.
@@ -373,13 +414,24 @@ enum DayDialModel {
     /// The meaning of every grab, as a pure function so it is testable.
     ///
     /// `base` is the rhythm when the finger went down; `delta` is how far the
-    /// finger has travelled since, in minutes. Each frame is applied from the
-    /// base, so the bar stays glued to the point it was picked up.
+    /// finger has travelled since, in minutes, unwrapped. Each frame is
+    /// applied from the base, so the bar stays glued to the point it was
+    /// picked up.
+    ///
+    /// One collision rule for every grab: moving later may push the bar
+    /// ahead of it later, keeping the minimum spacing; moving earlier never
+    /// pushes and never pulls. `pushed` is the gesture's push so far (from
+    /// the previous frame's `Applied.pushed`), measured in one unwrapped
+    /// timeline that starts at the base alarm. It never shrinks within a
+    /// gesture, so backing off leaves the pushed bar where it was. A chain
+    /// never wraps back onto the bar in your hand: where it would, the drag
+    /// stops and the overshoot rubber-bands instead.
     static func applying(
         _ grab: Grab,
         delta: Int,
         base: MorningRhythm,
-        current: MorningRhythm
+        current: MorningRhythm,
+        pushed: Int = 0
     ) -> Applied {
         let baseBed = base.bedtime.minutesFromMidnight
         let baseWake = base.wakeTime.minutesFromMidnight
@@ -391,6 +443,26 @@ enum DayDialModel {
         var next = current
         var overshoot = 0
         var pushesNight = false
+        var nowPushed = pushed
+        var inContact = false
+        let lead = minimumLeadMinutes
+        let tail = minimumGapMinutes
+        // The waking day can hold the lead, the visit and the travel, so a
+        // push can always be absorbed without breaking another rule.
+        let canPush = baseAwake - baseSession - tail >= lead
+
+        /// Records a push: `contact` is where the moving bar needs the other
+        /// bar to be. The other bar only ever moves later.
+        func push(contact: Int, ceiling: Int = .max) {
+            nowPushed = min(max(pushed, contact, 0), max(ceiling, pushed))
+            inContact = nowPushed > 0 && contact >= nowPushed
+        }
+
+        /// The night slid later by `shift`, bedtime and wake together.
+        func placeNight(shift: Int) {
+            next.bedtime = time(at: baseBed + shift + 1440)
+            next.wakeTime = time(at: baseWake + shift + 1440)
+        }
 
         // Both bars are written explicitly on every drag, even the one that is
         // not moving. Pinning the still bar is what guarantees it cannot drift
@@ -410,16 +482,6 @@ enum DayDialModel {
             )
         }
 
-        /// Writes a gym drag into the rhythm: the night slides by the push,
-        /// and the visit is placed relative to the (possibly moved) alarm.
-        func applyPush(_ push: GymPush) {
-            let newWake = baseWake + push.nightShift
-            next.bedtime = time(at: baseBed + push.nightShift + 1440)
-            next.wakeTime = time(at: newWake + 1440)
-            next.gymTime = time(at: newWake + push.gapMinutes)
-            pushesNight = push.nightShift != 0
-        }
-
         switch grab {
         case .bedtime:
             // Bedtime sets the length of the night; the alarm stays put, so
@@ -431,28 +493,37 @@ enum DayDialModel {
             next.bedtime = time(at: baseWake - sleep + 1440)
 
         case .wake:
-            // The alarm moves on its own. Later eats into the run-up to a gym
-            // time that is standing still, so it stops a few minutes short of
-            // the visit rather than shoving it along.
-            let shift = clampedWakeShift(delta, sleepMinutes: baseSleep, gapMinutes: baseGap)
+            // The alarm moves on its own. Earlier stops at the shortest night.
+            // Later closes on the visit and, once within the lead, pushes it
+            // later. The visit can go until its travel would reach bedtime,
+            // which belongs to the bar in your hand, so the chain stops there.
+            let gymRoom = max(baseAwake - baseSession - tail - baseGap, 0)
+            let earliest = min(minimumSleepMinutes - baseSleep, 0)
+            let latest = max(baseGap - lead + (canPush ? gymRoom : 0), 0)
+            let shift = min(max(delta, earliest), latest)
             overshoot = delta - shift
+            if canPush { push(contact: shift + lead - baseGap, ceiling: gymRoom) }
             next.wakeTime = time(at: baseWake + shift)
-            syncWindow(gap: baseGap - shift)
+            next.gymTime = time(at: baseGym + nowPushed)
+            syncWindow(gap: baseGap + nowPushed - shift)
 
         case .sleepBody:
-            // The whole night slides with its length intact. The gym visit
-            // does not come with it: the alarm closing on the visit stops the
-            // drag one way, bedtime closing on it stops the drag the other.
-            let shift = clampedNightShift(
-                delta,
-                awakeSpan: baseAwake,
-                gapMinutes: baseGap,
-                sessionMinutes: baseSession
-            )
+            // The whole night slides with its length intact. Later, the alarm
+            // closes on the visit and then pushes it along. Earlier, bedtime
+            // closes on the end of the visit (wherever it was pushed to) and
+            // stops there; it never tows the visit back.
+            var earliest = baseGap + baseSession + nowPushed + tail - baseAwake
+            if nowPushed == 0 { earliest = min(earliest, 0) }
+            var shift = max(delta, earliest)
+            if canPush {
+                push(contact: shift + lead - baseGap)
+            } else {
+                shift = min(shift, max(baseGap - lead, earliest))
+            }
             overshoot = delta - shift
-            next.bedtime = time(at: baseBed + shift + 1440)
-            next.wakeTime = time(at: baseWake + shift + 1440)
-            syncWindow(gap: baseGap - shift)
+            placeNight(shift: shift)
+            next.gymTime = time(at: baseGym + nowPushed)
+            syncWindow(gap: baseGap + nowPushed - shift)
 
         case .gymStart:
             // This end says where the visit begins; the far end stays put. So
@@ -472,29 +543,80 @@ enum DayDialModel {
 
         case .gymBody:
             // The whole visit slides anywhere in the day. Dragged into the
-            // night it pushes the night later, keeping its length.
-            let push = pushedGymBody(
-                desiredGap: baseGap + delta,
-                awakeSpan: baseAwake,
-                sessionMinutes: baseSession
-            )
-            overshoot = push.overshoot
-            applyPush(push)
-            syncWindow(gap: push.gapMinutes)
+            // night it pushes the night later, keeping its length. Earlier,
+            // it stops a lead after the alarm (wherever the alarm was pushed
+            // to) and leaves the night alone.
+            var earliest = nowPushed + lead - baseGap
+            if nowPushed == 0 { earliest = min(earliest, 0) }
+            var shift = max(delta, earliest)
+            if canPush {
+                push(contact: baseGap + shift + baseSession + tail - baseAwake)
+            } else {
+                shift = min(shift, max(baseAwake - baseSession - tail - baseGap, earliest))
+            }
+            overshoot = delta - shift
+            placeNight(shift: nowPushed)
+            next.gymTime = time(at: baseGym + shift)
+            pushesNight = nowPushed != 0
+            syncWindow(gap: baseGap + shift - nowPushed)
 
         case .gymEnd:
-            let push = pushedGymEnd(
-                desiredSession: baseSession + delta,
-                awakeSpan: baseAwake,
-                gapMinutes: baseGap
-            )
-            overshoot = push.overshoot
-            next.gymSessionMinutes = push.sessionMinutes
-            applyPush(push)
-            if push.nightShift != 0 { syncWindow(gap: push.gapMinutes) }
+            // Lengthens the visit from its end, its start fixed. Past the
+            // travel before bedtime the night slides later, until the alarm
+            // would reach the start of the visit. Shortening it again leaves
+            // the night where it was pushed.
+            let range = MorningRhythm.sessionRange
+            let maxShift = max(baseGap - lead, 0)
+            var session = min(max(baseSession + delta, range.lowerBound), range.upperBound)
+            session = min(session, max(baseAwake - baseGap - tail + maxShift, baseSession))
+            overshoot = baseSession + delta - session
+            push(contact: baseGap + session + tail - baseAwake, ceiling: maxShift)
+            next.gymSessionMinutes = session
+            placeNight(shift: nowPushed)
+            pushesNight = nowPushed != 0
+            if nowPushed != 0 { syncWindow(gap: baseGap - nowPushed) }
         }
 
-        return Applied(rhythm: next, overshoot: overshoot, pushesNight: pushesNight)
+        return Applied(
+            rhythm: next,
+            overshoot: overshoot,
+            pushesNight: pushesNight,
+            pushed: nowPushed,
+            inContact: inContact
+        )
+    }
+
+    // MARK: Clock highlight
+
+    /// The one spot on the clock face that lights up under a drag.
+    struct ClockIndicator: Equatable {
+        /// Minute of day on the five-minute grid, 0..<1440.
+        let minutes: Int
+        let isGym: Bool
+
+        /// The numbered hour to light, when the time sits exactly on one.
+        /// Only even hours carry numerals.
+        var hour: Int? { minutes % 120 == 0 ? minutes / 60 : nil }
+        /// The existing quarter-hour tick to light, when the time is on one.
+        var tickIndex: Int? { minutes % 15 == 0 ? minutes / 15 : nil }
+        /// A five-minute position between ticks: drawn as one small mark.
+        var markMinutes: Int? { minutes % 15 == 0 ? nil : minutes }
+    }
+
+    /// What the face should highlight: the moved end for an end grab, the
+    /// time under the finger for a body grab, nothing when nothing is held.
+    static func indicator(grab: Grab?, rhythm: MorningRhythm, fingerMinutes: Int) -> ClockIndicator? {
+        guard let grab else { return nil }
+        let raw: Int
+        switch grab {
+        case .bedtime: raw = rhythm.bedtime.minutesFromMidnight
+        case .wake: raw = rhythm.wakeTime.minutesFromMidnight
+        case .gymStart: raw = rhythm.gymByTime.minutesFromMidnight
+        case .gymEnd: raw = rhythm.gymByTime.minutesFromMidnight + rhythm.gymSessionMinutes
+        case .sleepBody, .gymBody: raw = fingerMinutes
+        }
+        let wrapped = ((raw % 1440) + 1440) % 1440
+        return ClockIndicator(minutes: snapped(Double(wrapped)), isGym: grab.isGym)
     }
 
     /// The note after a push, with the real times. 24-hour, as in FLOW.
@@ -735,7 +857,11 @@ struct DayDial: View {
     /// Where the finger and the values were when the grab began. Every frame
     /// is applied as a delta from here, so the bar stays glued to the finger
     /// at the point it was picked up.
-    @State private var grabFingerMinutes: Int = 0
+    @State private var tracker: DayDialModel.DragTracker?
+    /// How far this gesture has pushed the other bar later. Gesture-local:
+    /// reset on every new grab, never shrinks during one.
+    @State private var pushedMinutes = 0
+    @State private var isTouchingOther = false
     @State private var grabRhythm: MorningRhythm = .default
     @State private var lastTickKey: Int = -1
     @State private var didKnock = false
@@ -957,10 +1083,8 @@ struct DayDial: View {
                 let centre = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
                 let outer = metrics.tickOuterRadius
 
-                for tick in 0..<96 {
-                    let isHour = tick % 4 == 0
-                    let length: CGFloat = isHour ? metrics.majorTickLength : metrics.minorTickLength
-                    let angle = (Double(tick) / 96 * 360 - 90) * .pi / 180
+                func tickPath(minutes: Double, length: CGFloat) -> Path {
+                    let angle = (minutes / 1440 * 360 - 90) * .pi / 180
                     var path = Path()
                     path.move(to: CGPoint(
                         x: centre.x + (outer - length) * cos(angle),
@@ -970,10 +1094,27 @@ struct DayDial: View {
                         x: centre.x + outer * cos(angle),
                         y: centre.y + outer * sin(angle)
                     ))
+                    return path
+                }
+
+                for tick in 0..<96 {
+                    let isHour = tick % 4 == 0
+                    let isLit = indicator?.tickIndex == tick
+                    let length: CGFloat = isHour ? metrics.majorTickLength : metrics.minorTickLength
+                    let base = isHour ? Theme.inkTertiary.opacity(0.9) : Theme.border
                     context.stroke(
-                        path,
-                        with: .color(isHour ? Theme.inkTertiary.opacity(0.9) : Theme.border),
-                        style: StrokeStyle(lineWidth: isHour ? 1.5 : 1, lineCap: .round)
+                        tickPath(minutes: Double(tick) * 15, length: length),
+                        with: .color(isLit ? litColour : base),
+                        style: StrokeStyle(lineWidth: isLit ? 2 : (isHour ? 1.5 : 1), lineCap: .round)
+                    )
+                }
+
+                // Between ticks: one small temporary mark, tick-shaped.
+                if let mark = indicator?.markMinutes {
+                    context.stroke(
+                        tickPath(minutes: Double(mark), length: metrics.minorTickLength),
+                        with: .color(litColour),
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
                     )
                 }
             }
@@ -997,6 +1138,15 @@ struct DayDial: View {
         .allowsHitTesting(false)
     }
 
+    /// The single clock position lit by the drag in progress, if any.
+    private var indicator: DayDialModel.ClockIndicator? {
+        DayDialModel.indicator(grab: grab, rhythm: rhythm, fingerMinutes: tracker?.fingerMinutes ?? 0)
+    }
+
+    private var litColour: Color {
+        indicator?.isGym == true ? Theme.accent : Theme.ink
+    }
+
     /// Each numeral sits so its farthest corner is a fixed clearance inside
     /// the longest tick, measured in the font it is drawn in.
     private var hourNumbers: some View {
@@ -1011,7 +1161,7 @@ struct DayDial: View {
                 Text("\(hour)")
                     .font(.system(size: metrics.numeralFontSize(hour: hour), weight: isMajor ? .bold : .semibold))
                     .monospacedDigit()
-                    .foregroundStyle(isMajor ? Theme.ink : Theme.inkTertiary)
+                    .foregroundStyle(indicator?.hour == hour ? litColour : (isMajor ? Theme.ink : Theme.inkTertiary))
                     .offset(x: radius * cos(angle), y: radius * sin(angle))
             }
         }
@@ -1193,7 +1343,11 @@ struct DayDial: View {
                     // it picks up is exactly what it can see.
                     if introBegins != nil { cancelIntro() }
                     grab = picked
-                    grabFingerMinutes = DayDialModel.minutes(at: value.startLocation, centre: centre)
+                    tracker = DayDialModel.DragTracker(
+                        startingAt: DayDialModel.rawMinutes(at: value.startLocation, centre: centre)
+                    )
+                    pushedMinutes = 0
+                    isTouchingOther = false
                     grabRhythm = rhythm
                     didKnock = false
                     isPushingNight = false
@@ -1202,9 +1356,12 @@ struct DayDial: View {
                     onGrabChange?(picked)
                 }
 
-                guard let grab else { return }
-                let finger = DayDialModel.minutes(at: value.location, centre: centre)
-                apply(grab, delta: DayDialModel.wrappedDelta(from: grabFingerMinutes, to: finger))
+                guard let grab, var moved = tracker else { return }
+                // Travel is accumulated update by update, so it keeps its
+                // direction past midnight, past 12 hours and past a full turn.
+                let delta = moved.advance(to: DayDialModel.rawMinutes(at: value.location, centre: centre))
+                tracker = moved
+                apply(grab, delta: delta)
             }
             .onEnded { _ in
                 settle()
@@ -1218,8 +1375,21 @@ struct DayDial: View {
     }
 
     private func apply(_ grab: DayDialModel.Grab, delta: Int) {
-        let applied = DayDialModel.applying(grab, delta: delta, base: grabRhythm, current: rhythm)
+        let applied = DayDialModel.applying(
+            grab,
+            delta: delta,
+            base: grabRhythm,
+            current: rhythm,
+            pushed: pushedMinutes
+        )
         let overshoot = applied.overshoot
+
+        // A push starts the moment the dragged bar meets the other one and
+        // actually moves it. Once per contact: holding the push does not
+        // repeat it, backing off and pushing again does.
+        let startsPush = applied.pushed > pushedMinutes && !isTouchingOther
+        pushedMinutes = applied.pushed
+        isTouchingOther = applied.inContact
 
         if applied.rhythm != rhythm { rhythm = applied.rhythm }
         overshootMinutes = CGFloat(overshoot)
@@ -1227,12 +1397,13 @@ struct DayDial: View {
 
         // One tick per five-minute step of value, never per frame: a finger
         // pinned against a limit spins without changing anything and must not
-        // buzz.
+        // buzz. The push contact replaces the tick on the frame it happens.
         let key = valueKey(for: grab)
         if key != lastTickKey {
             lastTickKey = key
-            DialFeel.step()
+            if !startsPush { DialFeel.step() }
         }
+        if startsPush { DialFeel.contact() }
 
         // One knock the moment the limit is first reached, then silence until
         // the finger comes back inside and pushes again.
@@ -1262,6 +1433,9 @@ struct DayDial: View {
         grab = nil
         if released.isGym, isPushingNight { onNightPushed?(rhythm) }
         isPushingNight = false
+        tracker = nil
+        pushedMinutes = 0
+        isTouchingOther = false
         lastTickKey = -1
         didKnock = false
         onGrabChange?(nil)
@@ -1406,10 +1580,14 @@ struct DayDial: View {
     /// VoiceOver: every value is reachable without a drag.
     private func adjust(_ which: DayDialModel.Grab, byMinutes delta: Int) {
         grabRhythm = rhythm
+        pushedMinutes = 0
+        isTouchingOther = false
         withAnimation(settleAnimation) {
             apply(which, delta: delta)
             overshootMinutes = 0
         }
+        pushedMinutes = 0
+        isTouchingOther = false
         onSettle?()
     }
 }
@@ -1424,6 +1602,7 @@ private enum DialFeel {
     static func grab() {
         grabGenerator.impactOccurred(intensity: 0.9)
         stepGenerator.prepare()
+        contactGenerator.prepare()
         grabGenerator.prepare()
     }
 
@@ -1434,5 +1613,14 @@ private enum DialFeel {
 
     static func release() {
         grabGenerator.impactOccurred(intensity: 0.65)
+    }
+
+    /// The dragged bar meets the other one and starts pushing it: one light,
+    /// distinct tap, different in kind from the rigid detents.
+    private static let contactGenerator = UIImpactFeedbackGenerator(style: .light)
+
+    static func contact() {
+        contactGenerator.impactOccurred(intensity: 1)
+        contactGenerator.prepare()
     }
 }

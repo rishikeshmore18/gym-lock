@@ -700,13 +700,276 @@ struct DayDialTests {
     }
 
     /// The pure drag still honours the clamps, with the excess reported as
-    /// overshoot for the rubber-band.
+    /// overshoot for the rubber-band. The alarm now pushes the visit, so its
+    /// limit is the visit's travel meeting bedtime, not the visit itself.
     @Test func aDragPastALimitStopsAndReportsTheOvershoot() {
         let base = plan
-        let applied = DayDialModel.applying(.wake, delta: 300, base: base, current: base)
-        let allowed = 90 - DayDialModel.minimumLeadMinutes
+        let applied = DayDialModel.applying(.wake, delta: 1000, base: base, current: base)
+        let awake = 1440 - base.sleepMinutes
+        let allowed = awake - DayDialModel.minimumGapMinutes - 60 - DayDialModel.minimumLeadMinutes
         #expect(applied.rhythm.wakeTime == base.wakeTime.offset(byMinutes: allowed))
-        #expect(applied.overshoot == 300 - allowed)
+        #expect(applied.overshoot == 1000 - allowed)
+    }
+
+    // MARK: - Continuous tracking
+
+    private func ringPoint(minutes: Double, size: CGFloat) -> (point: CGPoint, centre: CGPoint) {
+        let m = DayDialModel.Metrics(size: size)
+        let centre = CGPoint(x: size / 2, y: size / 2)
+        let offset = DayDialModel.offset(minutes: minutes, radius: m.gutterRadius)
+        return (CGPoint(x: centre.x + offset.width, y: centre.y + offset.height), centre)
+    }
+
+    /// Feeds a finger path, given as unwrapped minutes, through real touch
+    /// points on a dial of `size`. Returns the delta after every update.
+    private func track(_ path: [Double], size: CGFloat) -> [Int] {
+        let first = ringPoint(minutes: path[0], size: size)
+        var tracker = DayDialModel.DragTracker(startingAt: DayDialModel.rawMinutes(at: first.point, centre: first.centre))
+        return path.dropFirst().map { minutes in
+            let p = ringPoint(minutes: minutes, size: size)
+            return tracker.advance(to: DayDialModel.rawMinutes(at: p.point, centre: p.centre))
+        }
+    }
+
+    /// The bug: past half a turn the old start-to-now reading flipped sign.
+    @Test(arguments: [260.0, 320.0, 430.0])
+    func aClockwiseDragPastTwelveHoursKeepsGoingForward(size: Double) {
+        let path = stride(from: 0.0, through: 900.0, by: 10).map { 1380 + $0 }
+        let deltas = track(path, size: CGFloat(size))
+        #expect(deltas.last == 900)
+        for (a, b) in zip(deltas, deltas.dropFirst()) { #expect(b > a) }
+        // What the old reading said at the same spot.
+        #expect(DayDialModel.wrappedDelta(from: 1380, to: (1380 + 900) % 1440) == -540)
+
+        let base = plan
+        let night = DayDialModel.applying(.sleepBody, delta: 900, base: base, current: base).rhythm
+        #expect(night.bedtime == base.bedtime.offset(byMinutes: 900))
+        #expect(night.sleepMinutes == base.sleepMinutes)
+        #expect(isValid(night))
+    }
+
+    @Test(arguments: [260.0, 320.0, 430.0])
+    func crossingMidnightReadsAsASmallStepBothWays(size: Double) {
+        #expect(track([1430, 1440, 1445], size: CGFloat(size)) == [10, 15])
+        #expect(track([10, 0, -5, -15], size: CGFloat(size)) == [-10, -15, -25])
+    }
+
+    @Test(arguments: [260.0, 320.0, 430.0])
+    func reversingAfterALongClockwiseDragFollowsTheFinger(size: Double) {
+        var path = Array(stride(from: 0.0, through: 800.0, by: 20))
+        path += stride(from: 790.0, through: 700.0, by: -10)
+        let deltas = track(path, size: CGFloat(size))
+        #expect(deltas[deltas.count - 11] == 800)
+        #expect(deltas.last == 700)
+        for (a, b) in zip(deltas.suffix(11), deltas.suffix(10)) { #expect(b < a) }
+    }
+
+    // MARK: - Push only, never pull
+
+    private func rhythm(bed: Int, wake: Int, gym: Int, session: Int = 60) -> MorningRhythm {
+        var r = MorningRhythm.default
+        r.bedtime = DayDialModel.time(at: bed)
+        r.wakeTime = DayDialModel.time(at: wake)
+        r.gymTime = DayDialModel.time(at: gym)
+        r.gymSessionMinutes = session
+        return r
+    }
+
+    /// Sleep, lead, visit and travel follow each other round the ring with
+    /// no overlap and every minimum kept.
+    private func isValid(_ r: MorningRhythm) -> Bool {
+        let bed = r.bedtime.minutesFromMidnight
+        let wake = r.wakeTime.minutesFromMidnight
+        let gym = r.gymByTime.minutesFromMidnight
+        let sleep = DayDialModel.clockwiseSpan(from: bed, to: wake)
+        let gap = DayDialModel.clockwiseSpan(from: wake, to: gym)
+        let after = DayDialModel.clockwiseSpan(from: (gym + r.gymSessionMinutes) % 1440, to: bed)
+        return sleep >= DayDialModel.minimumSleepMinutes
+            && gap >= DayDialModel.minimumLeadMinutes
+            && MorningRhythm.sessionRange.contains(r.gymSessionMinutes)
+            && after >= DayDialModel.minimumGapMinutes
+            && sleep + gap + r.gymSessionMinutes + after == 1440
+    }
+
+    /// Runs a gesture frame by frame, carrying the push the way the view does.
+    private func drag(_ grab: DayDialModel.Grab, _ deltas: [Int], base: MorningRhythm) -> [DayDialModel.Applied] {
+        var current = base
+        var pushed = 0
+        return deltas.map { delta in
+            let applied = DayDialModel.applying(grab, delta: delta, base: base, current: current, pushed: pushed)
+            current = applied.rhythm
+            pushed = applied.pushed
+            return applied
+        }
+    }
+
+    @Test func theAlarmPushesTheVisitOnlyOnceItIsWithinTheLead() {
+        let base = rhythm(bed: 23 * 60, wake: 7 * 60, gym: 7 * 60 + 30)
+        let frames = drag(.wake, [10, 20, 25], base: base)
+        #expect(frames[1].rhythm.wakeTime == TimeOfDay(hour: 7, minute: 20))
+        #expect(frames[1].rhythm.gymByTime == TimeOfDay(hour: 7, minute: 30))
+        #expect(frames[1].pushed == 0)
+        #expect(frames[2].rhythm.wakeTime == TimeOfDay(hour: 7, minute: 25))
+        #expect(frames[2].rhythm.gymByTime == TimeOfDay(hour: 7, minute: 35))
+        #expect(frames[2].inContact)
+        #expect(frames[2].rhythm.gymSessionMinutes == 60)
+        #expect(frames.allSatisfy { isValid($0.rhythm) })
+    }
+
+    @Test func backingOffAfterAPushLeavesTheVisitWhereItWasPushed() {
+        let base = rhythm(bed: 23 * 60, wake: 7 * 60, gym: 7 * 60 + 30)
+        let frames = drag(.wake, [10, 20, 25, 15, 10], base: base)
+        let last = frames[4]
+        #expect(last.rhythm.wakeTime == TimeOfDay(hour: 7, minute: 10))
+        #expect(last.rhythm.gymByTime == TimeOfDay(hour: 7, minute: 35))
+        #expect(!last.inContact)
+        #expect(last.overshoot == 0)
+
+        // The visit dragged back stops a lead after the alarm; the alarm
+        // stays put.
+        let back = drag(.gymBody, [-10, -20, -60], base: base).last!
+        #expect(back.rhythm.gymByTime == TimeOfDay(hour: 7, minute: 10))
+        #expect(back.rhythm.wakeTime == base.wakeTime)
+        #expect(back.overshoot == -40)
+    }
+
+    @Test func theVisitPushesTheNight() {
+        let base = plan
+        // Visit to 22:30, ending 23:30: bedtime needs to be at 00:00.
+        let frames = drag(.gymBody, [600, 840, 870], base: base)
+        let last = frames[2]
+        #expect(last.rhythm.gymByTime == TimeOfDay(hour: 22, minute: 30))
+        #expect(last.rhythm.bedtime == TimeOfDay(hour: 0, minute: 0))
+        #expect(last.rhythm.wakeTime == TimeOfDay(hour: 7, minute: 30))
+        #expect(last.rhythm.sleepMinutes == base.sleepMinutes)
+        #expect(last.pushesNight)
+        #expect(frames[0].pushed == 0)
+        #expect(frames.allSatisfy { isValid($0.rhythm) })
+
+        let longer = drag(.gymEnd, [60, 150], base: base).last!
+        #expect(isValid(longer.rhythm))
+        #expect(longer.rhythm.gymByTime == base.gymByTime)
+    }
+
+    @Test func backingOffAfterTheVisitPushedLeavesTheNightWhereItWasPushed() {
+        let base = plan
+        let frames = drag(.gymBody, [870, 700, 600], base: base)
+        let last = frames[2]
+        #expect(last.rhythm.gymByTime == TimeOfDay(hour: 18, minute: 0))
+        #expect(last.rhythm.bedtime == TimeOfDay(hour: 0, minute: 0))
+        #expect(last.pushesNight)
+        #expect(!last.inContact)
+
+        // Shortening a visit that pushed the night leaves the night too.
+        let tight = rhythm(bed: 23 * 60, wake: 7 * 60, gym: 20 * 60, session: 60)
+        let ends = drag(.gymEnd, [120, 60, 0], base: tight)
+        #expect(ends[0].rhythm.bedtime == TimeOfDay(hour: 23, minute: 30))
+        #expect(ends[2].rhythm.bedtime == TimeOfDay(hour: 23, minute: 30))
+        #expect(ends[2].rhythm.gymSessionMinutes == 60)
+        #expect(ends.allSatisfy { isValid($0.rhythm) })
+    }
+
+    /// Every grab, run through a long back-and-forth gesture, never leaves
+    /// an invalid plan behind.
+    @Test func everyGrabKeepsTheRequiredSeparation() {
+        let grabs: [DayDialModel.Grab] = [.bedtime, .wake, .sleepBody, .gymStart, .gymBody, .gymEnd]
+        let walk = [0, 30, 120, 400, 900, 1300, 1600, 700, 200, -100, -400, -900, 50, 1500, -1500]
+        for grab in grabs {
+        for base in [plan, rhythm(bed: 23 * 60, wake: 7 * 60, gym: 7 * 60 + 30), rhythm(bed: 1 * 60, wake: 9 * 60, gym: 17 * 60, session: 120)] {
+            for frame in drag(grab, walk, base: base) {
+                #expect(isValid(frame.rhythm))
+                if grab == .sleepBody || grab == .wake || grab == .bedtime {
+                    #expect(frame.rhythm.gymSessionMinutes == base.gymSessionMinutes)
+                }
+                if grab == .sleepBody || grab == .gymBody {
+                    #expect(frame.rhythm.sleepMinutes == base.sleepMinutes)
+                }
+            }
+        }
+        }
+    }
+
+    @Test func aChainedPushStillLeavesValidLengths() {
+        // A late visit lengthened into the night, then the alarm dragged up
+        // to it: every length stays within its rules.
+        let base = rhythm(bed: 23 * 60, wake: 7 * 60, gym: 21 * 60, session: 60)
+        let ends = drag(.gymEnd, [30, 90, 180, 400], base: base)
+        for frame in ends {
+            #expect(isValid(frame.rhythm))
+            #expect(frame.rhythm.sleepMinutes == base.sleepMinutes)
+        }
+        let pushed = ends.last!.rhythm
+        let alarm = drag(.wake, [200, 600, 900], base: pushed)
+        for frame in alarm { #expect(isValid(frame.rhythm)) }
+    }
+
+    @Test func aPushStopsAtTheBoundaryAndRubberBands() {
+        let base = rhythm(bed: 23 * 60, wake: 7 * 60, gym: 7 * 60 + 30)
+        let last = drag(.wake, [200, 600, 900, 1200], base: base).last!
+        // The visit's travel now ends exactly at bedtime, which belongs to the
+        // bar in hand, so the chain stops instead of wrapping round.
+        let end = last.rhythm.gymByTime.minutesFromMidnight + 60
+        #expect(DayDialModel.clockwiseSpan(from: end, to: last.rhythm.bedtime.minutesFromMidnight) == DayDialModel.minimumGapMinutes)
+        #expect(last.rhythm.bedtime == base.bedtime)
+        #expect(last.overshoot > 0)
+        #expect(isValid(last.rhythm))
+
+        // The visit's end, held past the alarm meeting its start.
+        let end2 = drag(.gymEnd, [400, 900], base: rhythm(bed: 23 * 60, wake: 7 * 60, gym: 20 * 60, session: 60)).last!
+        #expect(end2.overshoot > 0)
+        #expect(isValid(end2.rhythm))
+    }
+
+    @Test func everyGrabKeepsItsMeaning() {
+        let base = plan
+        let bed = DayDialModel.applying(.bedtime, delta: 30, base: base, current: base).rhythm
+        #expect(bed.bedtime == base.bedtime.offset(byMinutes: 30) && bed.wakeTime == base.wakeTime && bed.gymByTime == base.gymByTime)
+
+        let wake = DayDialModel.applying(.wake, delta: -30, base: base, current: base).rhythm
+        #expect(wake.wakeTime == base.wakeTime.offset(byMinutes: -30) && wake.bedtime == base.bedtime && wake.gymByTime == base.gymByTime)
+
+        let night = DayDialModel.applying(.sleepBody, delta: 20, base: base, current: base).rhythm
+        #expect(night.bedtime == base.bedtime.offset(byMinutes: 20) && night.wakeTime == base.wakeTime.offset(byMinutes: 20))
+
+        let start = DayDialModel.applying(.gymStart, delta: 15, base: base, current: base).rhythm
+        #expect(start.gymByTime == base.gymByTime.offset(byMinutes: 15) && start.gymSessionMinutes == 45)
+
+        let end = DayDialModel.applying(.gymEnd, delta: 30, base: base, current: base).rhythm
+        #expect(end.gymByTime == base.gymByTime && end.gymSessionMinutes == 90 && end.bedtime == base.bedtime)
+
+        let visit = DayDialModel.applying(.gymBody, delta: 120, base: base, current: base).rhythm
+        #expect(visit.gymByTime == base.gymByTime.offset(byMinutes: 120) && visit.gymSessionMinutes == 60 && visit.bedtime == base.bedtime)
+    }
+
+    // MARK: - Clock highlight
+
+    @Test func theHighlightLandsOnTheRightHourTickOrMark() {
+        for minutes in stride(from: 0, to: 1440, by: 5) {
+            var r = plan
+            r.wakeTime = DayDialModel.time(at: minutes)
+            let lit = DayDialModel.indicator(grab: .wake, rhythm: r, fingerMinutes: 0)!
+            #expect(lit.minutes == minutes)
+            #expect(!lit.isGym)
+            // Exactly one of: an existing tick, or one temporary mark.
+            #expect((lit.tickIndex == nil) != (lit.markMinutes == nil))
+            #expect(lit.hour == (minutes % 120 == 0 ? minutes / 60 : nil))
+            if let tick = lit.tickIndex { #expect(tick * 15 == minutes) }
+        }
+        var r = plan
+        r.gymTime = TimeOfDay(hour: 8, minute: 0)
+        let gym = DayDialModel.indicator(grab: .gymStart, rhythm: r, fingerMinutes: 0)!
+        #expect(gym.isGym && gym.hour == 8 && gym.tickIndex == 32)
+        let end = DayDialModel.indicator(grab: .gymEnd, rhythm: r, fingerMinutes: 0)!
+        #expect(end.minutes == 9 * 60 && end.hour == nil && end.tickIndex == 36)
+        // A body grab lights the time under the finger.
+        let body = DayDialModel.indicator(grab: .sleepBody, rhythm: r, fingerMinutes: 2 * 60 + 5)!
+        #expect(body.markMinutes == 125 && body.hour == nil)
+        let late = DayDialModel.indicator(grab: .bedtime, rhythm: r, fingerMinutes: 0)!
+        #expect(late.hour == 22 || late.minutes == 23 * 60)
+    }
+
+    @Test func theHighlightClearsOnRelease() {
+        #expect(DayDialModel.indicator(grab: nil, rhythm: plan, fingerMinutes: 120) == nil)
     }
 
     // MARK: - Bar width and the face
