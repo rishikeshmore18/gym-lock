@@ -1098,27 +1098,20 @@ struct DayDial: View {
                 }
 
                 for tick in 0..<96 {
+                    // The lit tick is drawn on its own above, so it can pop.
+                    if indicator?.tickIndex == tick { continue }
                     let isHour = tick % 4 == 0
-                    let isLit = indicator?.tickIndex == tick
                     let length: CGFloat = isHour ? metrics.majorTickLength : metrics.minorTickLength
-                    let base = isHour ? Theme.inkTertiary.opacity(0.9) : Theme.border
                     context.stroke(
                         tickPath(minutes: Double(tick) * 15, length: length),
-                        with: .color(isLit ? litColour : base),
-                        style: StrokeStyle(lineWidth: isLit ? 2 : (isHour ? 1.5 : 1), lineCap: .round)
-                    )
-                }
-
-                // Between ticks: one small temporary mark, tick-shaped.
-                if let mark = indicator?.markMinutes {
-                    context.stroke(
-                        tickPath(minutes: Double(mark), length: metrics.minorTickLength),
-                        with: .color(litColour),
-                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
+                        with: .color(isHour ? Theme.inkTertiary.opacity(0.9) : Theme.border),
+                        style: StrokeStyle(lineWidth: isHour ? 1.5 : 1, lineCap: .round)
                     )
                 }
             }
             .frame(width: faceRadius * 2, height: faceRadius * 2)
+
+            litTick
 
             hourNumbers
 
@@ -1147,6 +1140,38 @@ struct DayDial: View {
         indicator?.isGym == true ? Theme.accent : Theme.ink
     }
 
+    /// How the lit numeral and tick pop in as the time lands on them, and
+    /// how a held icon pops. A quick spring with a touch of overshoot, the
+    /// finger supplied the energy. Reduce Motion: no bounce, just the change.
+    private var popAnimation: Animation? {
+        reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.55)
+    }
+
+    /// The tick (or 5-minute mark) under the dragged time, drawn on its own
+    /// so it can pop: it springs in slightly longer and thicker each time
+    /// the time lands on it, in the colour of the bar being moved.
+    @ViewBuilder
+    private var litTick: some View {
+        if let lit = indicator {
+            let isHour = lit.minutes % 60 == 0
+            let isTick = lit.tickIndex != nil
+            let base: CGFloat = isTick && isHour ? metrics.majorTickLength : metrics.minorTickLength
+            let length = base * 1.6
+            Capsule()
+                .fill(litColour)
+                .frame(width: isTick ? 2.5 : 2, height: length)
+                .rotationEffect(.degrees(DayDialModel.angleDegrees(minutes: lit.minutes)))
+                .offset(DayDialModel.offset(minutes: lit.minutes, radius: metrics.tickOuterRadius - length / 2))
+                .id(lit.minutes)
+                .transition(
+                    reduceMotion
+                        ? .identity
+                        : .scale(scale: 0.4, anchor: .center).combined(with: .opacity)
+                )
+                .animation(popAnimation, value: lit.minutes)
+        }
+    }
+
     /// Each numeral sits so its farthest corner is a fixed clearance inside
     /// the longest tick, measured in the font it is drawn in.
     private var hourNumbers: some View {
@@ -1162,6 +1187,9 @@ struct DayDial: View {
                     .font(.system(size: metrics.numeralFontSize(hour: hour), weight: isMajor ? .bold : .semibold))
                     .monospacedDigit()
                     .foregroundStyle(indicator?.hour == hour ? litColour : (isMajor ? Theme.ink : Theme.inkTertiary))
+                    // Pops a little when the dragged time lands on its hour.
+                    .scaleEffect(indicator?.hour == hour ? 1.3 : 1)
+                    .animation(popAnimation, value: indicator?.hour == hour)
                     .offset(x: radius * cos(angle), y: radius * sin(angle))
             }
         }
@@ -1285,6 +1313,12 @@ struct DayDial: View {
         if grab == which { return true }
         if grab == .sleepBody { return which == .bedtime || which == .wake }
         if grab == .gymBody { return which == .gymStart || which == .gymEnd }
+        // The other bar, while the held one is pushing it along: it is
+        // moving with the finger too, so it pops with it.
+        if isTouchingOther {
+            if grab.isGym { return !which.isGym }
+            return which.isGym
+        }
         return false
     }
 

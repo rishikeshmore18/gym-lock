@@ -504,6 +504,10 @@ struct AlarmSettingsView: View {
                     .monospacedDigit()
                     .foregroundStyle(dialContext == .gym ? Theme.accent : Theme.ink)
                     .contentTransition(.numericText())
+                    // It changes with the arc, so it pops while one is held,
+                    // like the live time in the header.
+                    .scaleEffect(dialGrab != nil ? 1.06 : 1)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: dialGrab != nil)
             }
             .animation(.spring(response: 0.3, dampingFraction: 1), value: footerHeadline)
 
