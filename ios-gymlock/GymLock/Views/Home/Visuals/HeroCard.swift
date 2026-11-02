@@ -145,16 +145,18 @@ struct HeroCardView: View {
                     tint: Theme.accent,
                     metrics: metrics
                 )
-            case .verified(let step, let total, _):
-                RingHero(
+            case .verified:
+                // A finished workout deserves the same photographic language as
+                // the other hero states. The Path card already shows step progress,
+                // so the completed hero can focus on the achievement itself.
+                ImageHero(
+                    imageName: "HeroSummit",
                     eyebrow: "WORKOUT VERIFIED",
                     headline: ["Done."],
                     support: "You showed up today.",
-                    progress: Double(step) / Double(total),
-                    ringIcon: "checkmark",
-                    ringValue: "done",
-                    tint: Theme.ink,
-                    metrics: metrics
+                    metrics: metrics,
+                    showsCTA: false,
+                    onCTA: nil
                 )
             case .missed:
                 ImageHero(
