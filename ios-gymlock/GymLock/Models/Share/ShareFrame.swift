@@ -43,7 +43,7 @@ nonisolated enum ShareFrame: String, CaseIterable, Hashable, Identifiable, Codab
         case .momentum: "weeks you kept."
         case .journey: "how far it has been."
         case .milestone: "a number worth saying."
-        case .quickSave: "the day a quick 20 saved."
+        case .quickSave: "the day a quick 25 saved."
         case .comeback: "back after a miss."
         }
     }

@@ -190,7 +190,7 @@ private struct FixtureCanvas: View {
     FixtureCanvas(context: StoryFixtures.context(comeback: StoryFixtures.comeback), frame: .comeback)
 }
 #Preview("11 · The Save") {
-    FixtureCanvas(context: StoryFixtures.context(outcome: .homeWorkout, minutes: 20, receipt: nil), frame: .quickSave)
+    FixtureCanvas(context: StoryFixtures.context(outcome: .homeWorkout, minutes: 25, receipt: nil), frame: .quickSave)
 }
 #Preview("12 · Milestone 10 visits") {
     FixtureCanvas(context: StoryFixtures.context(milestone: Milestone(kind: .verifiedVisits(10))), frame: .milestone)

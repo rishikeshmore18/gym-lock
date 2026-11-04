@@ -9,7 +9,7 @@ enum SessionOutcomeKind: String, Codable, Hashable {
     /// Arrived at the gym. On its own this is a gym visit and does not count;
     /// it counts once the workout is done (`SessionOutcome.proof`).
     case showedUp
-    /// The 20-minute workout at home. Counts once Apple Health confirms it or
+    /// The 25-minute workout at home. Counts once Apple Health confirms it or
     /// a camera progress photo lands (`SessionOutcome.proof`); records saved
     /// before the check existed decode as `legacy` and keep counting.
     case homeWorkout

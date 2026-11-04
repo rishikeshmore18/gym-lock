@@ -149,7 +149,7 @@ enum ShareFrameAvailability {
         case .quickSave:
             guard !history.hasHomeWorkout else { return nil }
             return FrameLock(
-                requirement: "appears when a quick 20 saves your day",
+                requirement: "appears when a quick 25 saves your day",
                 progress: nil,
                 closeness: 0
             )

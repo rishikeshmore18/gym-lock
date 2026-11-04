@@ -330,9 +330,9 @@ struct SkipRulesTests {
 
     // MARK: - Home workout
 
-    @Test func homeWorkoutOptionsAreTwentyAndThirty() {
-        #expect(HomeWorkoutRules.options == [20, 30])
-        #expect(HomeWorkoutRules.defaultMinutes == 20)
+    @Test func homeWorkoutOptionsAreTwentyFiveAndThirty() {
+        #expect(HomeWorkoutRules.options == [25, 30])
+        #expect(HomeWorkoutRules.defaultMinutes == 25)
     }
 
     @Test func theFourthHomeWorkoutInAMonthIsGreyed() {

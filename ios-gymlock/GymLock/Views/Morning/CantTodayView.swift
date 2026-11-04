@@ -88,7 +88,7 @@ struct CantTodayView: View {
 
                 case .homeWorkout:
                     MorningChoiceRow(
-                        title: "home workout, 20 min",
+                        title: "home workout, 25 min",
                         subtitle: "counts with apple health or a photo",
                         systemImage: "house.fill"
                     ) {

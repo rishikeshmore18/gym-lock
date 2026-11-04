@@ -12,7 +12,7 @@ struct QuickWorkoutView: View {
     let onStart: (Int) -> Void
     let onBack: () -> Void
 
-    /// 20 is the default (FLOW, Flow 4); the 15-minute option is gone.
+    /// 25 is the default (FLOW, Flow 4); the 15-minute option is gone.
     private static let options = HomeWorkoutRules.options
     private static let recommended = HomeWorkoutRules.defaultMinutes
 
@@ -216,7 +216,7 @@ struct QuickWorkoutActiveView: View {
 
     @State private var isConfirmingEnd = false
 
-    private var totalMinutes: Int { session.quickWorkoutMinutes ?? 20 }
+    private var totalMinutes: Int { session.quickWorkoutMinutes ?? HomeWorkoutRules.defaultMinutes }
 
     var body: some View {
         ZStack {

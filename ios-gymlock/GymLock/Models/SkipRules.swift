@@ -240,13 +240,13 @@ nonisolated enum ReschedulePlanner {
 
 // MARK: - Home workout
 
-/// The home workout rules (FLOW, Flow 4): 20 or 30 minutes, at most 3 counted
+/// The home workout rules (FLOW, Flow 4): 25 or 30 minutes, at most 3 counted
 /// a calendar month, and it only counts once Apple Health confirms it or a
 /// camera progress photo lands.
 nonisolated enum HomeWorkoutRules {
     static let monthlyLimit = 3
-    static let options = [20, 30]
-    static let defaultMinutes = 20
+    static let options = [25, 30]
+    static let defaultMinutes = 25
     static let capMessage = "3 of 3 home workouts used. back on the 1st."
     static let notFoundMessage = "no workout in Apple Health? add a progress photo to count it."
 

@@ -121,7 +121,7 @@ struct StillGettingReadyView: View {
             }
 
             MorningChoiceRow(
-                title: "20-min workout at home",
+                title: "25-min workout at home",
                 subtitle: "keep today's momentum",
                 systemImage: "house.fill"
             ) {

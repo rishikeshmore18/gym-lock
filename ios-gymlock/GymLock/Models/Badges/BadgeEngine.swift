@@ -87,7 +87,7 @@ struct BadgeFacts: Hashable {
     var currentStreak = 0
     /// Distinct days with a counted workout, oldest first.
     var workoutDays: [Date] = []
-    /// Days with a counted home workout (Quick 20).
+    /// Days with a counted home workout (Quick 25).
     var homeWorkoutDays: Set<Date> = []
     /// The counting day of every verified gym workout, oldest first.
     var gymWorkoutDays: [Date] = []

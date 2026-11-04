@@ -15,7 +15,7 @@ import Foundation
 enum ProgressDayStatus: String, Hashable, Codable {
     /// Confirmed arrival at the gym.
     case gymVerified
-    /// The 20-minute home fallback. Keeps the commitment; is not a gym visit.
+    /// The 25-minute home fallback. Keeps the commitment; is not a gym visit.
     case quickWorkoutVerified
     /// A session came due and was recorded as missed.
     case missed
@@ -60,7 +60,7 @@ struct ProgressDay: Identifiable, Hashable {
         let day = date.formatted(.dateTime.weekday(.wide).month(.wide).day())
         switch status {
         case .gymVerified: return "\(day). Verified gym session."
-        case .quickWorkoutVerified: return "\(day). Verified 20-minute workout."
+        case .quickWorkoutVerified: return "\(day). Verified 25-minute workout."
         case .missed: return "\(day). Planned session missed."
         case .excused: return "\(day). Planned session set aside."
         case .unresolved: return "\(day). Planned, nothing recorded."
@@ -241,7 +241,7 @@ struct ProgressWeekSummary: Identifiable, Hashable, ProgressPeriodPresentation {
 
         var parts: [String] = []
         if tally.verifiedGym > 0 { parts.append("\(tally.verifiedGym) gym") }
-        if tally.quickWorkout > 0 { parts.append("\(tally.quickWorkout) quick 20") }
+        if tally.quickWorkout > 0 { parts.append("\(tally.quickWorkout) quick 25") }
         if tally.missed > 0 { parts.append("\(tally.missed) missed") }
 
         guard !parts.isEmpty else {

@@ -442,7 +442,7 @@ extension GymSessionCoordinator {
 
         case .quickWorkoutComplete:
             if session == nil { simulate(.alarmFired) }
-            startQuickWorkout(minutes: 20)
+            startQuickWorkout(minutes: HomeWorkoutRules.defaultMinutes)
             finishQuickWorkout(completed: true)
 
         // MARK: The three doors
@@ -1012,10 +1012,10 @@ extension GymSessionCoordinator {
             simulate(.alarmFired)
             beginCantToday()
             resolveCantToday(.homeWorkout)
-            startQuickWorkout(minutes: 20)
+            startQuickWorkout(minutes: HomeWorkoutRules.defaultMinutes)
             if var current = session {
-                current.quickWorkoutStartedAt = Date().addingTimeInterval(-25 * 60)
-                current.quickWorkoutDeadline = current.quickWorkoutStartedAt.map { $0.addingTimeInterval(20 * 60) }
+                current.quickWorkoutStartedAt = Date().addingTimeInterval(-30 * 60)
+                current.quickWorkoutDeadline = current.quickWorkoutStartedAt.map { $0.addingTimeInterval(TimeInterval(HomeWorkoutRules.defaultMinutes * 60)) }
                 debugReplace(current)
             }
             finishQuickWorkout(completed: true)

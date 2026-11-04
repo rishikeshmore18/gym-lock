@@ -11,7 +11,7 @@ import SwiftUI
 enum ProgressPalette {
     /// Verified gym visit. The strongest mark on the page.
     static let gym = Theme.ink
-    /// The 20-minute home fallback. Never black — it kept the commitment, but
+    /// The 25-minute home fallback. Never black — it kept the commitment, but
     /// it was not a trip to the gym.
     static let quick = Color(red: 1.0, green: 0.451, blue: 0.0)
     /// A recorded miss. Stated as a fact, in the quietest grey that still reads.
@@ -167,12 +167,12 @@ struct ProgressLegend: View {
     var body: some View {
         HStack(spacing: 0) {
             item(.gym, "Gym")
-            item(.quick, "Quick 20")
+            item(.quick, "Quick 25")
             item(.ghost, "Planned")
             item(.missed, "Missed")
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Legend. Black is a gym session, orange is a 20-minute workout, outlined is planned, grey is missed.")
+        .accessibilityLabel("Legend. Black is a gym session, orange is a 25-minute workout, outlined is planned, grey is missed.")
     }
 
     private func item(_ kind: ProgressLayerKind, _ label: String) -> some View {
