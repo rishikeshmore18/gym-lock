@@ -349,9 +349,9 @@ enum HomeCardDeriver {
     private static func nextDuringSession(_ session: GymSession, store: AppStore) -> NextCard {
         switch session.state {
         case .alarmFired, .awaitingDecision, .snoozed, .activationMission, .preparing, .quickWorkoutOffered, .quickWorkoutActive:
-            let leave = session.leaveMoment.map { Date.formattedClock($0) }
-                ?? store.plan.rhythm.leaveTime.displayString
-            return NextCard(eyebrow: "LEAVE", value: leave, detail: nil, showsArrow: true)
+            let gymBy = (session.deadline ?? session.arrivalTarget).map { Date.formattedClock($0) }
+                ?? store.plan.rhythm.gymByTime.displayString
+            return NextCard(eyebrow: "GYM BY", value: gymBy, detail: nil, showsArrow: true)
         case .departed, .approachingGym:
             return NextCard(eyebrow: "NEXT", value: "Gym", detail: nil, showsArrow: true)
         case .arrived:

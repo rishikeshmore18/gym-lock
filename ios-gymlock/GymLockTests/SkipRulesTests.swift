@@ -32,8 +32,7 @@ struct SkipRulesTests {
         plan.rhythm.bedtime = TimeOfDay(hour: 23, minute: 0)
         plan.rhythm.wakeTime = TimeOfDay(hour: 6, minute: 30)
         plan.rhythm.gymTime = TimeOfDay(hour: 7, minute: 30)
-        plan.rhythm.getReadyMinutes = 10
-        plan.rhythm.travelMinutes = 20
+        plan.rhythm.timeToGymMinutes = 30
         plan.rhythm.hasBeenSet = true
         plan.pendingBedtime = nil
         plan.slots = [AlarmSlot(days: days, alarmTime: plan.rhythm.lockAlarmTime)]
@@ -215,6 +214,9 @@ struct SkipRulesTests {
 
     @Test func theVisitMustFitBeforeBedtime() {
         var plan = makePlan(days: [.monday, .wednesday, .friday])
+        // Wake & Go's window is the gap, so place the gym 30 minutes after
+        // the alarm to make Time to Gym 30.
+        plan.rhythm.gymTime = TimeOfDay(hour: 7, minute: 0)
         // 30 minute window + 60 minute visit: 22:00 rings, 22:30 to 23:30
         // runs into the 23:00 bedtime.
         #expect(!ReschedulePlanner.isTimeAvailable(

@@ -162,42 +162,32 @@ struct SleepWakeRhythmView: View {
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(Theme.ink)
 
-            HStack(alignment: .top, spacing: 12) {
-                MinuteDial(
-                    title: "get ready",
-                    subtitle: "time to get yourself out the door",
-                    systemImage: "tshirt.fill",
-                    minutes: $rhythm.getReadyMinutes,
-                    range: MorningRhythm.getReadyRange
-                )
+            MinuteDial(
+                title: "time to gym",
+                subtitle: "including getting ready and traveling.",
+                systemImage: "figure.walk.departure",
+                minutes: timeToGym,
+                range: MorningRhythm.timeToGymRange
+            )
 
-                MinuteDial(
-                    title: "travel",
-                    subtitle: "time to get to the gym",
-                    systemImage: "car.fill",
-                    minutes: $rhythm.travelMinutes,
-                    range: MorningRhythm.travelRange
-                )
-            }
-
-            // The presets sit full width rather than under each dial: seven
-            // chips in half a screen would be smaller than a fingertip.
-            VStack(spacing: 8) {
-                PresetChips(
-                    label: "get ready",
-                    values: MorningRhythm.getReadyPresets,
-                    selection: $rhythm.getReadyMinutes
-                )
-                PresetChips(
-                    label: "travel",
-                    values: MorningRhythm.travelPresets,
-                    selection: $rhythm.travelMinutes
-                )
-            }
+            PresetChips(
+                label: "presets",
+                values: MorningRhythm.timeToGymPresets,
+                selection: timeToGym
+            )
         }
     }
 
-    /// The payoff: the whole morning as three times in a row.
+    /// Time to Gym, written through the rhythm's own rule so the gym time
+    /// follows in Wake & Go and stays put in Go Later.
+    private var timeToGym: Binding<Int> {
+        Binding(
+            get: { rhythm.currentTimeToGymMinutes },
+            set: { rhythm.setTimeToGym($0) }
+        )
+    }
+
+    /// The payoff: the whole morning as two times in a row.
     private var windowSummary: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 8) {
@@ -231,8 +221,6 @@ struct SleepWakeRhythmView: View {
 
             HStack(spacing: 0) {
                 milestone(time: rhythm.wakeTime, label: "wake", isEmphasised: false)
-                milestoneArrow
-                milestone(time: rhythm.leaveTime, label: "leave", isEmphasised: false)
                 milestoneArrow
                 milestone(time: rhythm.gymByTime, label: "gym", isEmphasised: true)
             }

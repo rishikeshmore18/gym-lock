@@ -20,13 +20,12 @@ struct AlarmRulesTests {
 
     private func t(_ hour: Int, _ minute: Int = 0) -> TimeOfDay { TimeOfDay(hour: hour, minute: minute) }
 
-    private func rhythm(wake: TimeOfDay, gym: TimeOfDay?, getReady: Int = 20, travel: Int = 15) -> MorningRhythm {
+    private func rhythm(wake: TimeOfDay, gym: TimeOfDay?, timeToGym: Int = 35) -> MorningRhythm {
         var rhythm = MorningRhythm.default
         rhythm.bedtime = t(23)
         rhythm.wakeTime = wake
         rhythm.gymTime = gym
-        rhythm.getReadyMinutes = getReady
-        rhythm.travelMinutes = travel
+        rhythm.timeToGymMinutes = timeToGym
         rhythm.hasBeenSet = true
         return rhythm
     }
@@ -40,10 +39,10 @@ struct AlarmRulesTests {
         return plan
     }
 
-    /// Flow 1: wake 06:30, 20 + 15 min, gym by 07:05.
+    /// Flow 1: wake 06:30, 35 min to the gym, gym by 07:05.
     private var wakeAndGo: MorningRhythm { rhythm(wake: t(6, 30), gym: nil) }
-    /// Flow 2: wake 07:00, gym 18:00, 10 + 20 min.
-    private var goLater: MorningRhythm { rhythm(wake: t(7), gym: t(18), getReady: 10, travel: 20) }
+    /// Flow 2: wake 07:00, gym 18:00, 30 min to the gym.
+    private var goLater: MorningRhythm { rhythm(wake: t(7), gym: t(18), timeToGym: 30) }
 
     // MARK: - Step 0
 
@@ -310,8 +309,7 @@ struct AlarmRulesTests {
             slotID: UUID(),
             alarmTime: TimeOfDay(from: rang),
             isMorningSession: true,
-            getReadyMinutes: rhythm.getReadyMinutes,
-            travelMinutes: rhythm.travelMinutes
+            timeToGymMinutes: rhythm.windowMinutes
         )
         session.alarmFiredAt = rang
         session.flowMode = rhythm.flowMode

@@ -147,8 +147,17 @@ struct GymSession: Codable, Hashable, Identifiable {
 
     var alarmTime: TimeOfDay
     var isMorningSession: Bool
-    var getReadyMinutes: Int
-    var travelMinutes: Int
+    /// Time to Gym captured when the alarm rang. Optional so sessions saved
+    /// before it existed decode; read through `timeToGymMinutes`.
+    private var timeToGym: Int?
+    /// Written by older builds. Read only, to rebuild `timeToGymMinutes`.
+    private var getReadyMinutes: Int?
+    private var travelMinutes: Int?
+    /// When the user is due at the gym: the scheduled ring plus Time to Gym.
+    /// Fixed when the alarm rings, so a snooze or a slow mission never moves
+    /// it. Moved only by running late. Nil on older sessions, which fall back
+    /// to counting the window from the commit.
+    var arrivalTarget: Date?
 
     var state: GymSessionState
 
@@ -274,8 +283,8 @@ struct GymSession: Codable, Hashable, Identifiable {
         slotID: UUID?,
         alarmTime: TimeOfDay,
         isMorningSession: Bool,
-        getReadyMinutes: Int,
-        travelMinutes: Int,
+        timeToGymMinutes: Int,
+        arrivalTarget: Date? = nil,
         state: GymSessionState = .alarmFired
     ) {
         self.id = id
@@ -283,8 +292,10 @@ struct GymSession: Codable, Hashable, Identifiable {
         self.slotID = slotID
         self.alarmTime = alarmTime
         self.isMorningSession = isMorningSession
-        self.getReadyMinutes = getReadyMinutes
-        self.travelMinutes = travelMinutes
+        timeToGym = timeToGymMinutes
+        getReadyMinutes = nil
+        travelMinutes = nil
+        self.arrivalTarget = arrivalTarget
         self.state = state
         alarmFiredAt = nil
         committedAt = nil
@@ -316,9 +327,15 @@ struct GymSession: Codable, Hashable, Identifiable {
 
     // MARK: Derived
 
+    /// Time to Gym for this session. Older sessions add their get ready and
+    /// travel minutes.
+    var timeToGymMinutes: Int {
+        timeToGym ?? ((getReadyMinutes ?? 0) + (travelMinutes ?? 0))
+    }
+
     /// Total window in minutes, including any extension already granted.
     var windowMinutes: Int {
-        getReadyMinutes + travelMinutes + extensionMinutesUsed
+        timeToGymMinutes + extensionMinutesUsed
     }
 
     var canExtend: Bool { extensionMinutesUsed == 0 }
@@ -365,20 +382,13 @@ struct GymSession: Codable, Hashable, Identifiable {
         return Date() >= deadline
     }
 
-    /// The moment the user should be leaving, used by the timeline rail.
-    var leaveMoment: Date? {
-        guard let committedAt else { return nil }
-        return committedAt.addingTimeInterval(Double(getReadyMinutes) * 60)
-    }
-
-    /// Which stage of get-ready → leave → arrive the user is in.
-    func stage(at now: Date = Date()) -> PreparationStage {
-        if departedAt != nil { return .arrive }
-        guard let committedAt else { return .getReady }
-        let elapsed = now.timeIntervalSince(committedAt) / 60
-        if elapsed < Double(getReadyMinutes) { return .getReady }
-        if elapsed < Double(getReadyMinutes + travelMinutes) { return .leave }
-        return .arrive
+    /// When the countdown ends once the user commits: the scheduled arrival
+    /// target, never pushed back by a snooze or a slow mission. If that has
+    /// already passed, the window is over and the usual expired flow (and
+    /// its one grace period) takes it from there. Sessions without a target
+    /// count the full window from the commit, as they always did.
+    func preparationDeadline(committedAt now: Date) -> Date {
+        arrivalTarget ?? now.addingTimeInterval(Double(windowMinutes) * 60)
     }
 
     var mirrorPhrase: String {
@@ -408,27 +418,3 @@ struct GymSession: Codable, Hashable, Identifiable {
     }
 }
 
-/// The three beats of the window, shown as a rail under the countdown.
-enum PreparationStage: Int, CaseIterable, Identifiable {
-    case getReady
-    case leave
-    case arrive
-
-    var id: Int { rawValue }
-
-    var label: String {
-        switch self {
-        case .getReady: "get ready"
-        case .leave: "leave"
-        case .arrive: "arrive"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .getReady: "figure.walk"
-        case .leave: "figure.walk.departure"
-        case .arrive: "mappin.and.ellipse"
-        }
-    }
-}

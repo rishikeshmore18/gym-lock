@@ -36,7 +36,7 @@ struct GymWindowView: View {
     private func content(at now: Date) -> some View {
         let remaining = session.remaining(at: now)
         let fraction = 1 - session.elapsedFraction(at: now)
-        let stage = session.stage(at: now)
+        let gymBy = session.deadline.map { TimeOfDay(from: $0).displayString }
         let hasLeft = session.departedAt != nil
 
         ScrollView {
@@ -47,10 +47,10 @@ struct GymWindowView: View {
                     CountdownRing(remainingFraction: fraction, size: 268)
 
                     VStack(spacing: 2) {
-                        Image(systemName: "dumbbell.fill")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(Theme.accent)
-                            .padding(.bottom, 6)
+                        Text("get to your gym")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.inkSecondary)
+                            .padding(.bottom, 4)
 
                         Text(Self.clock(remaining))
                             .font(.system(size: 56, weight: .bold))
@@ -58,20 +58,20 @@ struct GymWindowView: View {
                             .foregroundStyle(Theme.accent)
                             .contentTransition(.numericText(countsDown: true))
 
-                        Text("time remaining")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Theme.inkSecondary)
+                        if let gymBy {
+                            Text("at gym by \(gymBy)")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.inkSecondary)
+                        }
                     }
                 }
                 .frame(height: 286)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Time remaining")
-                .accessibilityValue(Self.spokenClock(remaining))
-
-                PreparationRail(
-                    current: stage,
-                    getReadyMinutes: session.getReadyMinutes,
-                    travelMinutes: session.travelMinutes
+                .accessibilityLabel("Get to your gym")
+                .accessibilityValue(
+                    [Self.spokenClock(remaining) + " left", gymBy.map { "at gym by \($0)" }]
+                        .compactMap { $0 }
+                        .joined(separator: ", ")
                 )
 
                 if !hasLeft {

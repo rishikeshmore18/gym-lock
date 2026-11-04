@@ -471,15 +471,16 @@ enum DayDialModel {
         // is touched.
         next.gymTime = time(at: baseGym)
 
-        /// In Wake & Go the lock window follows the gap the user drew (get
-        /// ready plus travel). In Go Later (gap over 2 hours) get ready and
-        /// travel are the user's own numbers, so the gap leaves them alone.
+        /// In Wake & Go Time to Gym is the gap the user drew. In Go Later (gap
+        /// over 2 hours) it is the user's own number, so it goes back to what
+        /// it was before this drag: crossing the boundary never leaves the
+        /// 120 the gap passed through behind.
         func syncWindow(gap: Int) {
-            guard gap <= MorningRhythm.absoluteMaximumWindow else { return }
-            next.travelMinutes = travelMinutes(
-                gapMinutes: gap,
-                getReadyMinutes: base.getReadyMinutes
-            )
+            if gap <= MorningRhythm.absoluteMaximumWindow {
+                next.timeToGymMinutes = MorningRhythm.normalizedTimeToGym(gap)
+            } else {
+                next.timeToGymMinutes = base.timeToGymMinutes
+            }
         }
 
         switch grab {
@@ -622,22 +623,6 @@ enum DayDialModel {
     /// The note after a push, with the real times. 24-hour, as in FLOW.
     static func pushMessage(bedtime: TimeOfDay, wake: TimeOfDay) -> String {
         "moved your sleep to \(bedtime.clockString)–\(wake.clockString) so it starts after the gym."
-    }
-
-    /// Travel minutes implied by the gap the user has drawn.
-    ///
-    /// The bar can be placed anywhere in the day, but the *lock* is still a
-    /// run-up: it never holds apps for longer than the product allows, and
-    /// `ShieldPolicy` caps it again on the way out. So the window follows the
-    /// gap up to that ceiling and then stops, which is why a visit at noon
-    /// does not mean a five-hour block.
-    static func travelMinutes(gapMinutes: Int, getReadyMinutes: Int) -> Int {
-        let ceiling = min(
-            MorningRhythm.travelRange.upperBound,
-            MorningRhythm.absoluteMaximumWindow - getReadyMinutes
-        )
-        let requested = gapMinutes - getReadyMinutes
-        return min(max(requested, MorningRhythm.travelRange.lowerBound), max(ceiling, 0))
     }
 
     /// Apple's rubber-band curve: progressive resistance at a boundary, so a

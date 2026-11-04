@@ -56,9 +56,19 @@ struct DayDialTests {
     /// window that actually blocks apps follows the gap only as far as the
     /// product ceiling and then stops.
     @Test func theLockWindowFollowsTheGapUpToItsCeiling() {
-        #expect(DayDialModel.travelMinutes(gapMinutes: 200, getReadyMinutes: 20) == 100)
-        #expect(DayDialModel.travelMinutes(gapMinutes: 5, getReadyMinutes: 20) == 0)
-        #expect(DayDialModel.travelMinutes(gapMinutes: 45, getReadyMinutes: 20) == 25)
+        var base = MorningRhythm.default
+        base.wakeTime = TimeOfDay(hour: 6, minute: 30)
+        base.gymTime = TimeOfDay(hour: 7, minute: 5)
+        base.timeToGymMinutes = 35
+        // Wake & Go: Time to Gym becomes the gap the user drew.
+        let near = DayDialModel.applying(.gymBody, delta: 10, base: base, current: base).rhythm
+        #expect(near.timeToGymMinutes == 45)
+        #expect(near.windowMinutes == 45)
+        // Past two hours it is Go Later and the window is the user's own
+        // number, never the gap.
+        let far = DayDialModel.applying(.gymBody, delta: 200, base: base, current: base).rhythm
+        #expect(far.flowMode == .goLater)
+        #expect(far.windowMinutes <= MorningRhythm.absoluteMaximumWindow)
     }
 
     /// One of the regressions: the gym bar hit an invisible wall two hours
@@ -104,10 +114,14 @@ struct DayDialTests {
     /// However far out the visit is placed, the lock window stays inside the
     /// product ceiling. A workout at noon must not mean a five-hour block.
     @Test func theLockNeverStretchesPastItsCeiling() {
-        for gap in stride(from: -120, through: 1440, by: 30) {
-            let travel = DayDialModel.travelMinutes(gapMinutes: gap, getReadyMinutes: 60)
-            #expect(MorningRhythm.travelRange.contains(travel))
-            #expect(60 + travel <= MorningRhythm.absoluteMaximumWindow)
+        var base = MorningRhythm.default
+        base.wakeTime = TimeOfDay(hour: 6, minute: 30)
+        base.gymTime = TimeOfDay(hour: 7, minute: 30)
+        base.timeToGymMinutes = 60
+        for delta in stride(from: -120, through: 900, by: 30) {
+            let next = DayDialModel.applying(.gymBody, delta: delta, base: base, current: base).rhythm
+            #expect(MorningRhythm.timeToGymRange.contains(next.timeToGymMinutes))
+            #expect(next.windowMinutes <= MorningRhythm.absoluteMaximumWindow)
         }
     }
 

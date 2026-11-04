@@ -44,8 +44,10 @@ enum SessionDaypart: String, Codable, Hashable, CaseIterable {
 struct MorningRhythm: Hashable {
     var bedtime: TimeOfDay
     var wakeTime: TimeOfDay
-    var getReadyMinutes: Int
-    var travelMinutes: Int
+    /// Time to Gym: one duration from the alarm to standing in the gym,
+    /// getting ready and traveling together. Always inside
+    /// `timeToGymRange` on a 5-minute step; edit it with `setTimeToGym`.
+    var timeToGymMinutes: Int
     /// How long the user plans to be at the gym once they arrive. Drawn as
     /// the coral bar on the day dial; nothing locks or unlocks on it.
     var gymSessionMinutes: Int = 60
@@ -85,28 +87,41 @@ struct MorningRhythm: Hashable {
     /// alarm read the long way round, and the plan needs repairing.
     static let maximumSaneGapMinutes = 12 * 60
 
-    static let getReadyRange = 5...60
-    /// Wide enough that get-ready plus travel can reach the absolute window
-    /// ceiling; the ceiling itself is enforced by `absoluteMaximumWindow`.
-    static let travelRange = 0...115
+    /// Every Time to Gym the user can pick: 10 min to 2 hours.
+    static let timeToGymRange = 10...120
+    static let timeToGymStep = 5
     /// A workout shorter than this is a warm-up; longer than this is a day out.
     static let sessionRange = 15...240
 
-    static let getReadyPresets = [10, 15, 20, 30, 45]
-    static let travelPresets = [5, 10, 15, 20, 30, 45, 60]
+    static let timeToGymPresets = [15, 30, 45, 60, 90]
 
     static let `default` = MorningRhythm(
         bedtime: TimeOfDay(hour: 23, minute: 0),
         wakeTime: TimeOfDay(hour: 6, minute: 30),
-        getReadyMinutes: 20,
-        travelMinutes: 15,
+        timeToGymMinutes: 35,
         hasBeenSet: false
     )
 
+    /// Clamps to `timeToGymRange` and snaps to the nearest 5 minutes.
+    static func normalizedTimeToGym(_ minutes: Int) -> Int {
+        let step = Double(timeToGymStep)
+        let snapped = Int((Double(minutes) / step).rounded()) * timeToGymStep
+        return min(max(snapped, timeToGymRange.lowerBound), timeToGymRange.upperBound)
+    }
+
     // MARK: Derived
 
-    /// Total minutes from the alarm going off to standing in the gym.
-    var windowMinutes: Int { getReadyMinutes + travelMinutes }
+    /// Total minutes from the lock alarm to standing in the gym.
+    ///
+    /// Wake & Go: the gap from the wake alarm to the placed gym time, so the
+    /// window always ends exactly when the user planned to be there. Go
+    /// Later: Time to Gym, counted back from the gym time.
+    var windowMinutes: Int {
+        guard gymTime != nil else { return timeToGymMinutes }
+        let gap = gapToGymMinutes
+        guard gap <= Self.absoluteMaximumWindow else { return timeToGymMinutes }
+        return min(max(gap, Self.timeToGymRange.lowerBound), Self.timeToGymRange.upperBound)
+    }
 
     /// Minutes of sleep, wrapping correctly across midnight.
     ///
@@ -119,12 +134,13 @@ struct MorningRhythm: Hashable {
     var sleepHoursPart: Int { sleepMinutes / 60 }
     var sleepMinutesPart: Int { sleepMinutes % 60 }
 
-    /// When the user should be walking out of the door.
-    var leaveTime: TimeOfDay { wakeTime.offset(byMinutes: getReadyMinutes) }
+    /// Time to Gym as the plan runs it today, on the 5-minute grid: the gap
+    /// in Wake & Go, the stored duration in Go Later. What every screen shows.
+    var currentTimeToGymMinutes: Int { Self.normalizedTimeToGym(windowMinutes) }
 
-    /// When they should be at the gym: the bar they placed, or the end of the
-    /// window if they have never moved it.
-    var gymByTime: TimeOfDay { gymTime ?? wakeTime.offset(byMinutes: windowMinutes) }
+    /// When they should be at the gym: the bar they placed, or wake time plus
+    /// Time to Gym if they have never moved it.
+    var gymByTime: TimeOfDay { gymTime ?? wakeTime.offset(byMinutes: timeToGymMinutes) }
 
     /// When the planned workout ends.
     var gymDoneTime: TimeOfDay { gymByTime.offset(byMinutes: gymSessionMinutes) }
@@ -156,6 +172,20 @@ struct MorningRhythm: Hashable {
         gymTime = newValue.offset(byMinutes: previousGap)
     }
 
+    /// Sets Time to Gym (clamped, 5-minute steps).
+    ///
+    /// Wake & Go: the alarm is the wake time, so the gym time moves to wake
+    /// plus the new duration. Go Later: the gym time is the fixed point and
+    /// stays put; only the time to go alarm moves.
+    mutating func setTimeToGym(_ minutes: Int) {
+        let value = Self.normalizedTimeToGym(minutes)
+        let wasWakeAndGo = flowMode == .wakeAndGo
+        timeToGymMinutes = value
+        if wasWakeAndGo, gymTime != nil {
+            gymTime = wakeTime.offset(byMinutes: value)
+        }
+    }
+
     var exceedsAbsoluteMaximum: Bool { windowMinutes > Self.absoluteMaximumWindow }
     var exceedsNormalMaximum: Bool { windowMinutes > Self.normalMaximumWindow }
     var isBelowMinimum: Bool { windowMinutes < Self.minimumWindow }
@@ -173,7 +203,12 @@ struct MorningRhythm: Hashable {
 
 extension MorningRhythm: Codable {
     private enum CodingKeys: String, CodingKey {
-        case bedtime, wakeTime, getReadyMinutes, travelMinutes, gymSessionMinutes, gymTime, hasBeenSet
+        case bedtime, wakeTime, timeToGymMinutes, gymSessionMinutes, gymTime, hasBeenSet
+    }
+
+    /// Keys older builds wrote and this one only reads.
+    private enum LegacyKeys: String, CodingKey {
+        case getReadyMinutes, travelMinutes
     }
 
     /// Plans saved before the workout length existed decode with the default,
@@ -182,11 +217,51 @@ extension MorningRhythm: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         bedtime = try container.decode(TimeOfDay.self, forKey: .bedtime)
         wakeTime = try container.decode(TimeOfDay.self, forKey: .wakeTime)
-        getReadyMinutes = try container.decode(Int.self, forKey: .getReadyMinutes)
-        travelMinutes = try container.decode(Int.self, forKey: .travelMinutes)
         gymSessionMinutes = try container.decodeIfPresent(Int.self, forKey: .gymSessionMinutes) ?? 60
         gymTime = try container.decodeIfPresent(TimeOfDay.self, forKey: .gymTime)
         hasBeenSet = try container.decode(Bool.self, forKey: .hasBeenSet)
+        if let stored = try container.decodeIfPresent(Int.self, forKey: .timeToGymMinutes) {
+            timeToGymMinutes = Self.normalizedTimeToGym(stored)
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            let getReady = try legacy.decodeIfPresent(Int.self, forKey: .getReadyMinutes)
+            let travel = try legacy.decodeIfPresent(Int.self, forKey: .travelMinutes)
+            timeToGymMinutes = Self.migratedTimeToGym(
+                getReady: getReady,
+                travel: travel,
+                wakeTime: wakeTime,
+                gymTime: gymTime
+            )
+        }
+    }
+
+    /// The one-time move from separate get ready and travel minutes to one
+    /// Time to Gym. A Wake & Go plan keeps the gap it already ran on, so its
+    /// alarm and gym time do not move; anything else adds the two old values.
+    static func migratedTimeToGym(
+        getReady: Int?,
+        travel: Int?,
+        wakeTime: TimeOfDay,
+        gymTime: TimeOfDay?
+    ) -> Int {
+        if let gymTime {
+            let gap = wakeTime.minutes(until: gymTime)
+            if gap >= timeToGymRange.lowerBound, gap <= absoluteMaximumWindow {
+                return normalizedTimeToGym(gap)
+            }
+        }
+        guard getReady != nil || travel != nil else { return MorningRhythm.default.timeToGymMinutes }
+        return normalizedTimeToGym((getReady ?? 0) + (travel ?? 0))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(bedtime, forKey: .bedtime)
+        try container.encode(wakeTime, forKey: .wakeTime)
+        try container.encode(timeToGymMinutes, forKey: .timeToGymMinutes)
+        try container.encode(gymSessionMinutes, forKey: .gymSessionMinutes)
+        try container.encodeIfPresent(gymTime, forKey: .gymTime)
+        try container.encode(hasBeenSet, forKey: .hasBeenSet)
     }
 }
 
@@ -438,6 +513,15 @@ struct MorningPlan: Hashable {
 
     var windowMinutes: Int { rhythm.windowMinutes }
 
+    /// Sets Time to Gym from any screen (Alarm or Preferences), so there is
+    /// one value and one rule. The main alarm follows the rhythm's lock alarm.
+    mutating func setTimeToGym(_ minutes: Int) {
+        rhythm.setTimeToGym(minutes)
+        if let index = slots.firstIndex(where: { $0.id == primaryAlarmSlot?.id }) {
+            slots[index].alarmTime = rhythm.lockAlarmTime
+        }
+    }
+
     /// The sleep schedule the user has set: the rhythm with any pending
     /// bedtime already in place. What the Alarm screen shows and edits.
     /// Tonight's lock still runs on `rhythm` until the pending one is due.
@@ -511,6 +595,8 @@ struct MorningPlan: Hashable {
         plan.rhythm.bedtime = profile.bedtime
         plan.rhythm.wakeTime = profile.answeredWakeTime
         plan.rhythm.gymTime = profile.failureTime
+        // Wake & Go: Time to Gym is the gap the user just described.
+        plan.rhythm.timeToGymMinutes = plan.rhythm.currentTimeToGymMinutes
 
         return plan
     }

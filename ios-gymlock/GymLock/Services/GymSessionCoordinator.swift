@@ -1063,8 +1063,13 @@ final class GymSessionCoordinator {
             slotID: slot?.id,
             alarmTime: alarmTime,
             isMorningSession: daypart.usesSleepRhythm,
-            getReadyMinutes: rhythm.getReadyMinutes,
-            travelMinutes: rhythm.travelMinutes,
+            timeToGymMinutes: rhythm.windowMinutes,
+            arrivalTarget: GymSession.arrivalTarget(
+                alarmTime: alarmTime,
+                near: date,
+                timeToGymMinutes: rhythm.windowMinutes,
+                calendar: calendar
+            ),
             state: .alarmFired
         )
         new.alarmFiredAt = date
@@ -1377,8 +1382,7 @@ final class GymSessionCoordinator {
             slotID: slot?.id,
             alarmTime: alarmTime,
             isMorningSession: SessionDaypart(alarmTime).usesSleepRhythm,
-            getReadyMinutes: rhythm.getReadyMinutes,
-            travelMinutes: rhythm.travelMinutes,
+            timeToGymMinutes: rhythm.windowMinutes,
             state: .cantToday
         )
         offer.flowMode = rhythm.flowMode
@@ -1554,7 +1558,9 @@ final class GymSessionCoordinator {
         let now = Date()
         current.state = .preparing
         if current.committedAt == nil { current.committedAt = now }
-        current.deadline = now.addingTimeInterval(Double(current.windowMinutes) * 60)
+        // The scheduled arrival: ring plus Time to Gym. A snooze or a slow
+        // mission does not buy extra time.
+        current.deadline = current.preparationDeadline(committedAt: now)
         session = current
 
         persist()

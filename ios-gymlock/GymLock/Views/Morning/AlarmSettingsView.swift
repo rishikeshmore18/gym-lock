@@ -977,23 +977,16 @@ struct AlarmSettingsView: View {
     }
 
     // PLACEHOLDER UI: designed in Step 3
-    /// Go Later only: get ready and travel are the user's own numbers, and
-    /// the time to go follows from them.
+    /// Go Later only: Time to Gym is the user's own number, and the time to
+    /// go follows from it. The same value Preferences edits.
     private var goLaterTimesRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             Stepper(
-                value: goLaterBinding(\.getReadyMinutes),
-                in: MorningRhythm.getReadyRange,
-                step: 5
+                value: timeToGymBinding,
+                in: MorningRhythm.timeToGymRange,
+                step: MorningRhythm.timeToGymStep
             ) {
-                AlarmValueRow(title: "get ready", value: "\(plan.rhythm.getReadyMinutes) min", showsChevron: false)
-            }
-            Stepper(
-                value: goLaterBinding(\.travelMinutes),
-                in: MorningRhythm.travelRange,
-                step: 5
-            ) {
-                AlarmValueRow(title: "travel", value: "\(plan.rhythm.travelMinutes) min", showsChevron: false)
+                AlarmValueRow(title: "time to gym", value: "\(plan.rhythm.timeToGymMinutes) min", showsChevron: false)
             }
             Text("time to go at \(plan.rhythm.timeToGo.displayString).")
                 .font(.system(size: 13, weight: .medium))
@@ -1002,16 +995,13 @@ struct AlarmSettingsView: View {
         .padding(.vertical, 8)
     }
 
-    private func goLaterBinding(_ keyPath: WritableKeyPath<MorningRhythm, Int>) -> Binding<Int> {
+    private var timeToGymBinding: Binding<Int> {
         Binding(
-            get: { store.plan.rhythm[keyPath: keyPath] },
+            get: { store.plan.rhythm.timeToGymMinutes },
             set: { minutes in
                 Haptics.selection()
                 var plan = store.plan
-                plan.rhythm[keyPath: keyPath] = minutes
-                if let index = plan.slots.firstIndex(where: { $0.id == plan.primaryAlarmSlot?.id }) {
-                    plan.slots[index].alarmTime = plan.rhythm.lockAlarmTime
-                }
+                plan.setTimeToGym(minutes)
                 store.plan = plan
                 snoozeSync?.cancel()
                 snoozeSync = Task {

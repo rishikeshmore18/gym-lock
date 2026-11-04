@@ -25,8 +25,8 @@ extension MorningRhythm {
         gapToGymMinutes <= Self.absoluteMaximumWindow ? .wakeAndGo : .goLater
     }
 
-    /// When the "time to go" alarm rings: gym time minus get ready and travel.
-    /// Gym 18:00, 10 + 20 min gives 17:30 (FLOW, Flow 2).
+    /// When the "time to go" alarm rings: gym time minus Time to Gym.
+    /// Gym 18:00 with 30 min gives 17:30 (FLOW, Flow 2).
     var timeToGo: TimeOfDay {
         gymByTime.offset(byMinutes: -windowMinutes)
     }
@@ -416,6 +416,41 @@ extension GymSession {
     var effectiveLockDeadline: Date {
         lockDeadline ?? ShieldPolicy.deadline(forWindowMinutes: windowMinutes, from: alarmFiredAt ?? day)
     }
+
+    /// The scheduled ring for `alarmTime` closest to `date`: the same day,
+    /// or the day either side when that is nearer (an alarm resumed just
+    /// after midnight, or a session started early the evening before).
+    static func scheduledRing(
+        alarmTime: TimeOfDay,
+        near date: Date,
+        calendar: Calendar = .current
+    ) -> Date {
+        let start = calendar.startOfDay(for: date)
+        let candidates = [-1, 0, 1].compactMap { offset -> Date? in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+            return calendar.date(
+                bySettingHour: alarmTime.hour,
+                minute: alarmTime.minute,
+                second: 0,
+                of: day
+            )
+        }
+        return candidates.min {
+            abs($0.timeIntervalSince(date)) < abs($1.timeIntervalSince(date))
+        } ?? date
+    }
+
+    /// When the user is due at the gym: the scheduled ring plus Time to Gym.
+    /// Wake & Go 6:00 + 60 gives 7:00; Go Later 17:15 + 45 gives 18:00.
+    static func arrivalTarget(
+        alarmTime: TimeOfDay,
+        near date: Date,
+        timeToGymMinutes: Int,
+        calendar: Calendar = .current
+    ) -> Date {
+        scheduledRing(alarmTime: alarmTime, near: date, calendar: calendar)
+            .addingTimeInterval(Double(timeToGymMinutes) * 60)
+    }
 }
 
 /// What to do with a session that is still live when it may not be wanted.
@@ -515,6 +550,9 @@ enum RunningLate {
         updated.runningLateUntil = ring
         updated.state = .runningLate
         updated.lockDeadline = ShieldPolicy.deadline(forWindowMinutes: session.windowMinutes, from: ring)
+        // The new ring is the new scheduled alarm, so the gym is due Time to
+        // Gym after it.
+        updated.arrivalTarget = ring.addingTimeInterval(Double(session.timeToGymMinutes) * 60)
         return updated
     }
 

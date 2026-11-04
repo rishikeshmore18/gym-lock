@@ -54,7 +54,7 @@ struct StillGettingReadyView: View {
             CountdownRing(remainingFraction: fraction, size: 240)
 
             VStack(spacing: -2) {
-                Text("Leaving in")
+                Text("time left")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.accent)
 
@@ -78,7 +78,7 @@ struct StillGettingReadyView: View {
         }
         .frame(height: 252)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Leaving in \(minutes) minutes")
+        .accessibilityLabel("\(minutes) minutes left to reach your gym on time")
     }
 
     private var heading: some View {

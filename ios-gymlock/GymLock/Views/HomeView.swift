@@ -163,12 +163,7 @@ struct HomeView: View {
                         milestone(nextAlarm.slot.alarmTime, "wake")
                         milestoneArrow
                         milestone(
-                            nextAlarm.slot.alarmTime.offset(byMinutes: store.plan.rhythm.getReadyMinutes),
-                            "leave"
-                        )
-                        milestoneArrow
-                        milestone(
-                            nextAlarm.slot.gymByTime(window: store.plan.rhythm.gapToGymMinutes),
+                            nextAlarm.slot.gymByTime(window: store.plan.rhythm.windowMinutes),
                             "gym",
                             isEmphasised: true
                         )

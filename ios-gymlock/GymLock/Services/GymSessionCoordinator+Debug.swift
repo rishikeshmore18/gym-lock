@@ -761,7 +761,7 @@ extension GymSessionCoordinator {
         case .wakeAndGoGymDay:
             // Wake 06:30, gym 07:05: a 35 minute gap, so the wake-up alarm
             // is the gym alarm and it snoozes once.
-            debugSetAlarmRhythm(wake: TimeOfDay(hour: 6, minute: 30), gym: TimeOfDay(hour: 7, minute: 5), getReady: 20, travel: 15)
+            debugSetAlarmRhythm(wake: TimeOfDay(hour: 6, minute: 30), gym: TimeOfDay(hour: 7, minute: 5), timeToGym: 35)
             let today = debugToday()
             let summary = debugAlarmSummary(on: today)
             endSession()
@@ -775,7 +775,7 @@ extension GymSessionCoordinator {
         case .goLaterGymDay:
             // Flow 2: wake 07:00, gym 18:00, 10 + 20 minutes, so the time to
             // go is 17:30. No snooze on that alarm; running late instead.
-            debugSetAlarmRhythm(wake: TimeOfDay(hour: 7, minute: 0), gym: TimeOfDay(hour: 18, minute: 0), getReady: 10, travel: 20)
+            debugSetAlarmRhythm(wake: TimeOfDay(hour: 7, minute: 0), gym: TimeOfDay(hour: 18, minute: 0), timeToGym: 30)
             let summary = debugAlarmSummary(on: debugToday())
             endSession()
             debugStore?.debugSeedGym()
@@ -859,7 +859,7 @@ extension GymSessionCoordinator {
             let calendar = Calendar.current
             let today = calendar.startOfDay(for: Date())
             let ring = Date().addingTimeInterval(-3 * 3600)
-            debugSetAlarmRhythm(wake: TimeOfDay(from: ring), gym: TimeOfDay(from: ring.addingTimeInterval(35 * 60)), getReady: 20, travel: 15)
+            debugSetAlarmRhythm(wake: TimeOfDay(from: ring), gym: TimeOfDay(from: ring.addingTimeInterval(35 * 60)), timeToGym: 35)
             store.log.outcomes.removeAll { $0.countingDay(calendar: calendar) == today }
             store.events.events.removeAll { $0.kind == .alarmFired && calendar.isDate($0.at, inSameDayAs: today) }
             debugResetMissedDayCheck(since: today)
@@ -1379,14 +1379,13 @@ extension GymSessionCoordinator {
 
     /// Sets the rhythm straight onto the plan and makes sure today is a gym
     /// day, so the step runs whatever day it is.
-    private func debugSetAlarmRhythm(wake: TimeOfDay, gym: TimeOfDay, getReady: Int, travel: Int) {
+    private func debugSetAlarmRhythm(wake: TimeOfDay, gym: TimeOfDay, timeToGym: Int) {
         guard let store = debugStore else { return }
         store.seedPlanIfNeeded()
         var plan = store.plan
         plan.rhythm.wakeTime = wake
         plan.rhythm.gymTime = gym
-        plan.rhythm.getReadyMinutes = getReady
-        plan.rhythm.travelMinutes = travel
+        plan.rhythm.timeToGymMinutes = MorningRhythm.normalizedTimeToGym(timeToGym)
         plan.oneOffAlarms = []
         if plan.slots.isEmpty {
             plan.slots = [AlarmSlot(days: [.monday, .wednesday, .friday], alarmTime: wake)]
@@ -1427,8 +1426,7 @@ extension GymSessionCoordinator {
         plan.rhythm.bedtime = bedtime
         plan.rhythm.wakeTime = bedtime.offset(byMinutes: 8 * 60)
         plan.rhythm.gymTime = TimeOfDay(from: now.addingTimeInterval(30 * 60))
-        plan.rhythm.getReadyMinutes = 10
-        plan.rhythm.travelMinutes = 20
+        plan.rhythm.timeToGymMinutes = 30
         plan.rhythm.gymSessionMinutes = 60
         plan.pendingBedtime = nil
         plan.oneOffAlarms = []
@@ -1567,8 +1565,7 @@ extension GymSessionCoordinator {
             slotID: slot.id,
             alarmTime: slot.alarmTime,
             isMorningSession: slot.daypart.usesSleepRhythm,
-            getReadyMinutes: store.plan.rhythm.getReadyMinutes,
-            travelMinutes: store.plan.rhythm.travelMinutes
+            timeToGymMinutes: store.plan.rhythm.windowMinutes
         )
         resolved.state = .cantToday
         debugMarkResolved(resolved)

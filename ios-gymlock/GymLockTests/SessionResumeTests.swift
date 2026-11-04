@@ -35,7 +35,7 @@ struct SessionResumeTests {
         )
     }
 
-    /// 35 minutes: a 20 minute get-ready plus 15 minutes of travel.
+    /// 35 minutes: the default Time to Gym.
     private let window = 35
 
     private func decide(

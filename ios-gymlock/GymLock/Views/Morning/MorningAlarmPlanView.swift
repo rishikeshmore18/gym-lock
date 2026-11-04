@@ -112,9 +112,7 @@ struct MorningAlarmPlanView: View {
         VStack(alignment: .leading, spacing: 12) {
             PlanSummaryCard(
                 wake: wakeTime,
-                getReadyMinutes: rhythm.getReadyMinutes,
-                travelMinutes: rhythm.travelMinutes,
-                leave: wakeTime.offset(byMinutes: rhythm.getReadyMinutes),
+                timeToGymMinutes: rhythm.windowMinutes,
                 gymBy: gymByTime
             )
 
@@ -350,7 +348,9 @@ struct MorningAlarmPlanView: View {
     /// to be the same number; now that the visit can sit anywhere in the day
     /// they are not, and this screen is about the plan.
     private var gymByTime: TimeOfDay {
-        wakeTime.offset(byMinutes: rhythm.gapToGymMinutes)
+        // The alarm plus Time to Gym: wake plus the gap in Wake & Go, time
+        // to go plus Time to Gym in Go Later.
+        wakeTime.offset(byMinutes: rhythm.windowMinutes)
     }
 
     // MARK: - Actions

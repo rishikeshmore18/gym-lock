@@ -302,93 +302,22 @@ struct MorningSectionLabel: View {
     }
 }
 
-// MARK: - Timeline rail
-
-/// The get-ready → leave → arrive rail beneath the countdown.
-struct PreparationRail: View {
-    let current: PreparationStage
-    let getReadyMinutes: Int
-    let travelMinutes: Int
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(PreparationStage.allCases.enumerated()), id: \.element.id) { index, stage in
-                if index > 0 { connector(isFilled: stage.rawValue <= current.rawValue) }
-                stageColumn(stage)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 16)
-        .warmCard(radius: 20)
-    }
-
-    private func stageColumn(_ stage: PreparationStage) -> some View {
-        let isActive = stage == current
-        let isDone = stage.rawValue < current.rawValue
-
-        return VStack(spacing: 8) {
-            Image(systemName: isDone ? "checkmark" : stage.icon)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(isActive || isDone ? .white : Theme.inkTertiary)
-                .frame(width: 44, height: 44)
-                .background(
-                    isActive || isDone ? Theme.accent : Theme.surfaceMuted,
-                    in: .circle
-                )
-
-            Text(stage.label)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(isActive ? Theme.accent : Theme.inkSecondary)
-
-            Text(range(for: stage))
-                .font(.system(size: 11, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(Theme.inkTertiary)
-        }
-        .frame(maxWidth: .infinity)
-        .animation(Theme.settle, value: current)
-    }
-
-    private func connector(isFilled: Bool) -> some View {
-        Rectangle()
-            .fill(isFilled ? Theme.accent.opacity(0.5) : Theme.border)
-            .frame(height: 1.5)
-            .frame(maxWidth: 34)
-            .offset(y: -18)
-            .animation(Theme.settle, value: isFilled)
-    }
-
-    private func range(for stage: PreparationStage) -> String {
-        switch stage {
-        case .getReady: "0–\(getReadyMinutes) min"
-        case .leave: "\(getReadyMinutes)–\(getReadyMinutes + travelMinutes) min"
-        case .arrive: "\(getReadyMinutes + travelMinutes) min"
-        }
-    }
-}
-
 // MARK: - Plan summary
 
-/// The four-line plan strip: wake, get ready, leave by, gym by.
+/// The three-line plan strip: wake, time to gym, gym by.
 ///
 /// One card rather than four, because four large tiles would make a simple
 /// sequence look like a dashboard.
 struct PlanSummaryCard: View {
     let wake: TimeOfDay
-    let getReadyMinutes: Int
-    let travelMinutes: Int
-    let leave: TimeOfDay
+    let timeToGymMinutes: Int
     let gymBy: TimeOfDay
 
     var body: some View {
         VStack(spacing: 0) {
             row(label: "wake", value: wake.displayString, icon: "sunrise.fill")
             divider
-            row(label: "get ready", value: "\(getReadyMinutes) min", icon: "tshirt.fill")
-            divider
-            row(label: "travel", value: "\(travelMinutes) min", icon: "figure.walk.departure")
-            divider
-            row(label: "leave by", value: leave.displayString, icon: "door.left.hand.open")
+            row(label: "time to gym", value: "\(timeToGymMinutes) min", icon: "figure.walk.departure")
             divider
             row(label: "gym by", value: gymBy.displayString, icon: "dumbbell.fill", isEmphasised: true)
         }

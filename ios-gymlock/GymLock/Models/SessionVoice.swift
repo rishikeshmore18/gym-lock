@@ -176,12 +176,9 @@ nonisolated struct SessionVoice: Hashable {
 
     // MARK: - The single nudge
 
-    var nudgeHeading: String {
-        switch daypart {
-        case .morning: "still getting ready?"
-        case .midday, .evening: "still heading out?"
-        }
-    }
+    /// One line for every daypart: Time to Gym covers getting ready and the
+    /// trip together, so the nudge does not guess which one the user is in.
+    var nudgeHeading: String { "still heading to the gym?" }
 
     var nudgeSupport: String {
         switch daypart {

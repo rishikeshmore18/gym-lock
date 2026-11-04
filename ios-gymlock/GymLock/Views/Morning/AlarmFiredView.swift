@@ -232,8 +232,7 @@ struct AlarmFiredView: View {
             slotID: nil,
             alarmTime: TimeOfDay(hour: 6, minute: 30),
             isMorningSession: true,
-            getReadyMinutes: 15,
-            travelMinutes: 20
+            timeToGymMinutes: 35
         ),
         onGoing: {},
         onSnooze: {},
@@ -250,8 +249,7 @@ struct AlarmFiredView: View {
             slotID: nil,
             alarmTime: TimeOfDay(hour: 18, minute: 0),
             isMorningSession: false,
-            getReadyMinutes: 15,
-            travelMinutes: 20
+            timeToGymMinutes: 35
         ),
         onGoing: {},
         onSnooze: {},

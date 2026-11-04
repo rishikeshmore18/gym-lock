@@ -13,8 +13,7 @@ struct AlarmOptionsTests {
             slotID: nil,
             alarmTime: time,
             isMorningSession: SessionDaypart(time).usesSleepRhythm,
-            getReadyMinutes: 15,
-            travelMinutes: 20
+            timeToGymMinutes: 35
         )
     }
 

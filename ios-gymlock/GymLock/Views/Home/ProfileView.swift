@@ -20,6 +20,7 @@ struct ProfileView: View {
     /// would give it two back buttons and two titles.
     @State private var isShowingClassicHome = false
     @State private var isShowingAlarmSettings = false
+    @State private var isShowingPreferences = false
     @State private var alarmAuth: AlarmAuthorization = .notDetermined
 
     /// The alarm screen grows out of this row and returns to it.
@@ -45,6 +46,10 @@ struct ProfileView: View {
             HomeView()
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $isShowingPreferences) {
+            PreferencesView()
+                .presentationDragIndicator(.visible)
+        }
         .fullScreenCover(isPresented: $isShowingAlarmSettings, onDismiss: {
             // The interesting state is exactly what may have changed while the
             // cover was up.
@@ -57,12 +62,13 @@ struct ProfileView: View {
             alarmAuth = await coordinator.alarmAuthorization()
         }
         .onChange(of: tabRequestCount) { _, _ in
-            guard isShowingClassicHome || isShowingAlarmSettings else { return }
+            guard isShowingClassicHome || isShowingAlarmSettings || isShowingPreferences else { return }
             var instant = Transaction()
             instant.disablesAnimations = true
             withTransaction(instant) {
                 isShowingClassicHome = false
                 isShowingAlarmSettings = false
+                isShowingPreferences = false
             }
         }
     }
@@ -125,6 +131,23 @@ struct ProfileView: View {
                     symbol: "square.grid.2x2.fill",
                     title: "Home 2",
                     detail: "Your locks, alarms and settings."
+                )
+            }
+            .buttonStyle(.plain)
+
+            Rectangle()
+                .fill(Theme.border)
+                .frame(height: 1)
+                .padding(.horizontal, 18)
+
+            Button {
+                Haptics.tap()
+                isShowingPreferences = true
+            } label: {
+                row(
+                    symbol: "slider.horizontal.3",
+                    title: "Preferences",
+                    detail: "Time to Gym · \(store.plan.rhythm.currentTimeToGymMinutes) min"
                 )
             }
             .buttonStyle(.plain)

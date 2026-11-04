@@ -17,8 +17,7 @@ struct SessionVoiceTests {
             slotID: nil,
             alarmTime: time,
             isMorningSession: SessionDaypart(time).usesSleepRhythm,
-            getReadyMinutes: 15,
-            travelMinutes: 20
+            timeToGymMinutes: 35
         )
     }
 
@@ -138,8 +137,7 @@ struct SnoozeStateTests {
             slotID: nil,
             alarmTime: TimeOfDay(hour: 6, minute: 30),
             isMorningSession: true,
-            getReadyMinutes: 15,
-            travelMinutes: 20
+            timeToGymMinutes: 35
         )
         session.state = .snoozed
         session.snoozeUsedAt = now
@@ -153,8 +151,7 @@ struct SnoozeStateTests {
             slotID: nil,
             alarmTime: TimeOfDay(hour: 6, minute: 30),
             isMorningSession: true,
-            getReadyMinutes: 15,
-            travelMinutes: 20
+            timeToGymMinutes: 35
         )
         #expect(!session.hasSnoozed)
         #expect(session.snoozeRemaining(at: now) == 0)
