@@ -1086,6 +1086,52 @@ struct DayDial: View {
                     return path
                 }
 
+                // The soft wash behind the lit ticks (the approved "Subtle
+                // Fill" variation): a thin annular band following exactly the
+                // range `isUnderGym` lights up below, same timing values, so
+                // it tracks every drag and the opening stretch. A blur
+                // feathers both edges into the face, so it reads as the glow
+                // the ticks cast rather than a shape. Purely decorative: the
+                // whole face already opts out of hit testing.
+                let bandSpan = min(max(Double(sessionMinutes) + introExtraMinutes, 0), 1440)
+                if bandSpan > 0 {
+                    // Centred on the minor ticks it backs, and thinner than
+                    // they are long, so it never reaches past them.
+                    let thickness = metrics.minorTickLength * 0.55
+                    let bandOuter = outer - metrics.minorTickLength * 0.22
+                    let bandInner = bandOuter - thickness
+                    let startMinutes = Double(gymByMinutes)
+                    // Angles run linearly with minutes past 1440, so a visit
+                    // crossing midnight is one continuous sector here, not
+                    // two.
+                    let startAngle = Angle.degrees(startMinutes / 1440 * 360 - 90)
+                    let endAngle = Angle.degrees((startMinutes + bandSpan) / 1440 * 360 - 90)
+
+                    var band = Path()
+                    band.addArc(
+                        center: centre,
+                        radius: bandOuter,
+                        startAngle: startAngle,
+                        endAngle: endAngle,
+                        clockwise: true
+                    )
+                    band.addArc(
+                        center: centre,
+                        radius: bandInner,
+                        startAngle: endAngle,
+                        endAngle: startAngle,
+                        clockwise: false
+                    )
+                    band.closeSubpath()
+
+                    // The blur belongs to the band alone, not to the tick
+                    // strokes drawn after it in the same context.
+                    context.drawLayer { layer in
+                        layer.addFilter(.blur(radius: thickness * 0.45))
+                        layer.fill(band, with: .color(Theme.accent.opacity(0.12)))
+                    }
+                }
+
                 for tick in 0..<96 {
                     // The lit tick is drawn on its own above, so it can pop.
                     if indicator?.tickIndex == tick { continue }
