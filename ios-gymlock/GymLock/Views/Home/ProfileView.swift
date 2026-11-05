@@ -46,9 +46,11 @@ struct ProfileView: View {
             HomeView()
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $isShowingPreferences) {
+        // Presented like Alarm, growing out of its row, because it is built
+        // from the same glass parts and should arrive the same way.
+        .fullScreenCover(isPresented: $isShowingPreferences) {
             PreferencesView()
-                .presentationDragIndicator(.visible)
+                .navigationTransition(.zoom(sourceID: "preferences", in: alarmTransition))
         }
         .fullScreenCover(isPresented: $isShowingAlarmSettings, onDismiss: {
             // The interesting state is exactly what may have changed while the
@@ -151,6 +153,7 @@ struct ProfileView: View {
                 )
             }
             .buttonStyle(.plain)
+            .matchedTransitionSource(id: "preferences", in: alarmTransition)
         }
         .padding(.vertical, 4)
         .warmCard()
