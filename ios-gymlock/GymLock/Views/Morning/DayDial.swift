@@ -1131,7 +1131,7 @@ struct DayDial: View {
                     // strokes drawn after it in the same context.
                     context.drawLayer { layer in
                         layer.addFilter(.blur(radius: thickness * 0.45))
-                        layer.fill(band, with: .color(Theme.accent.opacity(0.12)))
+                        layer.fill(band, with: .color(Theme.accent.opacity(0.144)))
                     }
                 }
 
