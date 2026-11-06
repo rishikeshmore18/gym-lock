@@ -1113,14 +1113,17 @@ struct DayDial: View {
                         radius: bandOuter,
                         startAngle: startAngle,
                         endAngle: endAngle,
-                        clockwise: true
+                        // y-down space: `clockwise: false` sweeps visually
+                        // clockwise (toward increasing angle), matching the
+                        // tick direction, so only the gym span is filled.
+                        clockwise: false
                     )
                     band.addArc(
                         center: centre,
                         radius: bandInner,
                         startAngle: endAngle,
                         endAngle: startAngle,
-                        clockwise: false
+                        clockwise: true
                     )
                     band.closeSubpath()
 
