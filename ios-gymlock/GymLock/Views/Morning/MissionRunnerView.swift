@@ -198,6 +198,7 @@ struct MissionRunnerView: View {
                 case .ready:
                     MissionCameraPreview(session: camera.session)
                         .clipShape(.rect(cornerRadius: 24))
+                        .blocksHeroHaptics("camera")
                         .allowsHitTesting(false)
 
                 case .preparing:

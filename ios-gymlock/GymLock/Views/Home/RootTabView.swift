@@ -25,8 +25,14 @@ struct RootTabView: View {
     /// Bumped on every notification-driven tab request, so screens that
     /// present over the shell can step aside and let the destination show.
     @State private var tabRequestCount = 0
+    /// The done flow or a standalone rank-up, waiting out its delay (spec §4.1).
+    @State private var celebrationTask: Task<Void, Never>?
+    /// A notification tap is bringing the flow up: 300 ms, then the spotlight after the collapse.
+    @State private var isFlowFromNotification = false
+    @AppStorage(HeroCardStyle.storageKey) private var cardStyleRaw = HeroCardStyle.ridge.rawValue
 
     private var launchCover: LaunchCover { .shared }
+    private var queue: CelebrationQueue { .shared }
 
     var body: some View {
         ZStack {
@@ -46,9 +52,11 @@ struct RootTabView: View {
                 ProfileView(tabRequestCount: tabRequestCount)
             }
         }
+        // The hero stops under anything that covers it (spec §5, step 11).
+        .environment(\.heroMotionPaused, isHeroCovered)
         .environment(\.rootTabBarMinY, tabBarMinY)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            RootTabBar(selection: $selection)
+            RootTabBar(selection: $selection, dots: tabDots)
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
                     tabBarMinY = $0
                 }
@@ -69,6 +77,15 @@ struct RootTabView: View {
                 // Kept from VoiceOver too, so the dimmed bar cannot be reached.
                 .accessibilityHidden(spotlight.isActive)
         }
+        // The done flow sits above the tabs and the bar, so it can collapse into the card.
+        .overlay { DoneFlowHost(queue: queue) }
+        // Standalone rank-ups (rule 4): in their own layer, so they finish without flying to a slot
+        // on a tab nobody is looking at.
+        .overlay {
+            Color.clear
+                .allowsHitTesting(false)
+                .badgeRankUp(standaloneBinding) { queue.standaloneLanded($0) }
+        }
         // Black rather than coral: on this screen coral means a skipped day,
         // and a coral tab would be competing with that.
         .tint(Theme.ink)
@@ -85,6 +102,23 @@ struct RootTabView: View {
                 presentEarnedCelebrationIfNeeded()
             }
         }
+        // Every way the gate can open: Home showing, a sheet or the morning gone, the cover lifted.
+        .onChange(of: isCelebrationGateOpen) { _, open in
+            if open {
+                scheduleCelebration(flowDelay: isFlowFromNotification ? 0.3 : 0.7)
+            } else {
+                celebrationTask?.cancel()
+            }
+        }
+        // A proof landing while Home is already on screen: 1300 ms (spec §4.1).
+        .onChange(of: queue.hasPendingFlow) { old, new in
+            guard new, !old else { return }
+            scheduleCelebration(flowDelay: isCelebrationGateOpen ? 1.3 : 0.7)
+        }
+        .onChange(of: store.log) { _, _ in
+            queue.sync(store: store, coordinator: coordinator)
+        }
+        .onChange(of: queue.flowEndCount) { _, _ in flowEnded() }
         // A notification tap asked for a tab (the workout-done line lands on
         // Progress with its spotlight). The spotlight is armed before the tab
         // changes, in the same update, so the first frame of Progress anyone
@@ -92,6 +126,19 @@ struct RootTabView: View {
         // this view existed is still honoured.
         .onChange(of: coordinator.requestedTab, initial: true) { _, tab in
             guard let tab else { return }
+            // The workout-done notification with a flow waiting: Home first, the flow 300 ms later,
+            // and the Progress spotlight once it collapses (spec §4.1 N).
+            queue.sync(store: store, coordinator: coordinator)
+            if tab == .progress, queue.hasPendingFlow, queue.presentation == nil {
+                queue.spotlightAfterFlow = coordinator.takePendingSpotlightDay()
+                spotlight.dismiss()
+                isFlowFromNotification = true
+                selection = .home
+                tabRequestCount += 1
+                coordinator.consumeRequestedTab()
+                scheduleCelebration(flowDelay: 0.3)
+                return
+            }
             if !spotlight.accept(requestedTab: tab, from: coordinator), tab != .progress {
                 spotlight.dismiss()
             }
@@ -113,12 +160,25 @@ struct RootTabView: View {
                     reduceMotion: reduceMotion,
                     isHomeVisible: isHomeVisible
                 )
+                HeroHapticPlayer.shared.setBlocked("background", false)
+                queue.sync(store: store, coordinator: coordinator)
+                // The return plays the launch cover first; a flow stays frozen until it lifts.
+                Task { @MainActor in
+                    await Task.yield()
+                    if !launchCover.isHoldingApp { resumeQueueIfReturning() }
+                }
             } else {
                 intro.sceneLeftForeground()
+                HeroHapticPlayer.shared.setBlocked("background", true)
+                if phase == .background {
+                    celebrationTask?.cancel()
+                    queue.sceneLeftForeground()
+                }
             }
         }
         .onChange(of: launchCover.isHoldingApp) { _, isHolding in
             if !isHolding {
+                resumeQueueIfReturning()
                 presentLaunchPrompts()
                 presentEarnedCelebrationIfNeeded()
             }
@@ -163,6 +223,89 @@ struct RootTabView: View {
             // launch cover lifting and the setup flow covering home.
             if !store.plan.hasBeenReviewed { intro.isSuspended = true }
             presentLaunchPrompts()
+
+            // A cold launch is a new foreground session (spec §3.2 rule 1).
+            queue.sync(store: store, coordinator: coordinator)
+            queue.sceneBecameActive()
+            scheduleCelebration(flowDelay: 0.7)
+        }
+    }
+
+    // MARK: - Celebrations (02-experience-spec §3.2, §4.1)
+
+    private var cardStyle: HeroCardStyle { HeroCardStyle(rawValue: cardStyleRaw) ?? .ridge }
+
+    /// Home is the screen, nothing covers it and nothing else is happening.
+    private var isCelebrationGateOpen: Bool {
+        selection == .home
+            && scenePhase == .active
+            && !coordinator.isSessionLive
+            && !launchCover.isHoldingApp
+            && !isRunningSetup
+            && !isAskingToAddGymDay
+            && !isAskingForWakeTime
+            && !spotlight.isActive
+            && !intro.isMounted
+    }
+
+    /// Anything over the hero: the flow, a rank-up, a sheet, the setup, the streak card.
+    private var isHeroCovered: Bool {
+        queue.isCelebrating || isAskingToAddGymDay || isAskingForWakeTime || isRunningSetup || intro.isMounted || spotlight.isActive
+    }
+
+    private var tabDots: Set<RootTab> {
+        var dots: Set<RootTab> = []
+        if queue.showsHomeDot { dots.insert(.home) }
+        if queue.showsProgressDot { dots.insert(.progress) }
+        return dots
+    }
+
+    private var standaloneBinding: Binding<BadgeRankUpRequest?> {
+        Binding(get: { queue.standalone }, set: { queue.standalone = $0 })
+    }
+
+    /// The flow after `flowDelay`, or a standalone rank-up 1.6 s after Home appears. Re-checks the
+    /// gate when the wait ends; the 120 ms after a dismissal is inside every delay.
+    private func scheduleCelebration(flowDelay: Double) {
+        celebrationTask?.cancel()
+        guard isCelebrationGateOpen, queue.presentation == nil, queue.standalone == nil else { return }
+        if queue.hasPendingFlow {
+            celebrationTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(flowDelay))
+                guard !Task.isCancelled, isCelebrationGateOpen else { return }
+                if queue.presentFlow(store: store, coordinator: coordinator, style: cardStyle) {
+                    intro.normalizeImmediately()
+                }
+            }
+        } else if queue.standaloneCandidate() != nil {
+            celebrationTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.6))
+                guard !Task.isCancelled, isCelebrationGateOpen else { return }
+                queue.presentStandalone()
+            }
+        }
+    }
+
+    /// Back from the background (only once the launch cover has lifted).
+    private func resumeQueueIfReturning() {
+        guard queue.data.backgroundedAt != nil else { return }
+        queue.sceneBecameActive()
+        scheduleCelebration(flowDelay: 0.7)
+    }
+
+    /// Completed, closed or discarded: the spotlight the notification asked for, else the streak
+    /// intro's turn (the flow already showed a kept week, so that one is marked celebrated).
+    private func flowEnded() {
+        isFlowFromNotification = false
+        if store.streak.isThisWeekKept {
+            intro.markCelebrated(weekStarting: store.streak.liveWeekStart)
+        }
+        if let day = queue.spotlightAfterFlow {
+            queue.spotlightAfterFlow = nil
+            spotlight.arm(day: day)
+            selection = .progress
+        } else {
+            intro.resume(streak: store.streak, reduceMotion: reduceMotion, isHomeVisible: isHomeVisible)
         }
     }
 

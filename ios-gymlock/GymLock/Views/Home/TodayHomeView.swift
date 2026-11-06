@@ -103,7 +103,7 @@ struct TodayHomeView: View {
                             )
                         }
 
-                        HeroCardView(stage: cards.hero)
+                        DynamicHeroCard(store: store, coordinator: coordinator)
 
                         MiniCardsRow(
                             protection: cards.protection,
@@ -168,6 +168,8 @@ struct TodayHomeView: View {
             // same workout also completes the week, the Momentum card owns
             // the success haptic, so the path only taps: one commit per event.
             guard current > previous else { return }
+            // The done flow owns the moment: no quiet taps under or before it (spec §3.5).
+            guard !CelebrationQueue.shared.holdsHomeHaptics else { return }
             let momentum = cards.momentum
             let weekCompletesNow = momentum.targetCount > 0 && momentum.countedCount == momentum.targetCount
             if current >= 4, !weekCompletesNow {

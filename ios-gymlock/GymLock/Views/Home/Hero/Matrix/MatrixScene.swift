@@ -140,23 +140,39 @@ public enum MatrixMoment: String, Sendable, CaseIterable {
 }
 
 public enum MatrixSceneRegistry {
-    /// `mxScene(state, day)`: one scene per moment per day (index 0 = Monday).
-    /// Unported entries are nil and resolve to `MatrixScene.empty`.
-    private static let table: [MatrixMoment: [MatrixScene?]] = [
-        .wake: [MX.Wake.bell, nil, nil, nil, nil, nil, nil],
-        .countdown: [nil, nil, MX.Countdown.waterClock, nil, nil, nil, nil],
-        .verified: [nil, nil, MX.Verified.battery, nil, nil, nil, nil],
-        // TODO: port the remaining 130 scenes from web/hero13/mx/*.ts with the same pattern.
+    /// `mxScene(state, theme)`: seven scenes per moment, indexed by the theme of the day
+    /// (0 radiant, 1 tiles, 2 signal, 3 levels, 4 vectors, 5 loops, 6 week).
+    /// All 133 are machine-translated from web-reference/hero13/mx/*.ts (Matrix/Scenes/MX*.swift).
+    private static let table: [MatrixMoment: [MatrixScene]] = [
+        .setup: MX.Setup.SCENES,
+        .firstnight: MX.Firstnight.SCENES,
+        .bedtime: MX.Bedtime.SCENES,
+        .wake: MX.Wake.SCENES,
+        .countdown: MX.Countdown.SCENES,
+        .ready: MX.Ready.SCENES,
+        .commute: MX.Commute.SCENES,
+        .atgym: MX.Atgym.SCENES,
+        .verified: MX.Verified.SCENES,
+        .stilltime: MX.Stilltime.SCENES,
+        .rest: MX.Rest.SCENES,
+        .paused: MX.Paused.SCENES,
+        .freshstart: MX.Freshstart.SCENES,
+        .missed: MX.Missed.SCENES,
+        .weekkept: MX.Weekkept.SCENES,
+        .comeback: MX.Comeback.SCENES,
+        .drift: MX.Drift.SCENES,
+        .halfway: MX.Halfway.SCENES,
+        .automatic: MX.Automatic.SCENES,
     ]
 
     public static func scene(_ moment: MatrixMoment, day: Int) -> MatrixScene {
-        guard day >= 0, day < 7, let row = table[moment], day < row.count, let s = row[day] else { return .empty }
-        return s
+        guard day >= 0, day < 7, let row = table[moment], day < row.count else { return .empty }
+        return row[day]
     }
 
     public static func isPorted(_ moment: MatrixMoment, day: Int) -> Bool {
         guard day >= 0, day < 7, let row = table[moment], day < row.count else { return false }
-        return row[day] != nil
+        return true
     }
 
     /// `mxHap(state, day)`.
@@ -257,292 +273,6 @@ extension MX {
     }
 }
 
-// MARK: - verified.ts (Wednesday: BATTERY)
-
-extension MX {
-    public enum Verified {
-        /// a decaying flash that starts at age 0
-        static func fl(_ a: Double, _ d: Double = 0.15, _ k: Double = 0.3) -> Double { a >= 0 ? exp(-a / d) * k : 0 }
-        /// taps in the done flow: five, seven for the week's last (`c.N || 5`, clamped 3...7)
-        static func nOf(_ c: MatrixContext) -> Int { max(3, min(7, c.N != 0 ? c.N : 5)) }
-        /// a soft band of light that crosses a coordinate every P seconds, after `from`
-        static func sweep(_ T: Double, _ from: Double, _ P: Double, _ pos: Double, _ lo: Double, _ hi: Double, _ w: Double = 2.5) -> Double {
-            if T < from { return 0 }
-            let q = JSMath.rem((T - from) / P, 1) * (hi - lo + 2 * w * 3) + lo - w * 3
-            let z = (pos - q) / w
-            return exp(-(z * z)) * cl((T - from) / 0.6)
-        }
-
-        // ---- Wed: BATTERY ----
-        static let BOLT = PixelRows(["....#####", "...#####.", "..#####..", ".#####...", "#########", "#########", "....####.", "...####..", "..####...", ".####....", "###......", "#........"])
-        // body 9..33 x 18..29, terminal 34..35
-        static let BX: Double = 9, BW: Double = 25, BY: Double = 18, BH: Double = 12
-        static func segT(_ N: Int, _ k: Int) -> Double { 0.35 + Double(k) * (0.7 / Double(N)) }
-        static func FULL(_ N: Int) -> Double { segT(N, N - 1) + 0.16 }
-
-        public static let battery = MatrixScene(
-            haptics: (0..<4).map { HapticCue(t: segT(5, $0) + 0.16, kind: .light) }
-                + [HapticCue(t: FULL(5), kind: .heavy), HapticCue(t: FULL(5) + 0.07, kind: .success)]
-        ) { g, c in
-            let T = c.T, N = nOf(c), full = FULL(N), done = T > full + 0.04
-            g.rect(BX, BY, BW, BH, 0.8)
-            g.rect(BX + BW, BY + 3, 2, BH - 6, 0.8, true)
-            if done {
-                g.on(BX + BW + 1, BY + 5, 1, 1)
-                g.on(BX + BW + 1, BY + 6, 1, 1)
-            }
-            // cells fill one after another, an anti-aliased edge sweeping left to right
-            var lv = 0.0
-            for k in 0..<N { lv += ez((T - segT(N, k)) / 0.16) }
-            let IW = BW - 4
-            let fx = (lv / Double(N)) * IW
-            for ii in 0..<Int(IW) {
-                let i = Double(ii)
-                let f = cl(fx - i)
-                let b = f * (0.86 + 0.14 * sweep(T, full + 0.6, 3.2, i, 0, IW, 2.2))
-                var y = BY + 2
-                while y < BY + BH - 2 {
-                    if f > 0.01 { g.on(BX + 2 + i, y, b) }
-                    y += 1
-                }
-            }
-            for k in stride(from: 1, to: N, by: 1) {
-                let i = JSMath.round((Double(k) / Double(N)) * IW)
-                if i > fx {
-                    var y = BY + 3
-                    while y < BY + BH - 3 {
-                        g.on(BX + 2 + i, y, 0.22)
-                        y += 2
-                    }
-                }
-            }
-            // the bolt flickers up with each cell, then holds at full
-            var pop = 0.0
-            for k in 0..<N { pop = max(pop, fl(T - segT(N, k) - 0.16, 0.22, 0.45)) }
-            let bb = done ? 1 : 0.28 + pop
-            g.glyph(BOLT, CX - 4, 4, 1, bb)
-            // two rings go out at full charge
-            for r in 0..<2 {
-                let a = T - full - 0.05 - Double(r) * 0.2
-                let R = 15 + a * 22
-                let lit = a > 0 && a < 0.75 ? (1 - a / 0.75) * 0.75 : 0
-                for k in 0..<44 {
-                    let q = (Double(k) / 44) * TAU
-                    g.fr(CX + 0.5 + sin(q) * R, BY + BH / 2 - cos(q) * R * 0.55, lit)
-                }
-            }
-            var tick = 0.0
-            for k in stride(from: 0, to: N - 1, by: 1) { tick += fl(T - segT(N, k) - 0.16, 0.08, 0.06) }
-            return SceneOut(
-                opts: MatrixDealOptions(stagger: 0.3),
-                flash: tick + fl(T - full, 0.15, 0.28),
-                shake: T > full && T < full + 0.14 ? 0.25 : 0
-            )
-        }
-    }
-}
-
-// MARK: - wake.ts (Monday: THE BELL)
-
-extension MX {
-    public enum Wake {
-        // ---- the alarm's clock (own copy: mxlib's lastRing jumped back between 2.6 s and 2.85 s) ----
-        static func ringT(_ k: Int) -> Double { k < 6 ? 0.35 + Double(k) * 0.5 : 2.85 + Double(k - 5) * 2.5 }
-        static func ringK(_ T: Double) -> Int {
-            if T < 0.35 { return -1 }
-            if T < 2.85 { return Int(((T - 0.35) / 0.5 + 1e-6).rounded(.down)) }
-            return 5 + Int(((T - 2.85) / 2.5 + 1e-6).rounded(.down))
-        }
-        static func ringAge(_ T: Double) -> Double {
-            let k = ringK(T)
-            return k < 0 ? 99 : T - ringT(k)
-        }
-        /// a sharp hit on every ring
-        static func hit(_ T: Double, _ w: Double = 0.12) -> Double { exp(-ringAge(T) / w) }
-        /// age of the latest ring with this parity: effects that alternate between two particle slots
-        static func slotAge(_ T: Double, _ s: Int) -> Double {
-            var k = ringK(T)
-            if k >= 0 && k % 2 != s { k -= 1 }
-            return k < 0 ? 99 : T - ringT(k)
-        }
-        /// ringHap covers the first five rings; the sixth and the slow rings get theirs too
-        static let HAP: [HapticCue] = ringHap + [HapticCue(t: 2.85, kind: .medium)] + (0..<24).map { HapticCue(t: 5.35 + Double($0) * 2.5, kind: .heavy) }
-
-        /// '#' lit (0), 'o' coral (1), '+' dim (2)
-        static func bmp(_ rows: [String]) -> [(x: Double, y: Double, k: Int)] {
-            var o: [(x: Double, y: Double, k: Int)] = []
-            for (j, r) in rows.enumerated() {
-                for (i, ch) in r.unicodeScalars.enumerated() {
-                    let k: Int
-                    switch ch {
-                    case "#": k = 0
-                    case "o": k = 1
-                    case "+": k = 2
-                    default: continue
-                    }
-                    o.append((x: Double(i), y: Double(j), k: k))
-                }
-            }
-            return o
-        }
-        static func rotP(_ x: Double, _ y: Double, _ px: Double, _ py: Double, _ a: Double) -> (Double, Double) {
-            let c = cos(a), s = sin(a), dx = x - px, dy = y - py
-            return (px + dx * c - dy * s, py + dx * s + dy * c)
-        }
-
-        // ---- Mon: the bell ----
-        static let BELL = bmp([
-            "........#........",
-            "......#####......",
-            ".....##...##.....",
-            "....#.......#....",
-            "....#.......#....",
-            "....#.......#....",
-            "...#.........#...",
-            "...#.........#...",
-            "...#.........#...",
-            "..#...........#..",
-            "..#...........#..",
-            ".#.............#.",
-            "#...............#",
-            "#################",
-            "#################",
-        ])
-        /// the bell's tilt: a 1 Hz pendulum through the fast rings (fully over on every ring), then one swing per slow ring
-        static func bellSwing(_ T: Double) -> Double {
-            let A = 0.2
-            if T < 0.1 { return 0 }
-            if T < 0.35 { return A * sin((Double.pi / 2) * ((T - 0.1) / 0.25)) }
-            if T < 2.85 { return A * cos((Double.pi * (T - 0.35)) / 0.5) }
-            let k = ringK(T), R = ringT(k), s: Double = k % 2 != 0 ? -1 : 1
-            var th = s * A * cos(2 * Double.pi * (T - R)) * exp(-(T - R) / 0.45)
-            let nx = ringT(k + 1)
-            if T > nx - 0.25 { th += -s * A * sin((Double.pi / 2) * ((T - (nx - 0.25)) / 0.25)) }
-            return th
-        }
-
-        /// Mon: THE BELL. It swings over on every ring; the clapper strikes and sound arcs radiate out both sides.
-        public static let bell = MatrixScene(haptics: HAP) { g, c in
-            let T = c.T, h = hit(T), th = bellSwing(T)
-            let px = 22.5, py = 8.5
-            for p in BELL {
-                let (X, Y) = rotP(14.5 + p.x, 9.5 + p.y, px, py, th)
-                g.fr(X, Y, 0.82 + 0.18 * h)
-            }
-            let (kx, ky) = rotP(px, py + 17, px, py, th * 0.35)
-            g.fr(kx, ky, 1, 1)
-            // two slots of arcs, so a new ring never takes the dots of one still in flight
-            for s in 0..<2 {
-                let a = slotAge(T, s), live = a < 0.65
-                for w in 0..<2 {
-                    let wd = Double(w)
-                    let r = live ? 11.5 - wd * 2.2 + 4 * ez(a / 0.55) : 11.5 - wd * 2.2
-                    let b = live ? pow(1 - a / 0.65, 1.3) * (w != 0 ? 0.6 : 1) : 0
-                    for side in [-1.0, 1.0] {
-                        for i in 0..<9 {
-                            let ang = side * (Double.pi / 2 + (Double(i) / 8 - 0.5) * (w != 0 ? 0.75 : 0.95))
-                            g.fr(22.5 + sin(ang) * r, 17.5 - cos(ang) * r, b)
-                        }
-                    }
-                }
-            }
-            return SceneOut(opts: MatrixDealOptions(stagger: 0.12), flash: 0.1 * h, shake: 0.16 * h)
-        }
-    }
-}
-
-// MARK: - countdown.ts (Wednesday: THE WATER CLOCK)
-
-extension MX {
-    public enum Countdown {
-        /// K = whole seconds left (what the clock shows), q = seconds since the last flip (0...1)
-        static func tick(_ c: MatrixContext) -> (s: Double, K: Double, q: Double) {
-            let s = max(0, c.d.countdown), K = s.rounded(.down)
-            return (s, K, 1 - (s - K))
-        }
-        /// cell-centre coordinates of the board's centre
-        static let OX = CX + 0.5, OY = CY + 0.5
-        static func polar(_ r: Double, _ a: Double, _ ox: Double = OX, _ oy: Double = OY) -> (Double, Double) {
-            (ox + sin(a) * r, oy - cos(a) * r)
-        }
-
-        /// Wed: THE WATER CLOCK. The tank holds the time left (full is two hours). Every second a drop
-        /// swells at the spout, lets go and lands on the flip; the surface barely moves.
-        public static let waterClock = MatrixScene { g, c in
-            let (s, K, q) = tick(c)
-            // `floor` in the TS; renamed so it does not shadow the function
-            let L = cl(s / 7200), top = 5.0, bend = 20.0, flr = 25.0, xl = 14.0, xr = 30.0
-            let rise = ez((c.T - 0.1) / 0.7)
-            // the vessel: open top, straight sides, a funnel down to the spout
-            var yy = top
-            while yy <= bend {
-                g.on(xl, yy, 0.55)
-                g.on(xr, yy, 0.55)
-                yy += 1
-            }
-            g.line(xl, bend, CX - 1, flr + 1, 0.55)
-            g.line(xr, bend, CX + 1, flr + 1, 0.55)
-            g.on(CX - 1, flr + 2, 0.4)
-            g.on(CX + 1, flr + 2, 0.4)
-            // half the inside width at a row
-            let span = { (y: Double) -> Double in y <= bend ? 7.5 : 7.5 - ((y - bend) / (flr + 1 - bend)) * 6.6 }
-            // graduations every half hour, the hours longer
-            var m = 30.0
-            while m <= 120 {
-                let y = flr + 0.5 - (m / 120) * (flr - top)
-                g.on(xl - 2, y, 0.32)
-                if JSMath.rem(m, 60) == 0 { g.on(xl - 3, y, 0.32) }
-                m += 30
-            }
-            // the water: a quiet surface over a dim body
-            let sy = flr + 0.5 - L * (flr - top - 0.5) * rise
-            var y = (sy + 0.6).rounded(.up)
-            while y <= flr {
-                let hw = span(y + 0.5)
-                var x = xl + 1
-                while x < xr {
-                    if abs(x + 0.5 - OX) < hw { g.on(x, y, 0.36) }
-                    x += 1
-                }
-                y += 1
-            }
-            var x = xl + 1
-            while x < xr {
-                let inside: Double = abs(x + 0.5 - OX) < span(sy) ? 1 : 0
-                g.fr(x + 0.5, sy + 0.22 * sin(x * 0.55 - c.t * 1.1) + 0.12 * sin(x * 1.3 + c.t * 0.7), 0.95 * rise * inside)
-                x += 1
-            }
-            // two drops take turns: one swells and falls this second, the other has just landed
-            let spout = flr + 2.3, land = 32.5
-            for p in 0..<2 {
-                if JSMath.rem(K, 2) == Double(p) {
-                    if q < 0.56 {
-                        g.fr(OX, spout + 0.5 * ez(q / 0.56), 0.3 + 0.7 * ez(q / 0.5), 1)
-                    } else {
-                        let a = q - 0.56
-                        g.fr(OX, spout + 0.5 + 0.5 * ((land - spout - 0.5) / (0.44 * 0.44)) * a * a, 1, 1)
-                    }
-                } else if q < 0.14 {
-                    g.fr(OX, land, 1 - q / 0.14)
-                } else {
-                    g.fr(OX, spout, 0)
-                }
-            }
-            // the splash on the flip
-            for k in 0..<4 {
-                let sd: Double = k % 2 != 0 ? 1 : -1, far = k < 2 ? 1.0 : 0.55, a = cl(q / 0.42)
-                g.fr(OX + sd * (0.4 + 3.2 * far * ez(a)), land + 0.3 - 1.5 * far * sin(Double.pi * a), q < 0.42 ? 0.7 * (1 - a) : 0)
-            }
-            var xx = CX - 4
-            while xx <= CX + 4 {
-                g.on(xx, 33, 0.22 + 0.4 * exp(-q / 0.25) * (1 - abs(xx - CX) / 5))
-                xx += 1
-            }
-            return SceneOut(opts: MatrixDealOptions(stagger: 0.3))
-        }
-    }
-}
-
 // MARK: - Parity self-test (golden values from the web sources)
 
 #if DEBUG
@@ -582,14 +312,14 @@ public enum MatrixParity {
 
         // scenes: target count, checksum, and the first target
         let cases: [(String, MatrixScene, Double, Int, Double)] = [
-            ("verifiedWed", MX.Verified.battery, 0.5, 277, 13553.262875),
-            ("verifiedWed", MX.Verified.battery, 1.0, 396, 20611.7731124),
-            ("verifiedWed", MX.Verified.battery, 2.0, 396, 20766.1413505),
-            ("wakeMon", MX.Wake.bell, 0.4, 137, 6414.69079125),
-            ("wakeMon", MX.Wake.bell, 3.0, 137, 6618.57780901),
-            ("wakeMon", MX.Wake.bell, 6.0, 137, 6450.72674053),
-            ("countdownWed", MX.Countdown.waterClock, 0.3, 132, 6604.98403189),
-            ("countdownWed", MX.Countdown.waterClock, 2.0, 177, 8780.82567354),
+            ("verifiedWed", MX.Verified.SCENES[2], 0.5, 277, 13553.262875),
+            ("verifiedWed", MX.Verified.SCENES[2], 1.0, 396, 20611.7731124),
+            ("verifiedWed", MX.Verified.SCENES[2], 2.0, 396, 20766.1413505),
+            ("wakeMon", MX.Wake.SCENES[0], 0.4, 137, 6414.69079125),
+            ("wakeMon", MX.Wake.SCENES[0], 3.0, 137, 6618.57780901),
+            ("wakeMon", MX.Wake.SCENES[0], 6.0, 137, 6450.72674053),
+            ("countdownWed", MX.Countdown.SCENES[2], 0.3, 132, 6604.98403189),
+            ("countdownWed", MX.Countdown.SCENES[2], 2.0, 177, 8780.82567354),
         ]
         for (name, scene, T, n, sum) in cases {
             var g = MatrixBoard()
@@ -600,7 +330,7 @@ public enum MatrixParity {
         }
         do {
             var g = MatrixBoard()
-            let o = MX.Verified.battery.draw(&g, ctx(1.0))
+            let o = MX.Verified.SCENES[2].draw(&g, ctx(1.0))
             near(o.flash, 0.03024464460440257, 1e-12, "battery flash T=1")
             if g.out().first != MatrixTarget(x: 9.5, y: 18.5, b: 0.8, c: 0, id: 4617) { fail.append("battery first target") }
         }
@@ -614,7 +344,7 @@ public enum MatrixParity {
         for k in 0...90 {
             let t = Double(k) / 60
             var g = MatrixBoard()
-            let o = MX.Verified.battery.draw(&g, ctx(t, t: t))
+            let o = MX.Verified.SCENES[2].draw(&g, ctx(t, t: t))
             e.update(key: "verified:2:middle:\(o.phase ?? "0")", targets: g.out(), t: t, options: o.opts ?? MatrixDealOptions(stagger: 0.25))
         }
         var bs = 0.0, xs = 0.0
@@ -624,6 +354,32 @@ public enum MatrixParity {
         }
         near(bs, 302.036830505, 1e-5, "engine brightness sum")
         near(xs, 60301.9963509, 1e-5, "engine x sum")
+        return fail
+    }
+
+    /// All 133 generated scenes against `allGolden` (MatrixParityAll.swift), replayed in the
+    /// golden script's order. setup.ts remembers per-day state between draws, so its memory is
+    /// cleared first, exactly like a fresh Node run.
+    public static func runAll() -> [String] {
+        var fail: [String] = []
+        MX.Setup.MEM.clear()
+        for (m, theme, k, n, sum, ph, flash, shake) in allGolden {
+            guard let moment = MatrixMoment(rawValue: m) else {
+                fail.append("unknown moment \(m)")
+                continue
+            }
+            var g = MatrixBoard()
+            let o = MatrixSceneRegistry.scene(moment, day: theme).draw(&g, allContexts[k])
+            let out = g.out()
+            let what = "\(m)[\(theme)] ctx \(k)"
+            if out.count != n { fail.append("\(what): \(out.count) targets, want \(n)") }
+            let cs = checksum(out)
+            if !(abs(cs - sum) <= 1e-9 * max(1, abs(sum))) { fail.append("\(what) checksum: got \(cs), want \(sum)") }
+            if o.phase != ph { fail.append("\(what) phase: got \(o.phase ?? "nil"), want \(ph ?? "nil")") }
+            if !(abs(o.flash - flash) <= 1e-9) { fail.append("\(what) flash: got \(o.flash), want \(flash)") }
+            if !(abs(o.shake - shake) <= 1e-9) { fail.append("\(what) shake: got \(o.shake), want \(shake)") }
+        }
+        MX.Setup.MEM.clear()
         return fail
     }
 }

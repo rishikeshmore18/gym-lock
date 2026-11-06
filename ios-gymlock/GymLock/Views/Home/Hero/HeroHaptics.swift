@@ -59,11 +59,29 @@ public struct HapticCue: Sendable, Equatable {
 public final class HeroHapticPlayer {
     public static let shared = HeroHapticPlayer()
 
-    /// App-level switch (a settings toggle). The system switch is honoured by UIKit itself.
-    public var isEnabled = true
-    /// Impacts closer than this to the previous one are dropped. A `success` always plays, and a
-    /// stronger impact may replace a weaker one inside the window.
-    public var minInterval: CFTimeInterval = 0.04
+    /// App-level switch (Profile > Preferences > haptics). The system switch is honoured by UIKit.
+    public var isEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: HeroCardStyle.hapticsKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: HeroCardStyle.hapticsKey) }
+    }
+    /// Spec §6.1: two different sources never land closer than this.
+    public var minInterval: CFTimeInterval = 0.05
+    /// Spec §6.1: at most one heavy or success from different sources inside this window.
+    public var strongInterval: CFTimeInterval = 0.3
+
+    /// Reasons the hero must stay silent right now ("alarm", "camera", "overlay", "background").
+    /// Any entry blocks every hero haptic, including the done flow's taps.
+    public private(set) var blockers: Set<String> = []
+
+    public func setBlocked(_ reason: String, _ blocked: Bool) {
+        if blocked { blockers.insert(reason) } else { blockers.remove(reason) }
+    }
+
+    public var isOpen: Bool { isEnabled && blockers.isEmpty }
+
+    private var lastSource: ObjectIdentifier?
+    private var lastStrongFire: CFTimeInterval = -1
+    private var lastStrongSource: ObjectIdentifier?
 
     public let supportsHaptics: Bool = CHHapticEngine.capabilitiesForHardware().supportsHaptics
 
@@ -79,7 +97,7 @@ public final class HeroHapticPlayer {
     /// Wake the Taptic Engine so the next cue of this kind plays without latency. Cheap; the system
     /// keeps a generator prepared for a couple of seconds.
     public func prepare(_ kind: HapticKind) {
-        guard isEnabled, supportsHaptics else { return }
+        guard isOpen, supportsHaptics else { return }
         switch kind {
         case .light: light.prepare()
         case .medium: medium.prepare()
@@ -88,17 +106,37 @@ public final class HeroHapticPlayer {
         }
     }
 
-    public func play(_ kind: HapticKind, now: CFTimeInterval = CACurrentMediaTime()) {
-        guard isEnabled, supportsHaptics else { return }
-        if kind != .success, lastFire >= 0, now - lastFire < minInterval, kind.rank <= lastRank { return }
+    /// - Parameter source: the scheduler (or flow) playing. Cues from one source keep their authored
+    ///   spacing (the seal is heavy, heavy, success inside 160 ms); the gaps apply between sources.
+    public func play(_ kind: HapticKind, source: ObjectIdentifier? = nil, now: CFTimeInterval = CACurrentMediaTime()) {
+        guard isOpen, supportsHaptics else { return }
+        let otherSource = source == nil || source != lastSource
+        if lastFire >= 0, now - lastFire < (otherSource ? minInterval : 0.03), kind.rank <= lastRank, kind != .success { return }
+        let strong = kind == .heavy || kind == .success
+        if strong, lastStrongFire >= 0, now - lastStrongFire < strongInterval, source == nil || source != lastStrongSource { return }
         lastFire = now
         lastRank = kind.rank
+        lastSource = source
+        if strong {
+            lastStrongFire = now
+            lastStrongSource = source
+        }
         switch kind {
         case .light: light.impactOccurred()
         case .medium: medium.impactOccurred()
         case .heavy: heavy.impactOccurred()
         case .success: notify.notificationOccurred(.success)
         }
+    }
+}
+
+// MARK: - Policy (spec §6.1)
+
+enum HeroHapticPolicy {
+    /// Moments whose card scene may play a `.success`: the proof (verified), week kept, automatic.
+    /// The seal inside the done flow is the fourth, and plays from the flow itself.
+    static func allowsSuccess(_ m: MatrixMoment) -> Bool {
+        m == .verified || m == .weekkept || m == .automatic
     }
 }
 
@@ -116,6 +154,9 @@ public final class HeroHapticScheduler {
     public var lookahead: Double = 0.15
     /// Off while the host is not the frontmost owner of haptics (e.g. the card under the done flow).
     public var isActive = true
+    /// Spec §6.1: `.success` belongs to the proof, the seal, week kept and automatic. Elsewhere a
+    /// success cue plays as heavy.
+    public var allowsSuccess = true
 
     public init(player: HeroHapticPlayer = .shared) {
         self.player = player
@@ -151,12 +192,16 @@ public final class HeroHapticScheduler {
             if cue.t - T > lookahead { break }
             player.prepare(cue.kind)
         }
-        if let k = strongest { player.play(k) }
+        if let k = strongest { player.play(mapped(k), source: ObjectIdentifier(self)) }
     }
 
     /// Play now, outside the schedule (taps on the done flow).
     public func playNow(_ kind: HapticKind) {
         guard isActive else { return }
-        player.play(kind)
+        player.play(mapped(kind), source: ObjectIdentifier(self))
+    }
+
+    private func mapped(_ k: HapticKind) -> HapticKind {
+        k == .success && !allowsSuccess ? .heavy : k
     }
 }

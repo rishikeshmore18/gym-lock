@@ -31,7 +31,7 @@ struct ProgressTabView: View {
     /// outlives the card that raised it.
     @State private var shareOrigin: ShareOrigin?
     @Namespace private var shareTransition
-    @State private var badges = BadgeStore()
+    @State private var badges = BadgeStore.shared
     @State private var isShowingBadges = false
 
     /// The zoom between the two levels of the chart.

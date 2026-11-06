@@ -136,7 +136,7 @@ struct MomentumFlameProgress: View {
                 litCount = target
                 filledConnectors = max(0, target - 1)
             }
-            completesWeek ? Haptics.commit() : Haptics.tap()
+            if !CelebrationQueue.shared.holdsHomeHaptics { completesWeek ? Haptics.commit() : Haptics.tap() }
             return
         }
 
@@ -151,7 +151,8 @@ struct MomentumFlameProgress: View {
                 // 2. The flame lights with the card's state change.
                 withAnimation(Theme.stateChange) { litCount = index + 1 }
                 if index == target - 1 {
-                    completesWeek ? Haptics.commit() : Haptics.tap()
+                    // quiet while the done flow is waiting or on screen (spec §3.5)
+                    if !CelebrationQueue.shared.holdsHomeHaptics { completesWeek ? Haptics.commit() : Haptics.tap() }
                 } else {
                     try? await Task.sleep(for: .milliseconds(200))
                     if Task.isCancelled { return }

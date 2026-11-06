@@ -81,6 +81,9 @@ private struct TabItemLabel: View {
     /// Counted rather than bound to `isSelected`, so the icon bounces when a
     /// tab becomes current and stays still when it is abandoned.
     @State private var bounce = 0
+    @Environment(\.rootTabDots) private var dots
+
+    private var hasDot: Bool { dots.contains(tab) && !isSelected }
 
     var body: some View {
         VStack(spacing: 3) {
@@ -88,6 +91,18 @@ private struct TabItemLabel: View {
                 .font(.system(size: 18, weight: .semibold))
                 .symbolEffect(.bounce, options: .speed(1.4), value: bounce)
                 .scaleEffect(isSelected ? 1.05 : 1)
+                // Something is waiting here: a finished workout's flow (Home) or a
+                // badge that ranked up quietly (Progress). Spec §3.2 rule 3, §4.1.
+                .overlay(alignment: .topTrailing) {
+                    if hasDot {
+                        Circle()
+                            .fill(Theme.accent)
+                            .frame(width: 7, height: 7)
+                            .offset(x: 5, y: -2)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: hasDot)
 
             Text(tab.title)
                 .font(.system(size: 10.5, weight: isSelected ? .semibold : .medium))
@@ -102,6 +117,7 @@ private struct TabItemLabel: View {
         .contentShape(.capsule)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(tab.title)
+        .accessibilityValue(hasDot ? "New" : "")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .onChange(of: isSelected) { _, selected in
             guard selected, !reduceMotion else { return }
@@ -484,6 +500,8 @@ private struct CirclePressStyle: ButtonStyle {
 /// so content scrolls beneath the material and has something to refract.
 struct RootTabBar: View {
     @Binding var selection: RootTab
+    /// Tabs showing a small coral dot (something is waiting there).
+    var dots: Set<RootTab> = []
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -514,6 +532,7 @@ struct RootTabBar: View {
         .padding(.horizontal, 16)
         .padding(.top, 6)
         .padding(.bottom, 4)
+        .environment(\.rootTabDots, dots)
         .task { Haptics.preparePress() }
     }
 
@@ -528,6 +547,17 @@ struct RootTabBar: View {
         withAnimation(reduceMotion ? TabMotion.reduced : TabMotion.settle) {
             selection = tab
         }
+    }
+}
+
+private struct RootTabDotsKey: EnvironmentKey {
+    static let defaultValue: Set<RootTab> = []
+}
+
+extension EnvironmentValues {
+    var rootTabDots: Set<RootTab> {
+        get { self[RootTabDotsKey.self] }
+        set { self[RootTabDotsKey.self] = newValue }
     }
 }
 

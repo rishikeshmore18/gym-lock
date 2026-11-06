@@ -175,7 +175,7 @@ enum HomeCardDeriver {
                     hero: .missed,
                     protection: protection(store, coordinator: coordinator, session: nil),
                     next: nextIdle(store, now: now, calendar: calendar),
-                    path: PathCard(completedSteps: 0, placeholder: "Today reset — tomorrow is ready")
+                    path: PathCard(completedSteps: 0, placeholder: "Today reset. Tomorrow is ready")
                 )
             default:
                 break

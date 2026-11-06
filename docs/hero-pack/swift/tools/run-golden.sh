@@ -4,6 +4,8 @@
 # mx/common.ts imports PROOF from hero4/card4.tsx, which pulls React and
 # ../../src/springFast (not part of the pack). A scratch copy swaps that import
 # for the constant (20 * 60) so the pure TS modules load on their own.
+# Usage: run-golden.sh [--all|--story]. --all prints MatrixParityAll.swift (every scene),
+# --story prints MatrixParityStory.swift (every done-flow screen).
 # Output goes to stdout; compare it with MatrixParity in
 # ios-gymlock/GymLock/Views/Home/Hero/Matrix/MatrixScene.swift and MatrixStoryView.swift.
 set -euo pipefail
@@ -16,4 +18,12 @@ cp -r "$PACK/web-reference" "$WORK/"
 cp -r "$HERE" "$WORK/swift/tools"
 sed -i "s#^import {PROOF} from '../../hero4/card4';#const PROOF = 20 * 60;#" "$WORK/web-reference/hero13/mx/common.ts"
 cd "$WORK/swift/tools"
-bun run matrix-golden.local.ts
+if [ "${1:-}" = "--all" ]; then
+  # Swift source for MatrixParityAll.swift (all 133 scenes)
+  bun run matrix-golden-all.local.ts
+elif [ "${1:-}" = "--story" ]; then
+  # Swift source for MatrixParityStory.swift (every done-flow screen)
+  bun run story-golden.local.ts
+else
+  bun run matrix-golden.local.ts
+fi

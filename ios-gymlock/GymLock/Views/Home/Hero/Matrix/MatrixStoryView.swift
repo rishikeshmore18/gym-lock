@@ -25,9 +25,12 @@
 //    - At sealT + 3.6 s (4.2 s on the month's last session) the overlay collapses into the home card
 //      over 0.55 s; at 70% the card switches to `verified` (onLanded), at 100% it is gone (onFinished).
 //
-//  Ported fully: the frame, the copy layers for the header, the climax and the button, the tap and
-//  seal timings, haptics per screen, the collapse, all mxstory helpers, Wednesday's finish (BATTERY)
-//  and the count (all seven days). Everything else is a clearly marked TODO mapped to mxstory.ts.
+//  Ported fully: the frame, every copy layer (header, verified pill, today figures, week, month
+//  figures and target picker, far, climax, month flourish, button), the tap and seal timings,
+//  haptics per screen, the collapse, and every board screen. The board screens are transpiled from
+//  mxstory.ts into Scenes/MXStory.swift and checked against the web by MatrixParity.runStoryAll().
+//  The copy carries real values only: the prototype's sample heart rate, energy and week numbers
+//  are not ported; MatrixStoryCopy supplies whatever GymLock actually measured.
 //
 //  Depends on: MatrixEngine.swift, MatrixBoard.swift, MatrixScene.swift, HeroHaptics.swift,
 //              MatrixCardView.swift (MatrixGridRenderer, MatrixRGB, MatrixRich).
@@ -76,10 +79,38 @@ public enum MatrixStoryConfig {
         }
     }
 
+    /// CFG_R (screens12.ts): the Ridge done screens.
+    public static func cfgR(_ id: MatrixStoryScreen) -> Screen {
+        func h(_ t: Double, _ k: HapticKind) -> HapticCue { HapticCue(t: t, kind: k) }
+        switch id {
+        case .verified:
+            return Screen(settle: 2.0, haptics: [h(0.05, .light), h(0.5, .medium), h(0.9, .heavy), h(0.95, .success)] + (0..<3).map { h(1.3 + Double($0) * 0.12, .light) })
+        case .today:
+            return Screen(settle: 1.8, haptics: [h(0.05, .medium)] + (0..<8).map { h(0.25 + Double($0) * 0.12, .light) } + [h(1.3, .medium)])
+        case .week:
+            return Screen(settle: 1.8, haptics: [h(0.05, .medium)] + (0..<3).map { h(0.5 + Double($0) * 0.18, .medium) } + [h(1.3, .light)])
+        case .month:
+            return Screen(settle: 1.6, haptics: [h(0.05, .medium)] + (0..<6).map { h(0.25 + Double($0) * 0.1, .light) } + [h(1.1, .heavy)])
+        case .far:
+            return Screen(settle: 2.0, haptics: [h(0.05, .medium)] + (0..<7).map { h(0.3 + Double($0) * 0.13, .light) } + [h(1.4, .heavy)])
+        case .climax:
+            return Screen(settle: 1.0, haptics: [h(0.05, .medium)])
+        }
+    }
+
+    static func cfg(_ id: MatrixStoryScreen, style: HeroCardStyle) -> Screen {
+        style == .ridge ? cfgR(id) : cfg(id)
+    }
+
     /// Seconds after the seal that the count takes over (story13m.tsx `counted`).
     public static let countAfter: Double = 1.6
     /// Seconds after the seal that the overlay collapses (app13.tsx, Matrix).
     public static func collapseAfter(mp: MatrixMonthPos, pos: MatrixWeekPos) -> Double { mp == .last && pos == .last ? 4.2 : 3.6 }
+    /// app12.tsx: Ridge collapses sooner (S + 2.8 s), the month's last session still waits 4.2 s.
+    static func collapseAfter(mp: MatrixMonthPos, pos: MatrixWeekPos, style: HeroCardStyle) -> Double {
+        if mp == .last && pos == .last { return 4.2 }
+        return style == .ridge ? 2.8 : 3.6
+    }
     public static let collapseDuration: Double = 0.55
 }
 
@@ -95,13 +126,13 @@ public struct MatrixClimaxCopy: Sendable {
     public let end: String
 
     public static let byDay: [MatrixClimaxCopy] = [
-        MatrixClimaxCopy(eyebrow: "TODAY’S SUNRISE", lastEyebrow: "THE WEEK’S LAST SUNRISE", title: "Raise it.", sub: { "Tap **\($0) times** to lift the sun over the horizon." }, idle: "Tap to raise the sun", mid: "Higher", end: "The sun is up, and so is the count."),
-        MatrixClimaxCopy(eyebrow: "TODAY’S BLOCK", lastEyebrow: "THE WEEK’S LAST BLOCK", title: "Build it.", sub: { "Tap **\($0) times.** Every session is a block in the wall." }, idle: "Tap to place a block", mid: "Next block", end: "Set in place. The wall gets taller every session."),
-        MatrixClimaxCopy(eyebrow: "TODAY’S CHARGE", lastEyebrow: "THE WEEK’S LAST CHARGE", title: "Charge it.", sub: { "Tap **\($0) times** to fill today’s charge." }, idle: "Tap to charge", mid: "Charging", end: "Fully charged. Training gives back more than it takes."),
-        MatrixClimaxCopy(eyebrow: "TODAY’S BAR", lastEyebrow: "THE WEEK’S LAST LIFT", title: "Load it.", sub: { "Tap **\($0) times.** Every tap adds a plate." }, idle: "Tap to add a plate", mid: "Add another", end: "Loaded and lifted. One more rep for the habit."),
-        MatrixClimaxCopy(eyebrow: "TODAY’S PUSH", lastEyebrow: "THE WEEK’S LAST PUSH", title: "Push it.", sub: { "Tap **\($0) times** to push today to the top." }, idle: "Tap to push", mid: "Higher", end: "Top reached. One more on the count."),
-        MatrixClimaxCopy(eyebrow: "TODAY’S RING", lastEyebrow: "THE WEEK’S LAST RING", title: "Close it.", sub: { "Tap **\($0) times** to close today’s ring." }, idle: "Tap to close the ring", mid: "Keep closing", end: "Ring closed. Habits are loops you keep closing."),
-        MatrixClimaxCopy(eyebrow: "THE WEEK’S SAND", lastEyebrow: "THE WEEK’S LAST GRAINS", title: "Turn it.", sub: { "Tap **\($0) times.** One day of sand for each." }, idle: "Tap to let a day fall", mid: "Next day", end: "Every day through. Turn it over and a new week starts."),
+        MatrixClimaxCopy(eyebrow: "TODAY'S SUNRISE", lastEyebrow: "THE WEEK'S LAST SUNRISE", title: "Raise it.", sub: { "Tap **\($0) times** to lift the sun over the horizon." }, idle: "Tap to raise the sun", mid: "Higher", end: "The sun is up, and so is the count."),
+        MatrixClimaxCopy(eyebrow: "TODAY'S BLOCK", lastEyebrow: "THE WEEK'S LAST BLOCK", title: "Build it.", sub: { "Tap **\($0) times.** Every session is a block in the wall." }, idle: "Tap to place a block", mid: "Next block", end: "Set in place. The wall gets taller every session."),
+        MatrixClimaxCopy(eyebrow: "TODAY'S CHARGE", lastEyebrow: "THE WEEK'S LAST CHARGE", title: "Charge it.", sub: { "Tap **\($0) times** to fill today's charge." }, idle: "Tap to charge", mid: "Charging", end: "Fully charged. Training gives back more than it takes."),
+        MatrixClimaxCopy(eyebrow: "TODAY'S BAR", lastEyebrow: "THE WEEK'S LAST LIFT", title: "Load it.", sub: { "Tap **\($0) times.** Every tap adds a plate." }, idle: "Tap to add a plate", mid: "Add another", end: "Loaded and lifted. One more rep for the habit."),
+        MatrixClimaxCopy(eyebrow: "TODAY'S PUSH", lastEyebrow: "THE WEEK'S LAST PUSH", title: "Push it.", sub: { "Tap **\($0) times** to push today to the top." }, idle: "Tap to push", mid: "Higher", end: "Top reached. One more on the count."),
+        MatrixClimaxCopy(eyebrow: "TODAY'S RING", lastEyebrow: "THE WEEK'S LAST RING", title: "Close it.", sub: { "Tap **\($0) times** to close today's ring." }, idle: "Tap to close the ring", mid: "Keep closing", end: "Ring closed. Habits are loops you keep closing."),
+        MatrixClimaxCopy(eyebrow: "THE WEEK'S SAND", lastEyebrow: "THE WEEK'S LAST GRAINS", title: "Turn it.", sub: { "Tap **\($0) times.** One day of sand for each." }, idle: "Tap to let a day fall", mid: "Next day", end: "Every day through. Turn it over and a new week starts."),
     ]
 
     public static let tally = ["SUNRISES", "BLOCKS LAID", "CHARGES", "BARS LIFTED", "PUSHES", "RINGS CLOSED", "WEEKS TURNED"]
@@ -109,18 +140,46 @@ public struct MatrixClimaxCopy: Sendable {
     public static func posTail(_ pos: MatrixWeekPos) -> String {
         switch pos {
         case .first: return "The first of the week is the hardest to start."
-        case .middle: return "The middle is where most people stop. **You didn’t.**"
-        case .last: return "A full week, finished on a high. **That’s how it will be remembered.**"
+        case .middle: return "The middle is where most people stop. **You didn't.**"
+        case .last: return "A full week, finished on a high. **That's how it will be remembered.**"
         }
     }
 
-    /// `endFor(pos, day)`: the closing line and the button. The next session is the next weekday.
-    /// NOTE: the week numbers in the `last` line are the prototype's sample data; feed real values.
-    public static func end(pos: MatrixWeekPos, day: Int) -> (sub: String, button: String) {
-        let names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        let next = day >= 4 ? "Monday" : names[max(0, min(6, day + 1))]
-        if pos == .last { return ("Week **5 of 5.** Week streak **6.** Rest up.", "Week done. See you Monday") }
-        return (pos == .first ? "Next: **\(next), 07:00.** Keep it rolling." : "Next: **\(next), 07:00.** Only 2 left.", "See you \(next)")
+    /// Real facts for the closing line (days12.ts `endFor`, with the prototype's sample numbers
+    /// replaced by the user's own).
+    public struct EndFacts: Sendable, Equatable {
+        /// sessions this week, including today
+        public var weekDone: Int
+        /// the weekly goal (3...7)
+        public var weekGoal: Int
+        /// kept weeks in a row, counting this one once it is kept
+        public var weekStreak: Int
+        /// the next planned session, e.g. ("Thursday", "07:00"); nil when nothing is planned
+        public var nextDay: String?
+        public var nextTime: String?
+        public init(weekDone: Int, weekGoal: Int, weekStreak: Int, nextDay: String? = nil, nextTime: String? = nil) {
+            self.weekDone = weekDone
+            self.weekGoal = weekGoal
+            self.weekStreak = weekStreak
+            self.nextDay = nextDay
+            self.nextTime = nextTime
+        }
+    }
+
+    /// `endFor(pos, day)`: the closing line and the button, from real values only.
+    public static func end(pos: MatrixWeekPos, facts f: EndFacts) -> (sub: String, button: String) {
+        let next: String? = f.nextDay.map { d in f.nextTime.map { "\(d), \($0)" } ?? d }
+        if pos == .last {
+            let streak = f.weekStreak > 0 ? " Week streak **\(f.weekStreak).**" : ""
+            return ("Week **\(f.weekDone) of \(f.weekGoal).**\(streak) Rest up.", f.nextDay.map { "Week done. See you \($0)" } ?? "Week done")
+        }
+        let button = f.nextDay.map { "See you \($0)" } ?? "Done"
+        let left = max(0, f.weekGoal - f.weekDone)
+        if pos == .first {
+            return (next.map { "Next: **\($0).** Keep it rolling." } ?? "Keep it rolling.", button)
+        }
+        let tail = left == 1 ? "Only 1 left." : "Only \(left) left."
+        return (next.map { "Next: **\($0).** \(tail)" } ?? tail, button)
     }
 }
 
@@ -141,10 +200,110 @@ public struct MatrixStoryCopy: Sendable {
     /// The quieter second line (week / month research notes).
     public var research: [MatrixStoryScreen: String]
 
-    public init(headers: [MatrixStoryScreen: Header], captions: [MatrixStoryScreen: String] = [:], research: [MatrixStoryScreen: String] = [:]) {
+    /// One figure in a stats row (story13m.tsx today / month rows). `roll` counts up to the value.
+    public struct Stat: Sendable, Equatable {
+        public var value: String
+        public var roll: Int?
+        public var unit: String?
+        public var label: String
+        public var coral: Bool
+        public init(value: String, roll: Int? = nil, unit: String? = nil, label: String, coral: Bool = false) {
+            self.value = value
+            self.roll = roll
+            self.unit = unit
+            self.label = label
+            self.coral = coral
+        }
+        public static func count(_ n: Int, unit: String? = nil, label: String, coral: Bool = false) -> Stat {
+            Stat(value: String(n), roll: n, unit: unit, label: label, coral: coral)
+        }
+    }
+
+    /// The today screen: when the session ran, a line about it, and real figures only (no heart
+    /// rate or energy unless GymLock actually measured them).
+    public struct Today: Sendable, Equatable {
+        public var start: String
+        public var end: String?
+        public var caption: String?
+        public var stats: [Stat]
+        /// The session's measured length (Ridge today title rolls up to it). Nil when unknown.
+        public var minutes: Int?
+        public init(start: String, end: String? = nil, caption: String? = nil, stats: [Stat] = [], minutes: Int? = nil) {
+            self.start = start
+            self.end = end
+            self.caption = caption
+            self.stats = stats
+            self.minutes = minutes
+        }
+    }
+
+    /// One day of the current week (Ridge week pebbles): real sessions only.
+    public struct WeekDay: Sendable, Equatable {
+        public var label: String
+        public var minutes: Int?
+        public var done: Bool
+        public var isToday: Bool
+        public init(label: String, minutes: Int? = nil, done: Bool, isToday: Bool) {
+            self.label = label
+            self.minutes = minutes
+            self.done = done
+            self.isToday = isToday
+        }
+    }
+
+    /// days12.ts MONTH_TARGETS
+    public struct MonthTarget: Sendable, Equatable {
+        public var n: Int
+        public var label: String
+        public init(n: Int, label: String) {
+            self.n = n
+            self.label = label
+        }
+    }
+
+    public var today: Today?
+    /// The verified screen's pill ("6 apps unlocked"). Nil hides it.
+    public var appsUnlocked: Int?
+    /// The month screen's figures when it is not asking for a target.
+    public var monthStats: [Stat]
+    /// The month screen's target choices (first week of a month, first session).
+    public var monthTargets: [MonthTarget]
+    /// "November": the climax flourish on the month's last session.
+    public var monthName: String?
+    /// The closing line and button after the seal.
+    public var endSub: String
+    public var endButton: String
+    /// Ridge week screen: Monday-first days and the week's figures.
+    public var weekDays: [WeekDay] = []
+    public var weekStats: [Stat] = []
+    /// Ridge far screen: minutes per week (oldest first, at most 8) and the long-run figures.
+    public var farWeeks: [Int] = []
+    public var farStats: [Stat] = []
+    /// Total sessions after today's (the Ridge count rolls from `sessions - 1`).
+    public var sessions: Int = 0
+
+    public init(
+        headers: [MatrixStoryScreen: Header],
+        captions: [MatrixStoryScreen: String] = [:],
+        research: [MatrixStoryScreen: String] = [:],
+        today: Today? = nil,
+        appsUnlocked: Int? = nil,
+        monthStats: [Stat] = [],
+        monthTargets: [MonthTarget] = [],
+        monthName: String? = nil,
+        endSub: String = "",
+        endButton: String = "Done"
+    ) {
         self.headers = headers
         self.captions = captions
         self.research = research
+        self.today = today
+        self.appsUnlocked = appsUnlocked
+        self.monthStats = monthStats
+        self.monthTargets = monthTargets
+        self.monthName = monthName
+        self.endSub = endSub
+        self.endButton = endButton
     }
 }
 
@@ -174,6 +333,8 @@ public struct MatrixStoryContext: Sendable {
     public var pick: Bool
     public var picked: Bool
     public var pickAt: Double?
+    /// the month screen's calendar; without it the month screen draws nothing
+    public var cal: MatrixStoryCal? = nil
 }
 
 public struct MatrixGlow: Sendable, Equatable {
@@ -187,340 +348,169 @@ public struct MatrixStoryOut: Sendable {
     public var glow: [MatrixGlow] = []
 }
 
-// MARK: - mxstory.ts helpers and screens
+// MARK: - mxstory.ts bridge
+//
+// Every screen is transpiled from hero13/mxstory.ts into `MX.Story` (Scenes/MXStory.swift). The
+// TS context is all numbers, so the bridge mirrors it as `MXStoryContext` and maps the result back.
+
+/// The month screen's calendar (hero13 `MCal`): Monday-first `lead` blanks, then one cell per day of
+/// the month: "done", "today", "future", "miss" or "rest".
+public struct MatrixStoryCal: Sendable, Equatable {
+    public var lead: Int
+    public var cells: [String]
+    public var target: Int
+    public var sessions: Int
+    public init(lead: Int, cells: [String], target: Int, sessions: Int) {
+        self.lead = lead
+        self.cells = cells
+        self.target = target
+        self.sessions = sessions
+    }
+}
+
+extension MX.Story {
+    final class MXStoryDay {
+        var day: Double
+        var sessions: Double
+        init(day: Double, sessions: Double) {
+            self.day = day
+            self.sessions = sessions
+        }
+    }
+
+    final class MXStoryWeek {
+        var done: Double
+        var today: Double
+        init(done: Double, today: Double) {
+            self.done = done
+            self.today = today
+        }
+    }
+
+    final class MXStoryCal {
+        var lead: Double
+        var cells: [String]
+        var target: Double
+        var sessions: Double
+        init(lead: Double, cells: [String], target: Double, sessions: Double) {
+            self.lead = lead
+            self.cells = cells
+            self.target = target
+            self.sessions = sessions
+        }
+    }
+
+    /// mxstory.ts `SC`
+    final class MXStoryContext {
+        var t: Double, lt: Double, cx: Double, cy: Double, cols: Double, rows: Double
+        var N: Double, taps: Double
+        var tapTimes: [Double]
+        var tapAt: Double?
+        var sealT: Double?
+        var since: Double
+        var D: MXStoryDay
+        var day: Double
+        var pos: String
+        var PW: MXStoryWeek
+        var cal: MXStoryCal?
+        var pick: Bool?
+        var picked: Bool?
+        var pickAt: Double?
+
+        init(_ s: MatrixStoryContext) {
+            t = s.t
+            lt = s.lt
+            cx = s.cx
+            cy = s.cy
+            cols = Double(s.cols)
+            rows = Double(s.rows)
+            N = Double(s.N)
+            taps = Double(s.taps)
+            tapTimes = s.tapTimes
+            tapAt = s.tapAt
+            sealT = s.sealT
+            since = s.since
+            D = MXStoryDay(day: Double(s.D.day), sessions: Double(s.D.sessions))
+            day = Double(s.day)
+            pos = s.pos.rawValue
+            PW = MXStoryWeek(done: Double(s.weekDone), today: Double(s.weekToday))
+            cal = s.cal.map { MXStoryCal(lead: Double($0.lead), cells: $0.cells, target: Double($0.target), sessions: Double($0.sessions)) }
+            pick = s.pick
+            picked = s.picked
+            pickAt = s.pickAt
+        }
+    }
+
+    /// mxstory.ts `Res`
+    final class MXStoryRes {
+        var ph: String?
+        var o: MatrixDealOptions?
+        var flash: Double?
+        var glow: [MatrixGlow]?
+        init(ph: String? = nil, o: MatrixDealOptions? = nil, flash: Double? = nil, glow: [MatrixGlow]? = nil) {
+            self.ph = ph
+            self.o = o
+            self.flash = flash
+            self.glow = glow
+        }
+    }
+}
 
 public enum MatrixStoryScenes {
-    typealias P = (Double, Double)
-
-    static func cl(_ x: Double) -> Double { MX.cl(x) }
-    static func ez(_ x: Double) -> Double { MX.ez(x) }
-    static func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double { MX.lerp(a, b, t) }
-    static let TAU = MX.TAU
-
-    static func seg(_ x: Double, _ a: Double, _ d: Double) -> Double { cl((x - a) / d) }
-    /// a quick spring 0 -> 1 from a = 0: lands in about 0.14 s, a small overshoot, settled by 0.4 s
-    static func sp(_ a: Double) -> Double { a <= 0 ? 0 : a > 0.6 ? 1 : MX.spr(a, 11, 9) }
-    /// a pulse that decays after an event at a = 0
-    static func hit(_ a: Double, _ d: Double = 0.25) -> Double { a >= 0 ? exp(-a / d) : 0 }
-    static func C(_ v: Double) -> Double { v.rounded(.down) + 0.5 }
-    static func eo5(_ x: Double) -> Double { 1 - pow(1 - cl(x), 5) }
-    static func gb(_ x: Double) -> Double { exp(-x * x) }
-
-    /// mxstory.ts `path(V)`: a polyline measured by arc length.
-    struct Polyline {
-        let V: [P]
-        let L: [Double]
-        let len: Double
-        init(_ V: [P]) {
-            self.V = V
-            var L: [Double] = [0]
-            for i in stride(from: 1, to: V.count, by: 1) { L.append(L[i - 1] + hypot(V[i].0 - V[i - 1].0, V[i].1 - V[i - 1].1)) }
-            self.L = L
-            len = L.last ?? 0
-        }
-        private func idx(_ s: Double) -> Int {
-            var i = 1
-            while i < V.count - 1 && L[i] < s { i += 1 }
-            return i
-        }
-        func at(_ s: Double) -> P {
-            guard V.count >= 2 else { return V.first ?? (0, 0) }
-            let q = max(0, min(len, s)), i = idx(q)
-            let d = L[i] - L[i - 1]
-            let u = (q - L[i - 1]) / (d != 0 && !d.isNaN ? d : 1) // `|| 1`
-            return (lerp(V[i - 1].0, V[i].0, u), lerp(V[i - 1].1, V[i].1, u))
-        }
-        func dir(_ s: Double) -> P {
-            guard V.count >= 2 else { return (1, 0) }
-            let i = idx(max(0, min(len, s)))
-            let dx = V[i].0 - V[i - 1].0, dy = V[i].1 - V[i - 1].1
-            let h = hypot(dx, dy), d = h != 0 ? h : 1
-            return (dx / d, dy / d)
-        }
-    }
-
-    /// a ring of free dots thrown out from (x, y) at a = 0; always pushed, dark when idle
-    static func ripple(_ g: inout MatrixBoard, _ x: Double, _ y: Double, _ r0: Double, _ r1: Double, _ a: Double, _ d: Double, _ n: Int, _ b: Double = 0.6) {
-        let live = a >= 0 && a < d, p = live ? ez(a / d) : 0
-        for i in 0..<max(0, n) {
-            let an = (Double(i) / Double(n)) * TAU, r = lerp(r0, r1, p)
-            g.fr(x + sin(an) * r, y - cos(an) * r, live ? b * (1 - a / d) : 0)
-        }
-    }
-
-    /// a diagonal band of light that crosses the art once every `per` seconds (calm idle)
-    static func sheen(_ dx: Double, _ dy: Double, _ t: Double, _ per: Double = 3.4, _ span: Double = 34, _ w: Double = 3.5) -> Double {
-        let u = (JSMath.rem(JSMath.rem(t, per) + per, per) / per) * (2 * span + 6 * w) - span - 3 * w
-        let d = dx + dy * 0.55 - u
-        return exp(-(d * d) / (w * w))
-    }
-
-    /// LED digits (5 x 7): digits and ':' only, like mxstory's F5.
-    static let F5: [Unicode.Scalar: PixelRows] = MatrixLED.FONT.filter { entry in
-        let zero: Unicode.Scalar = "0", nine: Unicode.Scalar = "9", colon: Unicode.Scalar = ":"
-        return (entry.key >= zero && entry.key <= nine) || entry.key == colon
-    }
-
-    /// small 3 x 5 type for labels
-    static let F3: [Unicode.Scalar: PixelRows] = [
-        "M": PixelRows(["#...#", "##.##", "#.#.#", "#...#", "#...#"]), "T": PixelRows(["###", ".#.", ".#.", ".#.", ".#."]), "W": PixelRows(["#...#", "#...#", "#.#.#", "##.##", "#...#"]),
-        "F": PixelRows(["###", "#..", "##.", "#..", "#.."]), "S": PixelRows([".##", "#..", ".#.", "..#", "##."]),
-        "0": PixelRows(["###", "#.#", "#.#", "#.#", "###"]), "1": PixelRows([".#.", "##.", ".#.", ".#.", "###"]), "2": PixelRows(["##.", "..#", ".#.", "#..", "###"]),
-        "3": PixelRows(["##.", "..#", ".#.", "..#", "##."]), "4": PixelRows(["#.#", "#.#", "###", "..#", "..#"]), "5": PixelRows(["###", "#..", "##.", "..#", "##."]),
-        "6": PixelRows([".##", "#..", "###", "#.#", "###"]), "7": PixelRows(["###", "..#", ".#.", ".#.", ".#."]), "8": PixelRows(["###", "#.#", "###", "#.#", "###"]), "9": PixelRows(["###", "#.#", "###", "..#", "##."]),
-    ]
-
-    static func txt3(_ g: inout MatrixBoard, _ s: String, _ cx: Double, _ y: Double, _ b: Double) {
-        var w = -1.0
-        for ch in s.unicodeScalars { w += Double(F3[ch]?.rows.first?.count ?? 3) + 1 }
-        var x = JSMath.round(cx - w / 2)
-        for ch in s.unicodeScalars {
-            if let R = F3[ch] {
-                for (j, row) in R.rows.enumerated() {
-                    for (i, c) in row.enumerated() where c == PixelRows.hash { g.on(x + Double(i), y + Double(j), b) }
-                }
-            }
-            x += Double(F3[ch]?.rows.first?.count ?? 3) + 1
-        }
-    }
-
-    /// LED digits on fixed slots laid out for `fmt`: unlit cells dim, so a changing number flips in place.
-    static func led(_ g: inout MatrixBoard, _ s: String, _ fmt: String, _ cx: Double, _ y: Double, _ k: Double, _ b: Double, _ dim: Double, _ gap: Double, _ coral: Int = -1) {
-        let fmtChars = Array(fmt.unicodeScalars)
-        var W = -gap
-        for ch in fmtChars { W += Double(F5[ch]?.rows.first?.count ?? 0) * k + gap }
-        var x = JSMath.round(cx - W / 2)
-        // s.padStart(fmt.length, ' ')
-        var sv = Array(s.unicodeScalars)
-        if sv.count < fmtChars.count { sv = [Unicode.Scalar](repeating: " ", count: fmtChars.count - sv.count) + sv }
-        for (i, fch) in fmtChars.enumerated() {
-            let R = i < sv.count ? F5[sv[i]] : nil
-            let w = F5[fch]?.rows.first?.count ?? 0
-            for r in 0..<7 {
-                for c in 0..<w {
-                    var on = false
-                    if let R, r < R.rows.count, c < R.rows[r].count { on = R.rows[r][c] == PixelRows.one }
-                    if !on && dim <= 0 { continue }
-                    var v = 0.0
-                    while v < k {
-                        var u = 0.0
-                        while u < k {
-                            g.on(x + Double(c) * k + u, y + Double(r) * k + v, on ? b : dim, on && i == coral ? 1 : 0)
-                            u += 1
-                        }
-                        v += 1
-                    }
-                }
-            }
-            x += Double(w) * k + gap
-        }
-    }
-
-    /// the cells of a polyline with thickness (1 or 2), up to arc length upTo
-    @discardableResult
-    static func stroke(_ g: inout MatrixBoard, _ V: [P], _ upTo: Double, _ b: Double, _ thick: Int = 1, _ c: Int = 0) -> Polyline {
-        let pt = Polyline(V)
-        var s = 0.0
-        while s <= min(upTo, pt.len) + 1e-6 {
-            let (x, y) = pt.at(s)
-            g.on(x, y, b, c)
-            if thick > 1 {
-                g.on(x + 1, y, b, c)
-                g.on(x, y + 1, b, c)
-            }
-            s += 0.35
-        }
-        return pt
-    }
-
-    static func cellsOf(_ V: [P], _ thick: Int = 2) -> Set<Int> {
-        let pt = Polyline(V)
-        var S = Set<Int>()
-        var s = 0.0
-        while s <= pt.len {
-            let (x, y) = pt.at(s)
-            S.insert(Int(y.rounded(.down)) * 256 + Int(x.rounded(.down)))
-            if thick > 1 {
-                S.insert(Int(y.rounded(.down)) * 256 + Int((x + 1).rounded(.down)))
-                S.insert(Int((y + 1).rounded(.down)) * 256 + Int(x.rounded(.down)))
-            }
-            s += 0.3
-        }
-        return S
-    }
-
-    // ============================== 6. THE FINISH ==============================
-
-    static func lastAge(_ s: MatrixStoryContext) -> Double { s.tapAt.map { s.t - $0 } ?? -1 }
-
-    // ---- Wed: BATTERY. Each tap charges a cell; full, the cells join and a bolt strikes through ----
-    static let BOLT = PixelRows([".....####", "....####.", "...####..", "..####...", ".########", "########.", "...####..", "..####...", ".####....", ".##......", "#........"])
-
-    static func finWed(_ g: inout MatrixBoard, _ s: MatrixStoryContext, _ age: (Int) -> Double) -> MatrixStoryOut {
-        let cx = s.cx, cy = s.cy, N = s.N, t = s.t, since = s.since, taps = s.taps
-        let cw = N >= 7 ? 4 : 5, inner = N * cw + N - 1, W = inner + 4, H = 17
-        let Wd = Double(W)
-        let x0 = JSMath.round(cx - (Wd + 2) / 2), y0 = cy.rounded(.down) - 9
-        let sealed = s.sealT != nil
-        for i in 0..<W {
-            for j in 0..<H {
-                let edge = i == 0 || j == 0 || i == W - 1 || j == H - 1
-                let corner = (i == 0 || i == W - 1) && (j == 0 || j == H - 1)
-                if edge && !corner { g.on(x0 + Double(i), y0 + Double(j), 0.85 + 0.15 * hit(since - 0.3, 0.3)) }
-            }
-        }
-        for i in 0..<2 { for j in 0..<7 { g.on(x0 + Wd + Double(i), y0 + 5 + Double(j), 0.85) } }
-        // the bolt, cut out of the full battery top to bottom
-        let bx = JSMath.round(x0 + Wd / 2 - 4.5), by = y0 + 3
-        let strike = sealed ? seg(since, 0.3, 0.12) * Double(BOLT.height) : -1
-        var cut = Set<Int>()
-        for (j, row) in BOLT.rows.enumerated() {
-            for (i, ch) in row.enumerated() where ch == PixelRows.hash && Double(j) < strike {
-                cut.insert(Int(by + Double(j)) * 256 + Int(bx) + i)
-            }
-        }
-        func bolt(_ x: Double, _ y: Double) -> Bool { cut.contains(Int(y.rounded(.down)) * 256 + Int(x.rounded(.down))) }
-        func shim(_ x: Double) -> Double {
-            guard let sealT = s.sealT, since > 1 else { return 0 }
-            return 0.12 * sheen(x - cx, 0, t - sealT - 1, 2.6, 24, 3)
-        }
-        for k in 0..<N {
-            let sx = x0 + 2 + Double(k * (cw + 1)), a = age(k), f = a >= 0 ? ez(a / 0.14) : 0
-            if k >= taps { g.rect(sx, y0 + 2, Double(cw), 13, 0.12) }
-            for u in 0..<cw {
-                for v in 0..<13 {
-                    let vis = a >= 0 && Double(u) < f * Double(cw) + 0.05
-                    let x = vis ? sx + Double(u) + 0.5 : sx + 0.5, y = y0 + 2.5 + Double(v)
-                    let front = !sealed && k == taps - 1 && u == cw - 1 && v == 6 && f > 0.98
-                    g.fr(x, y, vis && !bolt(x, y) ? 0.88 + 0.12 * hit(a, 0.2) + shim(x) : 0, front ? 1 : 0)
-                }
-            }
-        }
-        // the gaps between cells fill once it is full
-        for k in stride(from: 0, to: N - 1, by: 1) {
-            let gx = x0 + 2 + Double(k * (cw + 1) + cw) + 0.5
-            for v in 0..<13 {
-                let y = y0 + 2.5 + Double(v), vis = sealed && since > 0.16 + abs(Double(v) - 6) * 0.012
-                g.fr(gx, vis ? y : y0 + 8.5, vis && !bolt(gx, y) ? 0.9 + shim(gx) : 0)
-            }
-        }
-        g.on(bx + 4, by + 5, sealed && since > 0.42 ? 1 : 0, 1)
-        return MatrixStoryOut(
-            flash: 0.08 * hit(since - 0.3, 0.15),
-            glow: [
-                MatrixGlow(x: x0 + Wd / 2, y: y0 + 8.5, r: 22, a: 0.3 * hit(since - 0.3, 0.45)),
-                MatrixGlow(x: x0 + 2 + (Double(taps) - 0.5) * Double(cw + 1), y: y0 + 8.5, r: 6, a: sealed ? 0 : 0.16 * hit(lastAge(s), 0.2)),
-            ]
-        )
-    }
-
-    // ============================== 7. THE COUNT ==============================
-    // 1.6 s after the seal the finished object becomes the session count; the last digit ticks up.
-
-    static func mini(_ g: inout MatrixBoard, _ day: Int, _ x: Double, _ y: Double) {
-        let X = x.rounded(.down), Y = y.rounded(.down)
-        switch day {
-        case 0:
-            g.line(X - 7, Y + 3, X + 7, Y + 3, 0.6)
-            for dy in -4...2 { for dx in -4...4 where dx * dx + (dy + 1) * (dy + 1) <= 17 { g.on(X + Double(dx), Y + Double(dy), 0.9, dx == 0 && dy == -4 ? 1 : 0) } }
-            for (dx, dy) in [(0.0, -7.0), (-5, -5), (5, -5), (-7, -1), (7, -1)] { g.on(X + dx, Y + dy, 0.8) }
-        case 1:
-            for (ox, oy, w) in [(-8.0, 1.0, 8), (1, 1, 8), (-8, -3, 3), (-4, -3, 8), (5, -3, 4)] {
-                for v in 0..<3 { for u in 0..<w { g.on(X + ox + Double(u), Y + oy + Double(v), 0.85, ox == -4 && u >= 3 && u < 5 && v == 1 ? 1 : 0) } }
-            }
-        case 2:
-            g.rect(X - 8, Y - 4, 16, 9, 0.85)
-            g.rect(X + 8, Y - 2, 1, 5, 0.85, true)
-            for v in 0..<7 { for u in 0..<14 { g.on(X - 7 + Double(u), Y - 3 + Double(v), 0.85) } }
-            g.on(X, Y, 1, 1)
-        case 3:
-            g.line(X - 11, Y, X + 11, Y, 0.8)
-            for sd in [-1.0, 1.0] {
-                for (o, h) in [(5.0, 9.0), (6, 9), (7, 7), (8, 7)] { g.line(X + sd * o, Y - (h - 1) / 2, X + sd * o, Y + (h - 1) / 2, 0.9) }
-            }
-            g.on(X, Y, 1, 1)
-        case 4:
-            for i in -3...3 {
-                g.on(X - 6 + Double(i), Y, 0.9)
-                g.on(X - 6, Y + Double(i), 0.9)
-            }
-            g.on(X - 6, Y, 1, 1)
-            for j in -3...3 { g.on(X + 4, Y + Double(j), 0.9) }
-            g.on(X + 3, Y - 2, 0.9)
-            g.on(X + 3, Y + 3, 0.9)
-            g.on(X + 5, Y + 3, 0.9)
-        case 5:
-            for yy in -6...6 {
-                for xx in -6...6 {
-                    let r = hypot(Double(xx), Double(yy))
-                    if r >= 3.6 && r <= 5.6 { g.on(X + Double(xx), Y + Double(yy), 0.92) }
-                }
-            }
-            g.on(X, Y - 5, 1, 1)
-        default:
-            for i in -5...5 {
-                g.on(X + Double(i), Y - 6, 0.85)
-                g.on(X + Double(i), Y + 6, 0.85)
-            }
-            for j in 0...5 {
-                let w = 1 + Double(j) * 0.8, jd = Double(j)
-                g.on(X - w, Y - jd, 0.5)
-                g.on(X + w, Y - jd, 0.5)
-                g.on(X - w, Y + jd, 0.5)
-                g.on(X + w, Y + jd, 0.5)
-                if j >= 1 && j <= 4 {
-                    var xx = (X - w + 1).rounded(.up)
-                    while xx < X + w {
-                        g.on(xx, Y - jd, 0.85, j == 1 && xx == X ? 1 : 0)
-                        xx += 1
-                    }
-                }
-            }
-        }
-    }
-
-    static func count(_ g: inout MatrixBoard, _ s: MatrixStoryContext) -> MatrixStoryOut {
-        let a = s.since - 1.6, tick = a > 0.55
-        let n = tick ? s.D.sessions : s.D.sessions - 1
-        let fmt = String(repeating: "8", count: String(s.D.sessions).count)
-        led(&g, String(n), fmt, s.cx, s.cy.rounded(.down) - 18, 3, 0.95 + 0.05 * hit(a - 0.55, 0.3), 0, 3)
-        mini(&g, s.day, s.cx, s.cy.rounded(.down) + 11)
-        return MatrixStoryOut(opts: MatrixDealOptions(stagger: 0.12, burst: 24), glow: [MatrixGlow(x: s.cx, y: s.cy - 8, r: 22, a: 0.2 * hit(a - 0.55, 0.4))])
-    }
-
-    // ============================== entry (mxStory) ==============================
-
     /// `mxStory(id, counted, s)`: draws the screen into `g` (reset by the caller, sized cols x rows,
     /// cap 1400) and returns its phase, deal options, flash and glows.
     public static func render(_ g: inout MatrixBoard, _ id: MatrixStoryScreen, counted: Bool, _ s: MatrixStoryContext) -> MatrixStoryOut {
-        let age = { (k: Int) -> Double in k < s.tapTimes.count ? s.t - s.tapTimes[k] : -1 }
-        if counted { return count(&g, s) }
-        switch id {
-        case .verified:
-            // TODO: port VERIFIED[s.day]: vMon (seal rosette), vTue (padlock opens), vWed (heartbeat
-            // writes the check), vThu, vFri, vSat, vSun. mxstory.ts "1. VERIFIED", BEAT_V = 0.75.
-            return MatrixStoryOut()
-        case .today:
-            // TODO: port `today` (SES, HR table with MatrixSinHash.hash(i, 5), the session strip).
-            return MatrixStoryOut()
-        case .week:
-            // TODO: port `week` (EARLIER per pos, the week's bars).
-            return MatrixStoryOut()
-        case .month:
-            // TODO: port `month` (calendar cells, target pick lighting from pickAt).
-            return MatrixStoryOut()
-        case .far:
-            // TODO: port the far screen: s.day == 3 ? fThu(g, s) : [fMon, fTue, fWed, fMon, fFri, fSat, fSun][s.day](g, s, D.day).
-            return MatrixStoryOut()
-        case .climax:
-            switch s.day {
-            case 2: return finWed(&g, s, age)
-            default:
-                // TODO: port FINISH[s.day]: finMon (sunGeo), finTue (wallSlots), finThu (barbell),
-                // finFri (chevCells / plusOne), finSat (RING), finSun (glassGeo).
-                return MatrixStoryOut()
+        typealias S = MX.Story
+        let sc = S.MXStoryContext(s)
+        let times = s.tapTimes, now = s.t
+        let age = { (k: Double) -> Double in
+            let i = Int(k)
+            return k >= 0 && i < times.count ? now - times[i] : -1
+        }
+        let dd = sc.D.day
+        let day = max(0, min(6, s.day))
+        let r: S.MXStoryRes?
+        if counted {
+            r = S.count(&g, sc)
+        } else {
+            switch id {
+            case .verified:
+                switch day {
+                case 0: r = S.vMon(&g, sc)
+                case 1: r = S.vTue(&g, sc)
+                case 2: r = S.vWed(&g, sc)
+                case 3: r = S.vThu(&g, sc)
+                case 4: r = S.vFri(&g, sc)
+                case 5: r = S.vSat(&g, sc)
+                default: r = S.vSun(&g, sc)
+                }
+            case .today: r = S.today(&g, sc)
+            case .week: r = S.week(&g, sc)
+            case .month: r = S.month(&g, sc)
+            case .far:
+                // `s.day === 3 ? fThu(g, s) : [fMon, fTue, fWed, fMon, fFri, fSat, fSun][s.day](g, s, dd)`
+                switch day {
+                case 0: r = S.fMon(&g, sc, dd)
+                case 1: r = S.fTue(&g, sc, dd)
+                case 2: r = S.fWed(&g, sc, dd)
+                case 3: r = S.fThu(&g, sc)
+                case 4: r = S.fFri(&g, sc, dd)
+                case 5: r = S.fSat(&g, sc, dd)
+                default: r = S.fSun(&g, sc, dd)
+                }
+            case .climax:
+                switch day {
+                case 0: r = S.finMon(&g, sc, age)
+                case 1: r = S.finTue(&g, sc, age)
+                case 2: r = S.finWed(&g, sc, age)
+                case 3: r = S.finThu(&g, sc, age)
+                case 4: r = S.finFri(&g, sc, age)
+                case 5: r = S.finSat(&g, sc, age)
+                default: r = S.finSun(&g, sc, age)
+                }
             }
         }
+        return MatrixStoryOut(phase: r?.ph, opts: r?.o, flash: r?.flash ?? 0, glow: r?.glow ?? [])
     }
 }
 
@@ -537,12 +527,18 @@ public final class MatrixStoryModel {
     public let weekToday: Int
     /// The month's first week of a month's first session: the month screen asks for a target.
     public let monthPick: Bool
+    /// the month screen's calendar (real sessions this month); the target follows `pickTarget`
+    public private(set) var cal: MatrixStoryCal?
     public let ids: [MatrixStoryScreen]
     public let copy: MatrixStoryCopy
     /// Dynamic camera (lean-in on taps and seal). Off under Reduce Motion regardless.
     public let dynamic: Bool
+    /// Which done flow: the Matrix board or the Ridge world (timings and haptics differ).
+    let style: HeroCardStyle
 
     public private(set) var idx = 0
+    /// Closed with the X or a swipe before the seal.
+    public private(set) var closedEarly = false
     public private(set) var start: Double = 0
     public private(set) var tapTimes: [Double] = []
     public private(set) var sealT: Double?
@@ -552,12 +548,27 @@ public final class MatrixStoryModel {
 
     @ObservationIgnored public var onLanded: (() -> Void)?
     @ObservationIgnored public var onFinished: (() -> Void)?
+    /// The month target buttons: persist the user's pick.
+    @ObservationIgnored public var onPickTarget: ((Int) -> Void)?
+    /// The month's last screen showed (`noteRecap`).
+    @ObservationIgnored public var onScreen: ((MatrixStoryScreen) -> Void)?
+    /// Any progress worth persisting (screen, taps, seal, pick): spec §3.4.
+    @ObservationIgnored public var onProgress: (() -> Void)?
+    /// Rank-up steps follow the count (spec §4.2): the collapse waits for `release(at:)`.
+    @ObservationIgnored public var holdsCollapse = false
+    @ObservationIgnored public var onHold: (() -> Void)?
+    public private(set) var holdAt: Double?
+    public private(set) var isHolding = false
     @ObservationIgnored let haptics = HeroHapticScheduler()
-    @ObservationIgnored private let epoch: Date
+    @ObservationIgnored private var epoch: Date
+    @ObservationIgnored private var frozenAt: Date?
     @ObservationIgnored private var landedFired = false
     @ObservationIgnored private var finishedFired = false
 
-    public init(day: Int, pos: MatrixWeekPos, monthPos: MatrixMonthPos, dayData: MatrixDayData, weekDone: Int, weekToday: Int, monthPick: Bool, copy: MatrixStoryCopy, dynamic: Bool = true, now: Date = Date()) {
+    /// - Parameters:
+    ///   - short: the fatigue guard's short flow (verified, then the climax).
+    ///   - resumeAtClimax: back after 10 min or more away: open on the climax.
+    init(day: Int, pos: MatrixWeekPos, monthPos: MatrixMonthPos, dayData: MatrixDayData, weekDone: Int, weekToday: Int, monthPick: Bool, cal: MatrixStoryCal? = nil, copy: MatrixStoryCopy, dynamic: Bool = true, style: HeroCardStyle = .matrix, short: Bool = false, resumeAtClimax: Bool = false, resumeIndex: Int? = nil, restoredTaps: Int = 0, now: Date = Date()) {
         self.day = day
         self.pos = pos
         self.monthPos = monthPos
@@ -565,45 +576,121 @@ public final class MatrixStoryModel {
         self.weekDone = weekDone
         self.weekToday = weekToday
         self.monthPick = monthPick
-        self.ids = MatrixStoryConfig.screens(monthPos)
+        self.cal = cal
+        // Spec §4.3: short is verified → climax → count, plus any month screen.
+        self.ids = short
+            ? (monthPos == .middle ? [.verified, .climax] : [.verified, .month, .climax])
+            : MatrixStoryConfig.screens(monthPos)
         self.copy = copy
         self.dynamic = dynamic
+        self.style = style
         // headroom so engine timestamps are positive from the first frame
         self.epoch = now.addingTimeInterval(-2)
         let t = now.timeIntervalSince(epoch)
         start = t
-        haptics.reset(cues: Self.cues(for: ids[0], start: t), at: t)
+        if resumeAtClimax, let c = ids.firstIndex(of: .climax) {
+            idx = c
+        } else if let r = resumeIndex, ids.indices.contains(r) {
+            // back within 10 min: the same screen, already settled, no entrance haptics
+            idx = r
+            start = t - MatrixStoryConfig.cfg(ids[r], style: style).settle
+        }
+        if idx == ids.count - 1, restoredTaps > 0 {
+            let n = min(restoredTaps, MatrixContext.taps(day: day, pos: pos) - 1)
+            tapTimes = (0..<max(0, n)).map { t - 1 - Double(n - $0) * 0.1 }
+        }
+        if picked == false, monthPick, let r = resumeIndex, let m = ids.firstIndex(of: .month), r > m { picked = true }
+        haptics.allowsSuccess = Self.allowsSuccess(ids[idx])
+        haptics.reset(cues: Self.cues(for: ids[idx], style: style, start: t), at: t)
     }
+
+    public func cfg(_ id: MatrixStoryScreen) -> MatrixStoryConfig.Screen { MatrixStoryConfig.cfg(id, style: style) }
+
+    /// Spec §6.1: success only at the proof (verified) and the seal (climax).
+    private static func allowsSuccess(_ id: MatrixStoryScreen) -> Bool { id == .verified || id == .climax }
+
+    /// The glass X or a swipe down: skip what is left and collapse at once (spec §4.3, 0.55 s).
+    public func close(at t: Double) {
+        if let c = collapseAt, c <= t { return }
+        if sealT == nil { closedEarly = true }
+        haptics.isActive = false
+        collapseAt = t
+        onProgress?()
+    }
+
+    /// The rank-ups are done: the collapse starts 200 ms later.
+    public func release(at t: Double) {
+        guard collapseAt == nil else { return }
+        isHolding = false
+        holdAt = nil
+        collapseAt = t + 0.2
+    }
+
+    /// Ends without the collapse (the overlay is already gone, or the day ended).
+    public func finishNow() {
+        haptics.isActive = false
+        if !landedFired {
+            landedFired = true
+            onLanded?()
+        }
+        if !finishedFired {
+            finishedFired = true
+            onFinished?()
+        }
+    }
+
+    /// Background: the overlay clock stops (spec §3.4 "it never jumps forward").
+    public func freeze(_ date: Date = Date()) {
+        guard frozenAt == nil else { return }
+        frozenAt = date
+        haptics.isActive = false
+    }
+
+    public func thaw(_ date: Date = Date()) {
+        guard let f = frozenAt else { return }
+        frozenAt = nil
+        epoch = epoch.addingTimeInterval(max(0, date.timeIntervalSince(f)))
+        if collapseAt == nil || !closedEarly { haptics.isActive = true }
+        haptics.reset(cues: [], at: time(date))
+    }
+
+    public var isFrozen: Bool { frozenAt != nil }
+
+    public var isSealed: Bool { sealT != nil }
 
     public var N: Int { MatrixContext.taps(day: day, pos: pos) }
     public var screen: MatrixStoryScreen { ids[idx] }
     public var isLast: Bool { idx == ids.count - 1 }
 
-    public func time(_ date: Date) -> Double { date.timeIntervalSince(epoch) }
+    public func time(_ date: Date) -> Double { (frozenAt.map { min($0, date) } ?? date).timeIntervalSince(epoch) }
     public func lt(_ t: Double) -> Double { t - start }
-    public func settled(_ t: Double) -> Bool { lt(t) >= MatrixStoryConfig.cfg(screen).settle }
+    public func settled(_ t: Double) -> Bool { lt(t) >= cfg(screen).settle }
     public func since(_ t: Double) -> Double { sealT.map { t - $0 } ?? -1 }
     public func counted(_ t: Double) -> Bool { sealT != nil && since(t) > MatrixStoryConfig.countAfter }
     /// 0...1 progress of the collapse into the card.
     public func collapse(_ t: Double) -> Double { collapseAt.map { MX.cl((t - $0) / MatrixStoryConfig.collapseDuration) } ?? 0 }
 
-    private static func cues(for id: MatrixStoryScreen, start: Double) -> [HapticCue] {
-        MatrixStoryConfig.cfg(id).haptics.map { HapticCue(t: start + $0.t, kind: $0.kind) }
+    private static func cues(for id: MatrixStoryScreen, style: HeroCardStyle, start: Double) -> [HapticCue] {
+        MatrixStoryConfig.cfg(id, style: style).haptics.map { HapticCue(t: start + $0.t, kind: $0.kind) }
     }
 
     private func goTo(_ i: Int, start s: Double, now t: Double) {
+        let changed = i != idx
         idx = i
         start = s
-        haptics.reset(cues: Self.cues(for: ids[i], start: s), at: t)
+        haptics.allowsSuccess = Self.allowsSuccess(ids[i])
+        haptics.reset(cues: Self.cues(for: ids[i], style: style, start: s), at: t)
+        if changed { onScreen?(ids[i]) }
+        onProgress?()
     }
 
     /// app13.tsx `onOverlayTap`. `xFraction` is the tap's x / screen width.
     public func tap(xFraction: Double, at t: Double) {
-        guard collapseAt == nil else { return }
-        let settle = MatrixStoryConfig.cfg(screen).settle
+        guard collapseAt == nil, !closedEarly else { return }
+        let settle = cfg(screen).settle
         if xFraction < 0.22 && idx > 0 {
             haptics.playNow(.light)
-            goTo(idx - 1, start: t - MatrixStoryConfig.cfg(ids[idx - 1]).settle, now: t)
+            goTo(idx - 1, start: t - cfg(ids[idx - 1]).settle, now: t)
             return
         }
         if isLast {
@@ -615,6 +702,8 @@ public final class MatrixStoryModel {
             picked = true
             pickAt = t
             haptics.playNow(.heavy)
+            if let n = cal?.target { onPickTarget?(n) }
+            onProgress?()
             return
         }
         if !settled(t) {
@@ -628,12 +717,18 @@ public final class MatrixStoryModel {
     }
 
     /// The month target buttons (month screen in a month's first week).
-    public func pickTarget(at t: Double) {
+    public func pickTarget(_ n: Int, at t: Double) {
+        guard collapseAt == nil, screen == .month, monthPick else { return }
         let first = !picked
         picked = true
+        if cal?.target != n {
+            cal?.target = n
+            onPickTarget?(n)
+        }
         pickAt = t
         haptics.playNow(first ? .heavy : .medium)
         if first { haptics.add(HapticCue(t: t + 0.12, kind: .success)) }
+        onProgress?()
     }
 
     /// app13.tsx `onRockTap`: build the finish; the Nth tap seals it.
@@ -646,14 +741,20 @@ public final class MatrixStoryModel {
             haptics.playNow(.heavy)
             haptics.add(HapticCue(t: t + 0.07, kind: .heavy))
             haptics.add(HapticCue(t: t + 0.16, kind: .success))
-            collapseAt = t + MatrixStoryConfig.collapseAfter(mp: monthPos, pos: pos)
+            let after = t + MatrixStoryConfig.collapseAfter(mp: monthPos, pos: pos, style: style)
+            if holdsCollapse { holdAt = after } else { collapseAt = after }
         } else {
             haptics.playNow(n >= N - 1 ? .heavy : Double(n) > Double(N) / 2 ? .medium : .light)
         }
+        onProgress?()
     }
 
     /// Once per frame (from `.onChange(of: timeline.date)`): haptics on the frame, collapse callbacks.
     public func advance(to t: Double) {
+        if let h = holdAt, collapseAt == nil, !isHolding, t >= h {
+            isHolding = true
+            onHold?()
+        }
         if let c = collapseAt, t >= c {
             // the web stops screen haptics once the overlay leaves; the seal cues are already past
             haptics.isActive = false
@@ -746,7 +847,7 @@ final class MatrixStoryRuntime {
             t: t, lt: lt, cx: cx, cy: cy, cols: cols, rows: rows, N: model.N, taps: model.tapTimes.count,
             tapTimes: model.tapTimes, tapAt: tapAt, sealT: model.sealT, since: since, D: model.dayData,
             day: model.day, pos: model.pos, weekDone: model.weekDone, weekToday: model.weekToday,
-            pick: model.monthPick, picked: model.picked, pickAt: model.pickAt
+            pick: model.monthPick, picked: model.picked, pickAt: model.pickAt, cal: model.cal
         )
         board.reset()
         let mx = MatrixStoryScenes.render(&board, id, counted: counted, sc)
@@ -801,8 +902,11 @@ public struct MatrixStoryView: View {
                     }
                     .accessibilityHidden(true)
                     MatrixStoryCopyLayer(model: model, t: t, size: size, reduceMotion: reduceMotion)
+                    if model.screen == .month && model.monthPick && model.collapseAt == nil {
+                        MatrixMonthPicker(model: model, t: t, size: size)
+                    }
                 }
-                .modifier(CollapseModifier(cp: cp, size: size, cardFrame: cardFrame))
+                .modifier(StoryCollapseModifier(cp: cp, size: size, cardFrame: cardFrame))
                 .onChange(of: tl.date) { _, d in model.advance(to: model.time(d)) }
             }
             .contentShape(Rectangle())
@@ -813,16 +917,18 @@ public struct MatrixStoryView: View {
         }
         .ignoresSafeArea()
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(model.isLast ? "Tap to build today’s finish" : "Tap to continue")
+        .accessibilityLabel(model.isLast ? "Tap to build today's finish" : "Tap to continue")
     }
 }
 
 /// app13.tsx: the overlay flies into the card. p = eio(cp); scale toward the card's width; clip to the
 /// card's height around FOCUS_Y; fade over the last 28%.
-private struct CollapseModifier: ViewModifier {
+struct StoryCollapseModifier: ViewModifier {
     let cp: Double
     let size: CGSize
     let cardFrame: CGRect?
+    /// design-space y (in the 1920 box) the card crop centres on
+    var focus: Double = MatrixStoryRuntime.FOCUS_Y
 
     func body(content: Content) -> some View {
         let opacity = 1 - MX.cl((cp - 0.72) / 0.28)
@@ -834,7 +940,7 @@ private struct CollapseModifier: ViewModifier {
             let s0 = vw / Double(comp.width)
             let p = MX.eio(cp)
             let k = Double(r.width) / vw
-            let focusY = ((Double(comp.height) - MatrixStoryRuntime.BOX_H) / 2 + MatrixStoryRuntime.FOCUS_Y) * s0
+            let focusY = ((Double(comp.height) - MatrixStoryRuntime.BOX_H) / 2 + focus) * s0
             let sc = 1 + (k - 1) * p
             let cx = vw / 2 + (Double(r.midX) - vw / 2) * p
             let cy = focusY + (Double(r.midY) - focusY) * p
@@ -889,7 +995,8 @@ private struct MatrixStoryCopyLayer: View {
         let white = Color.white
         let dz = model.dynamic && !reduceMotion
         let climax = MatrixClimaxCopy.byDay[max(0, min(6, model.day))]
-        let end = MatrixClimaxCopy.end(pos: model.pos, day: model.day)
+        let copy = model.copy
+        let cap40 = { (s: String) -> Text in MatrixRich.text(s, size: 40 * s0, weight: .medium, color: white.opacity(0.62), boldColor: white, boldWeight: .bold) }
         let taps = model.tapTimes.count, N = model.N
         let tapAt = model.tapTimes.last
 
@@ -909,7 +1016,7 @@ private struct MatrixStoryCopyLayer: View {
             // progress, one segment per screen
             HStack(spacing: u(12)) {
                 ForEach(Array(model.ids.enumerated()), id: \.offset) { i, sid in
-                    let fill = i < model.idx ? 1 : i > model.idx ? 0 : MX.cl(lt / MatrixStoryConfig.cfg(sid).settle)
+                    let fill = i < model.idx ? 1 : i > model.idx ? 0 : MX.cl(lt / model.cfg(sid).settle)
                     Capsule().fill(white.opacity(0.18))
                         .overlay(alignment: .leading) {
                             GeometryReader { g in Capsule().fill(white).frame(width: g.size.width * fill) }
@@ -948,20 +1055,90 @@ private struct MatrixStoryCopyLayer: View {
             .offset(x: u(ox + 60), y: u(oy + 250))
             .opacity(a(0.1, 0.3))
 
-            // the screen's caption (verified / week / month / far); TODO: the today stats and month picker
-            if id != .climax, id != .today, let cap = model.copy.captions[id] {
-                let at: Double = id == .verified ? 0.9 : id == .week ? 0.8 : id == .month ? 0.7 : 1.4
-                let top: Double = id == .verified ? 1350 : id == .week ? 1280 : id == .month ? 1230 : 1340
+            // verified: the caption and the unlocked-apps pill
+            if id == .verified {
+                VStack(spacing: u(34)) {
+                    if let cap = copy.captions[.verified] { cap40(cap) }
+                    if let n = copy.appsUnlocked, n > 0 {
+                        HStack(spacing: u(16)) {
+                            Circle().fill(MatrixRGB.coral.color).frame(width: u(14), height: u(14))
+                            Text(n == 1 ? "1 app unlocked" : "\(n) apps unlocked")
+                                .font(.system(size: u(32), weight: .bold))
+                                .foregroundStyle(white)
+                        }
+                        .padding(.vertical, u(20))
+                        .padding(.horizontal, u(34))
+                        .background(Capsule().fill(white.opacity(0.1)))
+                    }
+                }
+                .multilineTextAlignment(.center)
+                .frame(width: u(860))
+                .offset(x: u(ox + 110), y: u(oy + 1350) + (1 - a(0.9, 0.4)) * u(20))
+                .opacity(a(0.9, 0.4))
+            }
+
+            // today: when the session ran, its line and its real figures
+            if id == .today, let td = copy.today {
+                VStack(spacing: 0) {
+                    Group {
+                        if let e = td.end {
+                            Text("\(Text(td.start)) \(Text("to").foregroundStyle(white.opacity(0.4))) \(Text(e))")
+                        } else {
+                            Text("\(Text("In at").foregroundStyle(white.opacity(0.4))) \(Text(td.start))")
+                        }
+                    }
+                    .font(.system(size: u(64), weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(white)
+                    if let c = td.caption {
+                        cap40(c).padding(.top, u(14))
+                    }
+                    if !td.stats.isEmpty {
+                        MatrixStatsRow(stats: td.stats, u: u, lt: lt, rollAt: 2.2, rollStep: 0.1)
+                            .padding(.top, u(50))
+                    }
+                }
+                .multilineTextAlignment(.center)
+                .frame(width: u(860))
+                .offset(x: u(ox + 110), y: u(oy + 1250))
+                .opacity(a(2.1, 0.4))
+            }
+
+            // week: the caption and the research line
+            if id == .week {
                 VStack(spacing: u(30)) {
-                    MatrixRich.text(cap, size: u(40), weight: .medium, color: white.opacity(0.62), boldColor: white, boldWeight: .bold)
-                    if let r = model.copy.research[id] {
+                    if let cap = copy.captions[.week] { cap40(cap) }
+                    if let r = copy.research[.week] {
                         MatrixRich.text(r, size: u(30), weight: .medium, color: white.opacity(0.42), boldColor: white, boldWeight: .bold)
                     }
                 }
                 .multilineTextAlignment(.center)
                 .frame(width: u(860))
-                .offset(x: u(ox + 110), y: u(oy + top) + (1 - a(at, 0.4)) * u(20))
-                .opacity(a(at, 0.4))
+                .offset(x: u(ox + 110), y: u(oy + 1280) + (1 - a(0.8, 0.4)) * u(20))
+                .opacity(a(0.8, 0.4))
+            }
+
+            // month (no target to pick): the caption, the month's figures, the research line.
+            // With a target to pick, MatrixMonthPicker draws this block so its buttons take taps.
+            if id == .month && !model.monthPick {
+                MatrixMonthBlock(model: model, lt: lt, u: u, picker: nil)
+                    .frame(width: u(900))
+                    .offset(x: u(ox + 90), y: u(oy + 1230) + (1 - a(0.7, 0.4)) * u(20))
+                    .opacity(a(0.7, 0.4))
+            }
+
+            // far: day of the habit and the sessions, then the quieter time line
+            if id == .far, let cap = copy.captions[.far] {
+                VStack(spacing: 0) {
+                    cap40(cap)
+                    if let r = copy.research[.far] {
+                        MatrixRich.text(r, size: u(40), weight: .medium, color: white.opacity(0.42), boldColor: white.opacity(0.62), boldWeight: .bold)
+                    }
+                }
+                .multilineTextAlignment(.center)
+                .frame(width: u(840))
+                .offset(x: u(ox + 120), y: u(oy + 1340) + (1 - a(1.4, 0.4)) * u(20))
+                .opacity(a(1.4, 0.4))
             }
 
             // the climax, before the seal: the instruction and one dot per tap
@@ -989,12 +1166,35 @@ private struct MatrixStoryCopyLayer: View {
             if id == .climax && model.sealT != nil {
                 VStack(spacing: u(24)) {
                     MatrixRich.text(climax.end, size: u(46), weight: .bold, color: white, boldColor: white, boldWeight: .bold)
-                    MatrixRich.text("\(MatrixClimaxCopy.posTail(model.pos)) \(end.sub)", size: u(36), weight: .medium, color: white.opacity(0.62), boldColor: white, boldWeight: .bold)
+                    MatrixRich.text([MatrixClimaxCopy.posTail(model.pos), copy.endSub].filter { !$0.isEmpty }.joined(separator: " "), size: u(36), weight: .medium, color: white.opacity(0.62), boldColor: white, boldWeight: .bold)
                 }
                 .multilineTextAlignment(.center)
                 .frame(width: u(860))
                 .offset(x: u(ox + 110), y: u(oy + 1300) + (1 - ca(1.7, 0.4)) * u(20))
                 .opacity(ca(1.7, 0.4))
+            }
+
+            // the month's last session: the month closes on its own line above the art
+            if id == .climax, model.sealT != nil, model.monthPos == .last, model.pos == .last,
+               let cal = model.cal, let name = copy.monthName {
+                let hit = cal.sessions >= cal.target
+                let coral = MatrixRGB.coral.color
+                Group {
+                    if hit {
+                        Text("\(name), \(Text("done.").foregroundStyle(coral))")
+                    } else {
+                        Text("\(name): \(Text(String(cal.sessions)).foregroundStyle(coral)) of \(cal.target).")
+                    }
+                }
+                .font(.system(size: u(60), weight: .heavy, design: .rounded))
+                .tracking(0.02 * u(60))
+                .foregroundStyle(white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(width: u(1080))
+                .scaleEffect(1 + 0.25 * (1 - ca(2.4, 0.6)))
+                .offset(x: u(ox), y: u(oy + 560))
+                .opacity(ca(2.4, 0.5))
             }
 
             // the foot: a hint, or on the last screen the button that fills with each tap
@@ -1012,7 +1212,7 @@ private struct MatrixStoryCopyLayer: View {
                     .foregroundStyle(white.opacity(show ? 0.45 + 0.25 * sin(lt * 4) : 0))
                 } else {
                     let fill = model.sealT != nil ? 1 : min(1, Double(taps) / Double(N))
-                    let label = model.sealT != nil ? end.button : taps > 0 ? (taps >= N - 1 ? "One more" : climax.mid) : climax.idle
+                    let label = model.sealT != nil ? copy.endButton : taps > 0 ? (taps >= N - 1 ? "One more" : climax.mid) : climax.idle
                     Text(label)
                         .font(.system(size: u(38), weight: .bold))
                         .foregroundStyle(Color(.sRGB, red: 0x11 / 255, green: 0x11 / 255, blue: 0x11 / 255))
@@ -1039,6 +1239,149 @@ private struct MatrixStoryCopyLayer: View {
     }
 }
 
+/// A stats row (story13m.tsx): equal columns split by hairlines; counts roll up with eo5.
+private struct MatrixStatsRow: View {
+    let stats: [MatrixStoryCopy.Stat]
+    let u: (Double) -> Double
+    let lt: Double
+    let rollAt: Double
+    let rollStep: Double
+
+    private static func eo5(_ x: Double) -> Double { 1 - pow(1 - MX.cl(x), 5) }
+
+    var body: some View {
+        let white = Color.white
+        HStack(spacing: 0) {
+            ForEach(Array(stats.enumerated()), id: \.offset) { k, s in
+                let v: String = s.roll.map { n in
+                    String(Int(JSMath.round(Self.eo5((lt - rollAt - Double(k) * rollStep) / 0.8) * Double(n))))
+                } ?? s.value
+                VStack(spacing: u(10)) {
+                    HStack(alignment: .firstTextBaseline, spacing: u(6)) {
+                        Text(v)
+                            .font(.system(size: u(72), weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(s.coral ? MatrixRGB.coral.color : white)
+                        if let unit = s.unit {
+                            Text(unit)
+                                .font(.system(size: u(26), weight: .heavy, design: .rounded))
+                                .foregroundStyle(white.opacity(0.5))
+                        }
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    Text(s.label.uppercased())
+                        .font(.system(size: u(20), weight: .bold))
+                        .tracking(0.16 * u(20))
+                        .foregroundStyle(white.opacity(0.55))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .leading) {
+                    if k > 0 { Rectangle().fill(white.opacity(0.14)).frame(width: 1) }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(s.value)\(s.unit.map { " \($0)" } ?? ""), \(s.label.lowercased())")
+            }
+        }
+    }
+}
+
+/// The month screen's block below the art: caption, then the target buttons or the month's
+/// figures, then the research line (story13m.tsx, `id === 'month'`).
+private struct MatrixMonthBlock: View {
+    let model: MatrixStoryModel
+    let lt: Double
+    let u: (Double) -> Double
+    /// non-nil when the month asks for a target
+    let picker: ((Int) -> Void)?
+
+    var body: some View {
+        let white = Color.white
+        let copy = model.copy
+        VStack(spacing: 0) {
+            if let cap = copy.captions[.month] {
+                MatrixRich.text(cap, size: u(36), weight: .medium, color: white.opacity(0.62), boldColor: white, boldWeight: .bold)
+            }
+            if let picker {
+                HStack(spacing: u(18)) {
+                    ForEach(copy.monthTargets, id: \.n) { m in
+                        let sel = model.picked && model.cal?.target == m.n
+                        Button {
+                            picker(m.n)
+                        } label: {
+                            VStack(spacing: u(8)) {
+                                Text("\(m.n)")
+                                    .font(.system(size: u(64), weight: .heavy, design: .rounded))
+                                    .foregroundStyle(sel ? Color(.sRGB, red: 0x11 / 255, green: 0x11 / 255, blue: 0x11 / 255) : white)
+                                Text(m.label.uppercased())
+                                    .font(.system(size: u(18), weight: .bold))
+                                    .tracking(0.16 * u(18))
+                                    .foregroundStyle(sel ? Color.black.opacity(0.55) : white.opacity(0.5))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.6)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, u(20))
+                            .padding(.bottom, u(16))
+                            .background(RoundedRectangle(cornerRadius: u(30), style: .continuous).fill(sel ? white : white.opacity(0.08)))
+                            .contentShape(RoundedRectangle(cornerRadius: u(30), style: .continuous))
+                        }
+                        .buttonStyle(MatrixPressStyle())
+                        .accessibilityLabel("\(m.n) sessions, \(m.label)")
+                        .accessibilityAddTraits(sel ? .isSelected : [])
+                    }
+                }
+                .padding(.top, u(34))
+            } else if !copy.monthStats.isEmpty {
+                MatrixStatsRow(stats: copy.monthStats, u: u, lt: lt, rollAt: 0.8, rollStep: 0)
+                    .padding(.top, u(34))
+            }
+            if let r = copy.research[.month] {
+                MatrixRich.text(r, size: u(28), weight: .medium, color: white.opacity(0.42), boldColor: white, boldWeight: .bold)
+                    .padding(.top, u(30))
+            }
+        }
+        .multilineTextAlignment(.center)
+    }
+}
+
+/// The month screen with a target to pick: same place as the passive block, but its buttons take
+/// taps (everything else on the overlay passes taps to the flow).
+private struct MatrixMonthPicker: View {
+    let model: MatrixStoryModel
+    let t: Double
+    let size: CGSize
+
+    private static func eo(_ x: Double) -> Double { 1 - pow(1 - MX.cl(x), 3) }
+
+    var body: some View {
+        let comp = MatrixStoryRuntime.composition(size)
+        let cw = Double(comp.width), ch = Double(comp.height)
+        let s0 = Double(size.width) / cw
+        let ox = (cw - MatrixStoryRuntime.BOX_W) / 2, oy = (ch - MatrixStoryRuntime.BOX_H) / 2
+        let u = { (v: Double) -> Double in v * s0 }
+        let lt = model.lt(t)
+        let a = Self.eo((lt - 0.7) / 0.4)
+        MatrixMonthBlock(model: model, lt: lt, u: u) { n in
+            model.pickTarget(n, at: model.time(Date()))
+        }
+        .frame(width: u(900))
+        .offset(x: u(ox + 90), y: u(oy + 1230) + (1 - a) * u(20))
+        .opacity(a)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+}
+
+private struct MatrixPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
 // MARK: - Parity self-test for the story board
 
 #if DEBUG
@@ -1061,6 +1404,34 @@ extension MatrixParity {
             if out.count != n { fail.append("\(name): \(out.count) targets, want \(n)") }
             let got = checksum(out)
             if abs(got - sum) > 1e-9 * max(1, abs(sum)) { fail.append("\(name) checksum: got \(got), want \(sum)") }
+        }
+        return fail + runStoryAll()
+    }
+
+    /// Every done-flow screen, every day, against MatrixParityStory.swift.
+    public static func runStoryAll() -> [String] {
+        var fail: [String] = []
+        for (id, day, k, counted, n, sum, phase, flash) in storyGolden {
+            let c = k < 0 ? storyCountContext : storyContexts[k]
+            let s = MatrixStoryContext(
+                t: c.t, lt: c.lt, cx: 25.5, cy: 52.5, cols: 52, rows: 112, N: c.N, taps: c.taps.count, tapTimes: c.taps,
+                tapAt: c.taps.last, sealT: c.sealT, since: c.sealT.map { c.t - $0 } ?? -1,
+                D: MatrixDayData(day: 23, week: 3, sessions: 14), day: day, pos: c.pos, weekDone: c.done, weekToday: c.today,
+                pick: c.pick, picked: c.picked, pickAt: c.pickAt, cal: storyCal
+            )
+            guard let screen = MatrixStoryScreen(rawValue: id) else {
+                fail.append("unknown screen \(id)")
+                continue
+            }
+            var g = MatrixBoard(width: 52, height: 112, cap: 1400)
+            let o = MatrixStoryScenes.render(&g, screen, counted: counted, s)
+            let out = g.out()
+            let name = "\(id) day \(day) ctx \(k)\(counted ? " counted" : "")"
+            if out.count != n { fail.append("\(name): \(out.count) targets, want \(n)") }
+            let got = checksum(out)
+            if abs(got - sum) > 1e-9 * max(1, abs(sum)) { fail.append("\(name) checksum: got \(got), want \(sum)") }
+            if o.phase != phase { fail.append("\(name) phase: got \(o.phase ?? "nil"), want \(phase ?? "nil")") }
+            if abs(o.flash - flash) > 1e-9 { fail.append("\(name) flash: got \(o.flash), want \(flash)") }
         }
         return fail
     }

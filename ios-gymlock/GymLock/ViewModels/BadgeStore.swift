@@ -17,6 +17,9 @@ final class BadgeStore {
 
     static let recordsKey = "gymlock.badges.records"
 
+    /// One store for the app, so a rank-up seen in the done flow is seen on the Badges screen too.
+    static let shared = BadgeStore()
+
     private(set) var states: [String: BadgeState] = [:]
     private(set) var records: [String: Record]
 

@@ -14,6 +14,12 @@ struct MatrixParityTests {
         #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
     }
 
+    /// Every generated scene (19 moments x 7 themes) at four contexts.
+    @Test func allScenesMatchTheWeb() {
+        let failures = MatrixParity.runAll()
+        #expect(failures.isEmpty, "\(failures.prefix(40).joined(separator: "\n"))")
+    }
+
     @Test func storyBoardMatchesTheWeb() {
         let failures = MatrixParity.runStory()
         #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")

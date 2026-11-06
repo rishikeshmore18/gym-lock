@@ -53,6 +53,11 @@ private struct PreferencesHome: View {
                     .accessibilityHint("Opens the time to gym picker")
 
                     PreferencesFootnote(text: "Includes getting ready and traveling.")
+
+                    PreferencesEyebrow(text: "HOME CARD")
+                        .padding(.top, 18)
+
+                    CardStyleSection()
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 32)
@@ -127,6 +132,136 @@ private struct PreferencesHome: View {
 
     private var alarmWord: String {
         rhythm.flowMode == .wakeAndGo ? "alarm" : "time to go"
+    }
+}
+
+// MARK: - Card style (02-experience-spec §7)
+
+/// The Home card's look, its haptics and how long the finish runs. The preview is the real card for
+/// right now (`HeroMomentResolver.peek`, which never writes the rotation ledger); tapping it replays
+/// the entrance. Switching style fades the old one out in 150 ms while the new one plays its 600 ms
+/// entrance, exactly as on Home.
+private struct CardStyleSection: View {
+    @Environment(AppStore.self) private var store
+    @Environment(GymSessionCoordinator.self) private var coordinator
+
+    @AppStorage(HeroCardStyle.storageKey) private var styleRaw = HeroCardStyle.default.rawValue
+    @AppStorage(HeroCardStyle.hapticsKey) private var hapticsOn = true
+    @AppStorage(HeroCardStyle.doneFlowLengthKey) private var lengthRaw = DoneFlowLength.automatic.rawValue
+
+    /// Bumped on tap so the card remounts and plays its entrance again.
+    @State private var replayToken = 0
+
+    private var style: Binding<HeroCardStyle> {
+        Binding(
+            get: { HeroCardStyle(rawValue: styleRaw) ?? .default },
+            set: { new in
+                guard new.rawValue != styleRaw else { return }
+                Haptics.selection()
+                styleRaw = new.rawValue
+            }
+        )
+    }
+
+    private var length: Binding<DoneFlowLength> {
+        Binding(
+            get: { DoneFlowLength(rawValue: lengthRaw) ?? .automatic },
+            set: { lengthRaw = $0.rawValue }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            preview
+
+            Picker("Card style", selection: style) {
+                ForEach(HeroCardStyle.allCases) { s in
+                    Text(s.title).tag(s)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.top, 6)
+            .accessibilityLabel("Card style")
+
+            AlarmGroupCard {
+                Toggle(isOn: $hapticsOn) {
+                    Text("Card haptics")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                }
+                .tint(Theme.accent)
+                .frame(minHeight: 50)
+                .onChange(of: hapticsOn) { _, on in if on { Haptics.selection() } }
+
+                AlarmRowDivider()
+
+                HStack(spacing: 8) {
+                    Text("Done screens")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Spacer(minLength: 12)
+                    Picker("Done screens", selection: length) {
+                        ForEach(DoneFlowLength.allCases) { l in
+                            Text(l.title).tag(l)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .tint(Theme.inkSecondary)
+                }
+                .frame(minHeight: 50)
+                .accessibilityElement(children: .combine)
+            }
+            .padding(.top, 6)
+
+            PreferencesFootnote(text: lengthFootnote)
+        }
+    }
+
+    private var preview: some View {
+        TimelineView(.everyMinute) { tl in
+            let state = HeroMomentResolver.peek(store: store, coordinator: coordinator, now: tl.date)
+            // haptics only on a replay the user asked for, never on opening Preferences
+            let input = state.input(hapticsEnabled: replayToken > 0)
+            ZStack {
+                Group {
+                    switch style.wrappedValue {
+                    case .ridge: RidgeCardView(input: input)
+                    case .matrix: MatrixCardView(input: input)
+                    }
+                }
+                .id("\(styleRaw)-\(replayToken)")
+                .transition(.asymmetric(insertion: .identity, removal: .opacity.animation(.easeOut(duration: 0.15))))
+            }
+            .animation(.easeOut(duration: 0.15), value: styleRaw)
+            .background(Theme.surface)
+            .clipShape(.rect(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            }
+            .contentShape(.rect(cornerRadius: 24))
+            .onTapGesture {
+                Haptics.selection()
+                replayToken += 1
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Preview. \(state.accessibilityLabel)")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Replays the card")
+        }
+        // Preferences sits over Home; the preview is the one card that should move here.
+        .environment(\.heroMotionPaused, false)
+        .frame(maxWidth: HeroMetrics.maxWidth)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var lengthFootnote: String {
+        switch length.wrappedValue {
+        case .automatic: "Tap the card to replay. Done screens get shorter if you skip them often."
+        case .full: "Tap the card to replay. Every done screen, every time."
+        case .short: "Tap the card to replay. A shorter finish, every time."
+        }
     }
 }
 

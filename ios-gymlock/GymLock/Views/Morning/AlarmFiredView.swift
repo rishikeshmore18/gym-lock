@@ -35,6 +35,7 @@ struct AlarmFiredView: View {
     var body: some View {
         ZStack {
             Theme.canvas.ignoresSafeArea()
+                .blocksHeroHaptics("alarm")
 
             VStack(spacing: 0) {
                 Spacer(minLength: 8)

@@ -95,6 +95,7 @@ struct Day0CaptureSheet: View {
         ZStack {
             CameraPreview(session: camera.session)
                 .ignoresSafeArea()
+                .blocksHeroHaptics("camera")
 
             VStack {
                 Text(kind == .photo ? "day 0 photo" : "day 0 · 5 seconds")

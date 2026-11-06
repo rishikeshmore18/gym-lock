@@ -172,6 +172,8 @@ final class StreakIntroController {
     ) -> Bool {
         guard hasPendingCelebration(for: streak) else { return false }
         guard !isSuspended, isHomeVisible, state == .compact else { return false }
+        // The done flow celebrates the week itself; the intro never opens over or before it.
+        guard !CelebrationQueue.shared.suppressesStreakIntro() else { return false }
 
         lastCelebratedWeekStart = streak.liveWeekStart
 
@@ -180,6 +182,11 @@ final class StreakIntroController {
             await self?.run(streak: streak.weeks, reduceMotion: reduceMotion)
         }
         return true
+    }
+
+    /// The done flow already showed this week being kept (spec §3.5): no second celebration.
+    func markCelebrated(weekStarting week: Date) {
+        lastCelebratedWeekStart = week
     }
 
     /// Called when a covering flow finishes, so a celebration held back behind

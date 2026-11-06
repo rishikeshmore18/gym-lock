@@ -106,19 +106,23 @@ public struct MatrixLiveClock: Equatable, Sendable {
     public var gymStart: Date?
     /// When the evening window closes (stilltime state).
     public var eveningEnd: Date?
+    /// The gym clock stops here while the phone is outside the gym area (a pending exit).
+    public var gymFrozenAt: Date?
 
-    public init(setupDone: [Bool] = [false, false, false], countdownEnd: Date? = nil, gymStart: Date? = nil, eveningEnd: Date? = nil) {
+    public init(setupDone: [Bool] = [false, false, false], countdownEnd: Date? = nil, gymStart: Date? = nil, eveningEnd: Date? = nil, gymFrozenAt: Date? = nil) {
         self.setupDone = setupDone
         self.countdownEnd = countdownEnd
         self.gymStart = gymStart
         self.eveningEnd = eveningEnd
+        self.gymFrozenAt = gymFrozenAt
     }
 
     public func data(at date: Date) -> MatrixLiveData {
-        MatrixLiveData(
+        let gymNow = gymFrozenAt.map { min($0, date) } ?? date
+        return MatrixLiveData(
             setupDone: setupDone,
             countdown: countdownEnd.map { max(0, $0.timeIntervalSince(date)) } ?? 0,
-            atgym: gymStart.map { max(0, date.timeIntervalSince($0)) } ?? 0,
+            atgym: gymStart.map { max(0, gymNow.timeIntervalSince($0)) } ?? 0,
             stillLeft: eveningEnd.map { max(0, $0.timeIntervalSince(date)) } ?? 0
         )
     }
@@ -138,8 +142,21 @@ public struct MatrixCardCopy: Equatable, Sendable {
         case text(String, MatrixKineticStyle)
         /// The countdown as a flip clock (hh:mm:ss of `MatrixLiveData.countdown`).
         case countdownClock
-        /// A plain headline that fades in (atgym), e.g. "AT THE GYM" state's mm:ss.
+        /// A plain headline that fades in.
         case plain(String)
+        /// Live mm:ss on the gym floor (`MatrixLiveData.atgym`), ticking every frame.
+        case gymClock
+        /// Live "2h 14m left" of the evening (`MatrixLiveData.stillLeft`).
+        case stillLeft
+    }
+    /// One row of the setup checklist, shown instead of the support line.
+    public struct ChecklistRow: Equatable, Sendable {
+        public var label: String
+        public var isDone: Bool
+        public init(label: String, isDone: Bool) {
+            self.label = label
+            self.isDone = isDone
+        }
     }
     public var eyebrow: String
     public var headline: Headline
@@ -148,13 +165,29 @@ public struct MatrixCardCopy: Equatable, Sendable {
     public var liveDot: Bool
     /// The 20-minute bar under the support line (atgym).
     public var showsProofBar: Bool
+    /// Setup only: the three items, drawn in place of `support`.
+    public var checklist: [ChecklistRow]
+    /// Support line once the 20-minute proof lands (atgym), replacing `support`.
+    public var supportDone: String?
 
-    public init(eyebrow: String, headline: Headline, support: String, liveDot: Bool = false, showsProofBar: Bool = false) {
+    public init(eyebrow: String, headline: Headline, support: String, liveDot: Bool = false, showsProofBar: Bool = false, checklist: [ChecklistRow] = [], supportDone: String? = nil) {
         self.eyebrow = eyebrow
         self.headline = headline
         self.support = support
         self.liveDot = liveDot
         self.showsProofBar = showsProofBar
+        self.checklist = checklist
+        self.supportDone = supportDone
+    }
+
+    /// For VoiceOver and the style preview's label.
+    public var spokenHeadline: String {
+        switch headline {
+        case .text(let s, _), .plain(let s): return s.replacingOccurrences(of: "**", with: "")
+        case .countdownClock: return "countdown"
+        case .gymClock: return "time at the gym"
+        case .stillLeft: return "time left today"
+        }
     }
 }
 
@@ -348,6 +381,7 @@ final class MatrixCardRuntime {
 
         let out = stepScene(engine, input, t: clock.t, T: clock.T, live: clock.live)
         haptics.isActive = input.hapticsEnabled
+        haptics.allowsSuccess = HeroHapticPolicy.allowsSuccess(input.moment)
         haptics.tick(clock.T)
 
         let sh = reduceMotion ? 0 : out.shake * G.PITCH
@@ -375,6 +409,7 @@ public struct MatrixCardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.heroMotionPaused) private var externallyPaused
     @State private var runtime = MatrixCardRuntime()
     @State private var onScreen = false
     @State private var lastTouchCell: SIMD2<Double>?
@@ -384,13 +419,13 @@ public struct MatrixCardView: View {
         self.interactive = interactive
     }
 
-    private var paused: Bool { !onScreen || scenePhase != .active }
+    private var paused: Bool { !onScreen || scenePhase != .active || externallyPaused }
 
     public var body: some View {
         let look = MatrixLook.resolve(input.moment, scheme)
         GeometryReader { proxy in
             let k = Double(proxy.size.width) / MatrixCardGeometry.W
-            TimelineView(.animation(minimumInterval: nil, paused: paused)) { tl in
+            TimelineView(.animation(minimumInterval: HeroMotion.minimumInterval, paused: paused)) { tl in
                 let clock = runtime.sync(input, tl.date)
                 ZStack(alignment: .topLeading) {
                     Canvas(opaque: false, colorMode: .nonLinear, rendersAsynchronously: false) { ctx, size in
@@ -408,7 +443,7 @@ public struct MatrixCardView: View {
         .background(look.card.color)
         .onAppear { onScreen = true }
         .onDisappear { onScreen = false }
-        .onScrollVisibilityChange(threshold: 0.05) { visible in onScreen = visible }
+        .onScrollVisibilityChange(threshold: 0.1) { visible in onScreen = visible }
     }
 
     private func pointerGesture(k: Double) -> some Gesture {
@@ -469,8 +504,31 @@ struct MatrixCardCopyLayer: View {
             headline(size: hSize * k)
                 .padding(.top, 6 * k)
 
-            if !copy.support.isEmpty {
-                MatrixRich.text(supportText(), size: 35 * k, weight: .medium, color: look.ink2.color, boldColor: look.ink.color, boldWeight: .bold)
+            if !copy.checklist.isEmpty {
+                VStack(alignment: .leading, spacing: 8 * k) {
+                    ForEach(Array(copy.checklist.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: 12 * k) {
+                            ZStack {
+                                Circle()
+                                    .strokeBorder(row.isDone ? MatrixRGB.coral.color : look.ink2.color.opacity(0.6), lineWidth: 2.5 * k)
+                                if row.isDone {
+                                    Circle().fill(MatrixRGB.coral.color).padding(7 * k)
+                                }
+                            }
+                            .frame(width: 26 * k, height: 26 * k)
+                            Text(row.label)
+                                .font(.system(size: 31 * k, weight: row.isDone ? .medium : .bold, design: .rounded))
+                                .foregroundStyle(row.isDone ? look.ink2.color : look.ink.color)
+                                .strikethrough(row.isDone, color: look.ink2.color.opacity(0.6))
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .padding(.top, 14 * k)
+                .opacity(sub)
+                .offset(y: (1 - sub) * 10 * k)
+            } else if !copy.support.isEmpty {
+                MatrixRich.text(supportText(proofHit: proofHit), size: 35 * k, weight: .medium, color: look.ink2.color, boldColor: look.ink.color, boldWeight: .bold)
                     .lineSpacing(0.05 * 35 * k)
                     .frame(maxWidth: 430 * k, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -501,7 +559,9 @@ struct MatrixCardCopyLayer: View {
         let sample: String
         switch copy.headline {
         case .countdownClock: sample = "00:00:00"
-        case .plain: sample = "00:00"
+        case .plain(let s): sample = s.count < 6 ? "00:00" : s
+        case .gymClock: sample = "00:00"
+        case .stillLeft: sample = "0h 00m left"
         case .text(let s, _): sample = s
         }
         return min(88, (88 * 440) / max(1, MatrixTextMeasure.width(sample, size: 88, rounded: true)))
@@ -514,18 +574,30 @@ struct MatrixCardCopyLayer: View {
             let s = live.countdown
             MatrixFlipClock(text: Self.clock(s), frac: 1 - (s - s.rounded(.down)), size: size, color: look.ink.color, up: false)
         case .plain(let s):
-            Text(s)
-                .font(.system(size: size, weight: .bold, design: .rounded).monospacedDigit())
-                .tracking(-0.02 * size)
-                .foregroundStyle(look.ink.color)
-                .lineLimit(1)
-                .opacity(MX.cl((f - 4) / 3))
+            plainLine(s, size: size)
+        case .gymClock:
+            let s = Int(max(0, live.atgym).rounded(.down))
+            plainLine(String(format: "%02d:%02d", s / 60, s % 60), size: size)
+        case .stillLeft:
+            let m = Int((max(0, live.stillLeft) / 60).rounded(.down))
+            plainLine(String(format: "%dh %02dm left", m / 60, m % 60), size: size)
         case .text(let s, let style):
             MatrixKineticHeadline(text: s, style: style, f: f, size: size, color: look.ink.color, tracking: -0.02, reduceMotion: reduceMotion)
         }
     }
 
-    private func supportText() -> String {
+    private func plainLine(_ s: String, size: Double) -> some View {
+        Text(s)
+            .font(.system(size: size, weight: .bold, design: .rounded).monospacedDigit())
+            .tracking(-0.02 * size)
+            .foregroundStyle(look.ink.color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .opacity(MX.cl((f - 4) / 3))
+    }
+
+    private func supportText(proofHit: Bool) -> String {
+        if proofHit, let done = copy.supportDone { return done }
         guard copy.support.contains("{left}") else { return copy.support }
         let left = max(0, MX.PROOF - live.atgym)
         let mm = Int((left / 60).rounded(.down)), ss = Int(left.rounded(.down)) % 60

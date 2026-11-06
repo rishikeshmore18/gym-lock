@@ -117,6 +117,7 @@ struct ProgressPhotoCaptureSheet: View {
         ZStack {
             CameraPreview(session: camera.session)
                 .ignoresSafeArea()
+                .blocksHeroHaptics("camera")
                 // Two fingers zoom the lens, exactly as in Camera. The pinch
                 // is read from where it started rather than accumulated, so
                 // lifting and re-pinching does not compound.

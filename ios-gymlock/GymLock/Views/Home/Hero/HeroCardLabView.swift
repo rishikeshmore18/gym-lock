@@ -257,7 +257,7 @@ struct HeroCardLabView: View {
             // Let the spinner draw before the synchronous run.
             try? await Task.sleep(for: .milliseconds(50))
             let start = Date()
-            let failures = MatrixParity.run() + MatrixParity.runStory()
+            let failures = MatrixParity.run() + MatrixParity.runStory() + MatrixParity.runAll()
             parity = .done(failures: failures, seconds: Date().timeIntervalSince(start))
         }
     }
