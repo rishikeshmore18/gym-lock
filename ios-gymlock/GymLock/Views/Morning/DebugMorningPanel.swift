@@ -41,6 +41,7 @@ struct DebugMorningPanel: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
+                        heroLabLink
                         environmentCard
                         stepsSection
                         resetSection
@@ -73,6 +74,27 @@ struct DebugMorningPanel: View {
     }
 
     // MARK: - Sections
+
+    /// The Dynamic hero card lab: any moment, theme and T, plus the Matrix parity run.
+    private var heroLabLink: some View {
+        NavigationLink {
+            HeroCardLabView()
+        } label: {
+            HStack {
+                Text("Hero card lab")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(MorningCardStyle())
+    }
 
     /// What the flow is actually running against on this device, which is the
     /// first thing worth knowing when something behaves unexpectedly.

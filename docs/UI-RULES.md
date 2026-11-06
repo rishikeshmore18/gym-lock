@@ -88,6 +88,7 @@ System faces only — SF Pro, SF Rounded, SF Mono, New York — via `Font.system
 - **Depth is shadow + hairline, never blur.** Blur and material are reserved for floating glass chrome (§8).
 - **Prefer spacing over cards.** If two groups can be separated by whitespace, do not wrap each in a bordered card. Nested cards (a card inside a card) are banned.
 - **No glow, no neon, no outer shadow used decoratively.** Depth comes from a hairline and a soft lift, nothing else.
+- *Approved exception (Rishi, 2026-11-06):* Ridge's painterly gradients, washes and glow are allowed inside the Home hero card and the Ridge done flow only. See §14.
 
 ---
 
@@ -120,6 +121,8 @@ Every animation must be one of: **feedback**, **spatial consistency**, **state i
 | Sheet, cover, editor, modal | 200–500 ms |
 
 **Hard ceiling: 300 ms for anything in the Operate layer.** Longer needs a stated reason. The morning flow's celebratory moments are the exception.
+
+*Approved exception (Rishi, 2026-11-06):* the done flow and other celebration moments of the hero card may run longer than 300 ms. See §14.
 
 ### 5.4 Curves and springs
 
@@ -168,6 +171,8 @@ Springs, by job (Apple's own parameters):
 ### 5.7 One entry animation, once
 
 Elements may animate in once. **Nothing loops.** No pulsing buttons, no breathing glows, no perpetual shimmer. Anything rendered to an image (share frames) must render its **settled end state** — pass an `isAnimated: false` flag through the same view rather than building a second one.
+
+*Approved exception (Rishi, 2026-11-06):* the Home hero card, the done flow and the card-style preview are never static. They play an entrance, one beat, then a calm idle loop. Under Reduce Motion only a slow opacity breathe remains. See §14.
 
 ### 5.8 Reduce Motion
 
@@ -382,3 +387,15 @@ Call `prepareSelection()` before a surface where the first tick's latency would 
 - **The brief wins.** If this file and an explicit instruction in the task conflict, the task wins — but say so out loud rather than silently ignoring the rule.
 - **Refinement preserves; redesign replaces.** If asked to refine, keep the existing identity, behaviour, copy and scope. Do not quietly redesign a screen you were asked to adjust.
 - **Do not widen scope.** Touching a screen you were not asked to touch is a defect, however tempting.
+
+---
+
+## 14. Approved exceptions: Dynamic hero card (Rishi, 2026-11-06)
+
+These apply only to the Home hero card (Ridge and Matrix styles), its full-screen done flow and the card-style preview in Preferences. Everywhere else the rules above stand. The behaviour notes (2 and 5) are mirrored in `docs/FLOW.md`, which wins on behaviour.
+
+1. **Idle loop.** The hero card, done flow and style preview are never static: entrance, one beat, then a calm idle loop. This overrides "Nothing loops" (§5.7) for these surfaces only. Under Reduce Motion, keep an opacity breathe only.
+2. **Done flow timing.** The done flow plays after a verified workout. From the workout-done notification it runs first, then lands on the Progress spotlight.
+3. **Ridge paint.** Ridge's painterly gradients, washes and glow are allowed in the hero card and the Ridge done flow only (overrides §4 and the §12 gradient and glow checks there).
+4. **Long celebrations.** Done-flow and celebration durations may exceed 300 ms (§5.3).
+5. **Week position.** First / middle / last session of the week, and the 5 or 7 taps of the finish, come from real sessions against the weekly goal (3 to 7), never from the weekday.

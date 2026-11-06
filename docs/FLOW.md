@@ -299,6 +299,8 @@ GYM DAY
    shown once per workout day, only from that notification
 ```
 
+- *Approved exception (Rishi, 2026-11-06):* after a verified workout the full-screen done flow plays. When the workout-done notification is tapped, the done flow runs first, then lands on the Progress spotlight above. See "Approved exceptions: Dynamic hero card" under Confirmed Decisions.
+
 - **Built (`2026-09-27`):** today the day counts the moment you arrive. Count it when the workout is done.
 - **Built (`2026-09-27`):** today any Health workout counts, even 1 minute or typed in by hand. Set a 20-minute minimum and ignore hand-typed ones.
 - **Built (`2026-09-27`):** today the app stops watching the gym area once arrival is confirmed. It can't tell how long you stayed or when you left. Track both.
@@ -591,6 +593,16 @@ These were open questions while the flow was being written. They are final.
 - **The day counts when the workout is done, not on arrival.**
 - **In later years, freezes arrive Mar 1 and Jul 1, and unused ones expire Dec 31.**
 - **The night lock stays on during a late-night gym visit.**
+
+### Approved exceptions: Dynamic hero card (Rishi, 2026-11-06)
+
+Approved by Rishi for the Home hero card (Ridge and Matrix styles), its done flow and the card-style preview. They do not change any other rule in this file. Appearance notes are mirrored in `docs/UI-RULES.md` §14.
+
+1. **Idle loop.** The hero card, done flow and style preview are never static: entrance, one beat, then a calm idle loop. Under Reduce Motion, an opacity breathe only.
+2. **Done flow before the spotlight.** The done flow plays after a verified workout. From the workout-done notification it runs first, then lands on the Progress spotlight (Flow 3).
+3. **Ridge paint.** Ridge's painterly gradients, washes and glow are allowed in the hero card and the Ridge done flow only.
+4. **Long celebrations.** Done-flow and celebration durations may exceed 300 ms.
+5. **Week position.** First / middle / last session of the week, and the 5 or 7 taps of the finish, come from real sessions counted against the weekly goal (3 to 7), never from the weekday.
 
 ## Appendix A — Where This Lives in the Code
 
