@@ -1093,14 +1093,19 @@ struct DayDial: View {
                 // feathers both edges into the face, so it reads as the glow
                 // the ticks cast rather than a shape. Purely decorative: the
                 // whole face already opts out of hit testing.
-                let bandSpan = min(max(Double(sessionMinutes) + introExtraMinutes, 0), 1440)
-                if bandSpan > 0 {
+                // The same wash, in black, behind the night (bedtime to wake).
+                let washBands: [(start: Double, span: Double, colour: Color)] = [
+                    (Double(bedtimeMinutes), min(max(Double(sleepMinutes), 0), 1440), Color.black.opacity(0.194)),
+                    (Double(gymByMinutes), min(max(Double(sessionMinutes) + introExtraMinutes, 0), 1440), Theme.accent.opacity(0.194))
+                ]
+                for wash in washBands where wash.span > 0 {
+                    let bandSpan = wash.span
                     // Centred on the minor ticks it backs, and thinner than
                     // they are long, so it never reaches past them.
                     let thickness = metrics.minorTickLength * 0.55
                     let bandOuter = outer - metrics.minorTickLength * 0.22
                     let bandInner = bandOuter - thickness
-                    let startMinutes = Double(gymByMinutes)
+                    let startMinutes = wash.start
                     // Angles run linearly with minutes past 1440, so a visit
                     // crossing midnight is one continuous sector here, not
                     // two.
@@ -1131,7 +1136,7 @@ struct DayDial: View {
                     // strokes drawn after it in the same context.
                     context.drawLayer { layer in
                         layer.addFilter(.blur(radius: thickness * 0.45))
-                        layer.fill(band, with: .color(Theme.accent.opacity(0.194)))
+                        layer.fill(band, with: .color(wash.colour))
                     }
                 }
 
