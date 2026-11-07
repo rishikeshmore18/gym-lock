@@ -10,7 +10,7 @@ import Foundation
 
 extension MX {
     public enum Story {
-        final class O_len_at_dir_L {
+        nonisolated final class O_len_at_dir_L {
             var len: Double
             var at: (Double) -> (Double, Double)
             var dir: (Double) -> (Double, Double)
@@ -22,7 +22,7 @@ extension MX {
                 self.L = L
             }
         }
-        final class O_th_q_L {
+        nonisolated final class O_th_q_L {
             var th: Double
             var q: Double
             var L: Double
@@ -32,7 +32,7 @@ extension MX {
                 self.L = L
             }
         }
-        final class O_yh_R_disc_rays_y0_y1 {
+        nonisolated final class O_yh_R_disc_rays_y0_y1 {
             var yh: Double
             var R: Double
             var disc: [(Double, Double)]
@@ -48,7 +48,7 @@ extension MX {
                 self.y1 = y1
             }
         }
-        final class O_S_X0_top_Hw {
+        nonisolated final class O_S_X0_top_Hw {
             var S: [[Double]]
             var X0: Double
             var top: Double
@@ -60,7 +60,7 @@ extension MX {
                 self.Hw = Hw
             }
         }
-        final class O_x_y_th {
+        nonisolated final class O_x_y_th {
             var x: Double
             var y: Double
             var th: Double
@@ -70,7 +70,7 @@ extension MX {
                 self.th = th
             }
         }
-        final class O_H_top_bot_frame {
+        nonisolated final class O_H_top_bot_frame {
             var H: Double
             var top: [(Double, Double)]
             var bot: [(Double, Double)]

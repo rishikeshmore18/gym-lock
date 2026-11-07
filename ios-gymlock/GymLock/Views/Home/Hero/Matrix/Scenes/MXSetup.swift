@@ -10,7 +10,7 @@ import Foundation
 
 extension MX {
     public enum Setup {
-        final class Mem {
+        nonisolated final class Mem {
             var t: Double
             var T: Double
             var on: [Bool]

@@ -10,7 +10,7 @@ import Foundation
 
 extension MX {
     public enum Verified {
-        final class O_s_o {
+        nonisolated final class O_s_o {
             var s: Double
             var o: [(Double, Double)]
             init(s: Double, o: [(Double, Double)]) {
@@ -18,7 +18,7 @@ extension MX {
                 self.o = o
             }
         }
-        final class O_H_Wd_co_off {
+        nonisolated final class O_H_Wd_co_off {
             var H: [Double]
             var Wd: [Double]
             var co: Double
@@ -30,7 +30,7 @@ extension MX {
                 self.off = off
             }
         }
-        final class O_b_x_y_a {
+        nonisolated final class O_b_x_y_a {
             var b: Double
             var x: Double
             var y: Double
@@ -42,7 +42,7 @@ extension MX {
                 self.a = a
             }
         }
-        final class Cell {
+        nonisolated final class Cell {
             var x: Double
             var y: Double
             var a: Double
@@ -52,7 +52,7 @@ extension MX {
                 self.a = a
             }
         }
-        final class O_i_d_x {
+        nonisolated final class O_i_d_x {
             var i: Double
             var d: Double
             var x: Double
@@ -78,7 +78,7 @@ extension MX {
         static let HY: Double = 24.0
         static let SX: Double = 22.0
         static let SY: Double = 17.0
-        private static let _module1: (DISC: [(Double, Double)], sunrise: MatrixScene, DROP0: Double, DROPK: Double, FALL: Double, ARRIVE: Double, wall: MatrixScene, BOLT: [String], BX: Double, BW: Double, BY: Double, BH: Double, battery: MatrixScene, PL0: Double, PLK: Double, PLA: Double, barbell: MatrixScene, ONE: [String], PLUS: [String], BURST: Double, plusOne: MatrixScene, RR: Double, RCX: Double, RCY: Double, RING: [O_b_x_y_a], ring: MatrixScene, HG: Double, GX: Double, GY: Double, FRAME: [(Double, Double)], TOPS: [(Double, Double)], BOTS: [(Double, Double)], M: Double) = {
+        private static let _module1: (DISC: [(Double, Double)], sunrise: MatrixScene, wall: MatrixScene, BOLT: [String], battery: MatrixScene, barbell: MatrixScene, ONE: [String], PLUS: [String], plusOne: MatrixScene, RCX: Double, RCY: Double, RING: [O_b_x_y_a], ring: MatrixScene, GX: Double, GY: Double, FRAME: [(Double, Double)], TOPS: [(Double, Double)], BOTS: [(Double, Double)], M: Double) = {
             var DISC: [(Double, Double)] = ([] as [(Double, Double)])
             do {
                 var dy: Double = -(5.0)
@@ -140,10 +140,6 @@ extension MX {
                 }
                 return SceneOut(opts: MatrixDealOptions(stagger: 0.3), flash: fl(T - 1.15, 0.16, 0.28), shake: ((T > 1.15 && T < 1.3) ? 0.2 : 0.0))
             }
-            let DROP0: Double = 0.3
-            let DROPK: Double = 0.15
-            let FALL: Double = 0.18
-            let ARRIVE: Double = 0.33
             let wall: MatrixScene = MatrixScene(haptics: (Array(JS.slice(lands(5.0), 0.0, 4.0).map { (t: Double) -> HapticCue in
                 return HapticCue(t: t, kind: .light)
             }) + ([HapticCue(t: (lands(5.0))[4], kind: .heavy), HapticCue(t: (lands(5.0))[4] + 0.4, kind: .success)] as [HapticCue]))) { (g: inout MatrixBoard, c: MatrixContext) -> SceneOut in
@@ -233,10 +229,6 @@ extension MX {
                 return SceneOut(opts: MatrixDealOptions(stagger: 0.3), flash: small + fl(T - key, 0.15, 0.28), shake: ((T > key && T < key + 0.16) ? 0.35 : 0.0))
             }
             let BOLT: [String] = (["....#####", "...#####.", "..#####..", ".#####...", "#########", "#########", "....####.", "...####..", "..####...", ".####....", "###......", "#........"] as [String])
-            let BX: Double = 9.0
-            let BW: Double = 25.0
-            let BY: Double = 18.0
-            let BH: Double = 12.0
             let battery: MatrixScene = MatrixScene(haptics: (Array(JS.range(4.0).map { (k: Double) -> HapticCue in
                 return HapticCue(t: segT(5.0, k) + 0.16, kind: .light)
             }) + ([HapticCue(t: FULL(5.0), kind: .heavy), HapticCue(t: FULL(5.0) + 0.07, kind: .success)] as [HapticCue]))) { (g: inout MatrixBoard, c: MatrixContext) -> SceneOut in
@@ -326,9 +318,6 @@ extension MX {
                 }
                 return SceneOut(opts: MatrixDealOptions(stagger: 0.3), flash: tick + fl(T - full, 0.15, 0.28), shake: ((T > full && T < full + 0.14) ? 0.25 : 0.0))
             }
-            let PL0: Double = 0.3
-            let PLK: Double = 0.12
-            let PLA: Double = 0.3
             let barbell: MatrixScene = MatrixScene(haptics: (Array(JS.range(5.0).map { (k: Double) -> HapticCue in
                 return HapticCue(t: PL0 + k * PLK + PLA, kind: HapticKind(rawValue: (k == 4.0 ? "medium" : "light"))!)
             }) + ([HapticCue(t: LOCK(5.0), kind: .heavy), HapticCue(t: LOCK(5.0) + 0.07, kind: .success)] as [HapticCue]))) { (g: inout MatrixBoard, c: MatrixContext) -> SceneOut in
@@ -398,7 +387,6 @@ extension MX {
             }
             let ONE: [String] = (["00100", "01100", "00100", "00100", "00100", "00100", "01110"] as [String])
             let PLUS: [String] = (["..#..", "..#..", "#####", "..#..", "..#.."] as [String])
-            let BURST: Double = 1.12
             let plusOne: MatrixScene = MatrixScene(haptics: ([HapticCue(t: 0.22, kind: .light), HapticCue(t: 0.4, kind: .light), HapticCue(t: 0.58, kind: .medium), HapticCue(t: BURST, kind: .heavy), HapticCue(t: BURST + 0.06, kind: .success)] as [HapticCue])) { (g: inout MatrixBoard, c: MatrixContext) -> SceneOut in
                 let T: Double = c.T
                 let N: Double = nOf(c)
@@ -489,7 +477,6 @@ extension MX {
                 }
                 return SceneOut(phase: "track", opts: MatrixDealOptions(stagger: 0.25), flash: (last >= 0.0 ? fl(T - chevT(last), 0.08, 0.05) : 0.0))
             }
-            let RR: Double = 12.0
             let RCX: Double = CX + 0.5
             let RCY: Double = CY + 0.5
             let RING: [O_b_x_y_a] = (Array(ringCells(RCX, RCY, RR).map { (q: Cell) -> O_b_x_y_a in
@@ -560,7 +547,6 @@ extension MX {
                 }
                 return SceneOut(opts: MatrixDealOptions(stagger: 0.3), flash: tick + fl(T - seal, 0.15, 0.28), shake: ((sealed && T < seal + 0.14) ? 0.22 : 0.0))
             }
-            let HG: Double = 11.0
             let GX: Double = CX + 0.5
             let GY: Double = CY + 0.5
             var FRAME: [(Double, Double)] = ([] as [(Double, Double)])
@@ -605,41 +591,41 @@ extension MX {
             let M: Double = JS.min(Double(TOPS.count), Double(BOTS.count))
             JS.setLength(&TOPS, M)
             JS.setLength(&BOTS, M)
-            return (DISC: DISC, sunrise: sunrise, DROP0: DROP0, DROPK: DROPK, FALL: FALL, ARRIVE: ARRIVE, wall: wall, BOLT: BOLT, BX: BX, BW: BW, BY: BY, BH: BH, battery: battery, PL0: PL0, PLK: PLK, PLA: PLA, barbell: barbell, ONE: ONE, PLUS: PLUS, BURST: BURST, plusOne: plusOne, RR: RR, RCX: RCX, RCY: RCY, RING: RING, ring: ring, HG: HG, GX: GX, GY: GY, FRAME: FRAME, TOPS: TOPS, BOTS: BOTS, M: M)
+            return (DISC: DISC, sunrise: sunrise, wall: wall, BOLT: BOLT, battery: battery, barbell: barbell, ONE: ONE, PLUS: PLUS, plusOne: plusOne, RCX: RCX, RCY: RCY, RING: RING, ring: ring, GX: GX, GY: GY, FRAME: FRAME, TOPS: TOPS, BOTS: BOTS, M: M)
         }()
         static var DISC: [(Double, Double)] { _module1.DISC }
         static var sunrise: MatrixScene { _module1.sunrise }
-        static var DROP0: Double { _module1.DROP0 }
-        static var DROPK: Double { _module1.DROPK }
-        static var FALL: Double { _module1.FALL }
-        static var ARRIVE: Double { _module1.ARRIVE }
         static var wall: MatrixScene { _module1.wall }
         static var BOLT: [String] { _module1.BOLT }
-        static var BX: Double { _module1.BX }
-        static var BW: Double { _module1.BW }
-        static var BY: Double { _module1.BY }
-        static var BH: Double { _module1.BH }
         static var battery: MatrixScene { _module1.battery }
-        static var PL0: Double { _module1.PL0 }
-        static var PLK: Double { _module1.PLK }
-        static var PLA: Double { _module1.PLA }
         static var barbell: MatrixScene { _module1.barbell }
         static var ONE: [String] { _module1.ONE }
         static var PLUS: [String] { _module1.PLUS }
-        static var BURST: Double { _module1.BURST }
         static var plusOne: MatrixScene { _module1.plusOne }
-        static var RR: Double { _module1.RR }
         static var RCX: Double { _module1.RCX }
         static var RCY: Double { _module1.RCY }
         static var RING: [O_b_x_y_a] { _module1.RING }
         static var ring: MatrixScene { _module1.ring }
-        static var HG: Double { _module1.HG }
         static var GX: Double { _module1.GX }
         static var GY: Double { _module1.GY }
         static var FRAME: [(Double, Double)] { _module1.FRAME }
         static var TOPS: [(Double, Double)] { _module1.TOPS }
         static var BOTS: [(Double, Double)] { _module1.BOTS }
         static var M: Double { _module1.M }
+        static let DROP0: Double = 0.3
+        static let DROPK: Double = 0.15
+        static let FALL: Double = 0.18
+        static let ARRIVE: Double = 0.33
+        static let BX: Double = 9.0
+        static let BW: Double = 25.0
+        static let BY: Double = 18.0
+        static let BH: Double = 12.0
+        static let PL0: Double = 0.3
+        static let PLK: Double = 0.12
+        static let PLA: Double = 0.3
+        static let BURST: Double = 1.12
+        static let RR: Double = 12.0
+        static let HG: Double = 11.0
         static func sunY(_ T: Double) -> Double {
             return lerp(HY + 6.0, SY, eio((T - 0.25) / 0.8))
         }

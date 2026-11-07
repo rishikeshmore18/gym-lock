@@ -10,7 +10,7 @@ import Foundation
 
 extension MX {
     public enum Atgym {
-        final class O_m_f_h_fl {
+        nonisolated final class O_m_f_h_fl {
             var m: Double
             var f: Double
             var h: Double
@@ -22,7 +22,7 @@ extension MX {
                 self.fl = fl
             }
         }
-        final class O_live_liveDone {
+        nonisolated final class O_live_liveDone {
             var live: String
             var liveDone: String
             init(live: String, liveDone: String) {
@@ -30,7 +30,7 @@ extension MX {
                 self.liveDone = liveDone
             }
         }
-        final class O_x_y_r {
+        nonisolated final class O_x_y_r {
             var x: Double
             var y: Double
             var r: Double
@@ -40,7 +40,7 @@ extension MX {
                 self.r = r
             }
         }
-        final class O_x_y {
+        nonisolated final class O_x_y {
             var x: Double
             var y: Double
             init(x: Double, y: Double) {

@@ -481,3 +481,15 @@ enum RidgeShape: Sendable {
   `nonisolated extension RW {` and `nonisolated final class` so regenerated files keep this.
 - The done flow's story still paints on main, so the shared caches (`palette`, `grain`, `frameOf`,
   `C2DColor.parse`) sit behind locks. Never hold those locks while painting.
+
+## Module initialisers (all ts2swift modes)
+
+- A scene file's top-level values become one lazy `_moduleN` tuple. If code that runs while the
+  tuple is built (haptic lists, frame tables) calls a module function that reads the tuple back,
+  Swift re-enters `swift_once` and traps with SIGTRAP. This crashed launch through
+  `MX.Verified.SCENES` -> `lands()` -> `DROP0`.
+- ts2swift therefore hoists `const` primitives (`const DROP0 = 0.3`) out of the tuple as plain
+  `static let`s, per declaration, so `const HG = 11, GX = CX + 0.5` still hoists `HG`.
+- After regenerating, run `bun docs/hero-pack/swift/tools/check-module-recursion.ts <scene files>`.
+  It must print `clean`. If it flags a call, make what that call reads a literal const in the TS
+  source, or move the call out of top-level code.

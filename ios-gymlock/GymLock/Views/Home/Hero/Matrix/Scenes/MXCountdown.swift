@@ -10,7 +10,7 @@ import Foundation
 
 extension MX {
     public enum Countdown {
-        final class O_s_K_q {
+        nonisolated final class O_s_K_q {
             var s: Double
             var K: Double
             var q: Double

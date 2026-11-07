@@ -1666,9 +1666,10 @@ export class Emitter {
     this.w(`return ${this.retValue(s.expression, f.ret)}`);
   }
 
-  varStmt(list: any, isModule: boolean) {
+  varStmt(list: any, isModule: boolean, only?: (d: any) => boolean) {
     const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
     for (const d of list.declarations) {
+      if (only && !only(d)) continue;
       const init = d.initializer;
       if (ts.isIdentifier(d.name)) {
         const name = d.name.text;
@@ -2223,8 +2224,25 @@ export function emitModule(checker: any, sf: any, cfg: Config, header: string, o
       em.lines = inner;
       em.ind = savedInd + 1;
       const funcs: any[] = [];
+      // Literal constants (`const DROP0 = 0.3`) become plain `static let`s outside the tuple. Module
+      // functions read them, and the tuple's own eager code (scene haptics, frame tables) calls those
+      // functions: reading them through the tuple would re-enter its lazy initialiser and trap.
+      const hoisted: any[] = [];
+      const isLit = (e: any): boolean => {
+        const u = e && em.unwrapParens(e);
+        if (!u) return false;
+        if (ts.isNumericLiteral(u) || ts.isStringLiteral(u) || u.kind === ts.SyntaxKind.TrueKeyword || u.kind === ts.SyntaxKind.FalseKeyword) return true;
+        return ts.isPrefixUnaryExpression(u) && u.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(em.unwrapParens(u.operand));
+      };
+      const litDecl = (d: any) => ts.isIdentifier(d.name) && isLit(d.initializer); // a const primitive can never change
       for (let j = blockStart; j <= blockEnd; j++) {
         const t = stmts[j];
+        let rest: ((d: any) => boolean) | undefined;
+        if (ts.isVariableStatement(t) && (t.declarationList.flags & ts.NodeFlags.Const) && t.declarationList.declarations.some(litDecl)) {
+          hoisted.push(t);
+          if (t.declarationList.declarations.every(litDecl)) continue;
+          rest = (d: any) => !litDecl(d);
+        }
         if (ts.isVariableStatement(t)) {
           const fnOnly = t.declarationList.declarations.every((d: any) => d.initializer && (ts.isArrowFunction(em.unwrapParens(d.initializer)) || ts.isFunctionExpression(em.unwrapParens(d.initializer))));
           if (fnOnly) {
@@ -2232,9 +2250,10 @@ export function emitModule(checker: any, sf: any, cfg: Config, header: string, o
             continue;
           }
           for (const d of t.declarationList.declarations) {
+            if (rest && !rest(d)) continue;
             if (ts.isIdentifier(d.name) && !(d.initializer && ts.isArrowFunction(em.unwrapParens(d.initializer)))) initVars.push({name: d.name.text, sw: em.ty(em.typeOf(d.name))});
           }
-          em.varStmt(t.declarationList, false);
+          em.varStmt(t.declarationList, false, rest);
         } else if (ts.isFunctionDeclaration(t)) funcs.push(t);
         else em.stmt(t);
       }
@@ -2247,6 +2266,7 @@ export function emitModule(checker: any, sf: any, cfg: Config, header: string, o
       em.lines.push(...inner);
       em.w('}()');
       for (const v of initVars) em.w(`static var ${esc(v.name)}: ${v.sw} { ${id}${initVars.length === 1 ? '' : '.' + v.name} }`);
+      for (const h of hoisted) em.varStmt(h.declarationList, true, litDecl);
       for (const f of funcs) {
         if (ts.isFunctionDeclaration(f)) em.funcDecl(f.name.text, f, true);
         else em.varStmt(f.declarationList, true);

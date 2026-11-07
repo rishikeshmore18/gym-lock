@@ -10,7 +10,7 @@ import Foundation
 
 extension MX {
     public enum Ready {
-        final class O_cx_cy_r_gap {
+        nonisolated final class O_cx_cy_r_gap {
             var cx: Double
             var cy: Double
             var r: Double
@@ -22,7 +22,7 @@ extension MX {
                 self.gap = gap
             }
         }
-        final class O_cx_cy {
+        nonisolated final class O_cx_cy {
             var cx: Double
             var cy: Double
             init(cx: Double, cy: Double) {

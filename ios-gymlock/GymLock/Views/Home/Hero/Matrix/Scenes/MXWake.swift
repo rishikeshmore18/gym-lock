@@ -10,7 +10,7 @@ import Foundation
 
 extension MX {
     public enum Wake {
-        final class O_cx_cy_r {
+        nonisolated final class O_cx_cy_r {
             var cx: Double
             var cy: Double
             var r: Double

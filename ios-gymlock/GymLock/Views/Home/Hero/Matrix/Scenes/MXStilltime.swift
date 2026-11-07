@@ -10,7 +10,7 @@ import Foundation
 
 extension MX {
     public enum Stilltime {
-        final class O_wi_S_top_bot {
+        nonisolated final class O_wi_S_top_bot {
             var wi: [Double]
             var S: Double
             var top: [(Double, Double)]

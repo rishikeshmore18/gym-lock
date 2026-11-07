@@ -10,7 +10,7 @@ import Foundation
 
 extension MX {
     public enum Drift {
-        final class O_a_R {
+        nonisolated final class O_a_R {
             var a: Double
             var R: Double
             init(a: Double, R: Double) {
