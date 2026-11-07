@@ -73,6 +73,10 @@ struct ContentView: View {
             // Home reports its own readiness once it has settled. The other
             // stages are ready as soon as they are mounted.
             if store.stage != .home { launchCover.contentIsReady() }
+            HeroTrace.log("content.task stage=\(store.stage)")
+            // Launch diagnostics: still alive well after the first frames.
+            try? await Task.sleep(for: .seconds(6))
+            CrashSentinel.launchSucceeded()
         }
     }
 

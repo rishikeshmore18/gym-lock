@@ -59,8 +59,10 @@ nonisolated final class RidgeRenderThread: @unchecked Sendable {
 /// Debug-only breadcrumbs for the hero card ("event key=value"), read with the runtime logs.
 nonisolated enum HeroTrace {
     static func log(_ line: @autoclosure () -> String) {
+        let s = line()
+        CrashSentinel.mark(s)
         #if DEBUG
-        print("[hero] \(line())")
+        print("[hero] \(s)")
         #endif
     }
 

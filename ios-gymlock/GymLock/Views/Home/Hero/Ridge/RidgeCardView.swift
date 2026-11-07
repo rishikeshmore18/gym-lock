@@ -91,6 +91,7 @@ nonisolated final class RidgeFrameRenderer: @unchecked Sendable {
     func enqueue(_ job: RidgeFrameJob, deliver: @escaping @Sendable (Int, CGImage) -> Void) {
         RidgeRenderThread.shared.submit(self) { [self] in
             let start = CFAbsoluteTimeGetCurrent()
+            CrashSentinel.mark("ridge.paint n=\(painted + 1) moment=\(job.moment) day=\(job.day) pos=\(job.pos) T=\(job.c.T)")
             let img = frame(moment: job.moment, day: job.day, pos: job.pos, c: job.c, theme: job.theme, t: job.t, pxScale: job.pxScale, reduceMotion: job.reduceMotion)
             painted += 1
             let ms = HeroTrace.ms(since: start)
@@ -168,6 +169,7 @@ final class RidgeCardRuntime {
         haptics.isActive = input.hapticsEnabled
         haptics.allowsSuccess = HeroHapticPolicy.allowsSuccess(input.moment)
         haptics.tick(clock.T)
+        if CrashSentinel.heroSafeMode { return }
         seq += 1
         if seq == 1 { HeroTrace.log("ridge.request first moment=\(input.moment.rawValue) day=\(input.day) px=\(pxScale)") }
         let job = RidgeFrameJob(seq: seq, moment: input.moment.rawValue, day: input.day, pos: input.pos.rawValue, c: c, theme: scheme == .dark ? "dark" : "light", t: clock.t, pxScale: pxScale, reduceMotion: reduceMotion)

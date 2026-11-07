@@ -10,6 +10,9 @@ import UserNotifications
 
 @main
 struct GymLockApp: App {
+    /// First stored property, so the launch diagnostics are armed before any store is created.
+    private let sentinel: Void = CrashSentinel.install()
+    @State private var launchReport: String? = CrashSentinel.previousReport
     @State private var store = AppStore()
     /// Owns the morning state machine for the lifetime of the app, so a session
     /// survives the user moving between screens.
@@ -40,6 +43,19 @@ struct GymLockApp: App {
 
     var body: some Scene {
         WindowGroup {
+            if let report = launchReport {
+                LaunchReportView(report: report) { safe in
+                    CrashSentinel.heroSafeMode = safe
+                    CrashSentinel.clearPrevious()
+                    launchReport = nil
+                }
+            } else {
+                app
+            }
+        }
+    }
+
+    private var app: some View {
             ContentView()
                 .environment(store)
                 .environment(coordinator)
@@ -65,6 +81,5 @@ struct GymLockApp: App {
                     // rather than accumulating duplicates.
                     Task { await coordinator.syncAlarms() }
                 }
-        }
     }
 }

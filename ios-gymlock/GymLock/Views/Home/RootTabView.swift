@@ -220,15 +220,18 @@ struct RootTabView: View {
             // the shell rather than inside a tab so it still runs when the new
             // home is the screen the user lands on.
             store.seedPlanIfNeeded()
+            HeroTrace.log("root.task seeded")
             // Suspended at once, so the entrance cannot slip in between the
             // launch cover lifting and the setup flow covering home.
             if !store.plan.hasBeenReviewed { intro.isSuspended = true }
             presentLaunchPrompts()
 
             // A cold launch is a new foreground session (spec §3.2 rule 1).
+            HeroTrace.log("root.task prompts")
             queue.sync(store: store, coordinator: coordinator)
             queue.sceneBecameActive()
             scheduleCelebration(flowDelay: 0.7)
+            HeroTrace.log("root.task done")
         }
     }
 
