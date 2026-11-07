@@ -95,6 +95,54 @@ protocol AlarmScheduling: AnyObject, Sendable {
     func scheduledSlotIDs() async -> Set<UUID>
 }
 
+// MARK: - Snooze re-alert
+
+/// What the one-time snooze re-alert needs to ring like the alarm it
+/// replaces, saved on every sync.
+///
+/// The system alarm's snooze button runs an intent that may perform before
+/// the app has put anything on screen (a locked phone), so it cannot ask the
+/// coordinator for the sound or the length. It reads this instead.
+struct SnoozeRealertTemplate: Codable, Hashable {
+    var minutes: Int
+    var title: String
+    var message: String
+    var soundResource: String?
+    var soundFileName: String?
+
+    static let storageKey = "gymlock.alarm.snoozeTemplate"
+
+    func save(defaults: UserDefaults = .standard) {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> SnoozeRealertTemplate? {
+        guard let data = defaults.data(forKey: storageKey) else { return nil }
+        return try? JSONDecoder().decode(SnoozeRealertTemplate.self, from: data)
+    }
+
+    /// The re-alert for the alarm `sourceAlarmID`, snoozed at `snoozedAt`:
+    /// a gym alarm, once, at the end of the snooze, with no snooze button.
+    func request(sourceAlarmID: UUID, snoozedAt: Date, calendar: Calendar = .current) -> GymAlarmRequest {
+        let fireDate = snoozedAt.addingTimeInterval(Double(minutes) * 60)
+        let weekday = Weekday(rawValue: calendar.component(.weekday, from: fireDate))
+        return GymAlarmRequest(
+            slotID: SnoozeAlarmID.derive(from: sourceAlarmID),
+            time: TimeOfDay(from: fireDate),
+            weekdays: weekday.map { [$0] } ?? [],
+            title: title,
+            message: message,
+            soundResource: soundResource,
+            soundFileName: soundFileName,
+            allowsSnooze: false,
+            snoozeMinutes: minutes,
+            fireDate: fireDate,
+            kind: .gym
+        )
+    }
+}
+
 // MARK: - Selection
 
 enum AlarmSchedulerFactory {

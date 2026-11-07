@@ -2,7 +2,11 @@
 import AppIntents
 import Foundation
 
-/// Runs when the user taps "I'm up" on the system alarm.
+/// Runs when the user taps "I'm up" (or "I'm going") on the system alarm.
+///
+/// The tap is the commitment: the note says `.stopped`, and the app goes
+/// straight on to the quick task or the countdown, never to a second "I'm
+/// up" of its own (FLOW, Flow 1 and 2).
 ///
 /// `.foreground(.immediate)` is what brings GymLock to the front, and that
 /// matters for more than politeness: the shield cannot be applied by a process
@@ -60,11 +64,23 @@ struct SnoozeGymSessionIntent: LiveActivityIntent {
         if let id = UUID(uuidString: alarmID), !WakeAlarmID.startsSession(alarmID: id) {
             return .result()
         }
+        let now = Date()
+        // The second ring is booked here, before anything else, so it rings
+        // even if the phone stays locked and the app never comes forward.
+        // The coordinator adopts the same alarm (same derived id) later.
+        if let id = UUID(uuidString: alarmID) {
+            await Self.bookSecondRing(after: id, snoozedAt: now)
+        }
         AlarmHandoff.write(
-            .init(slotID: UUID(uuidString: alarmID), firedAt: Date(), action: .snoozed)
+            .init(slotID: UUID(uuidString: alarmID), firedAt: now, action: .snoozed)
         )
         NotificationCenter.default.post(name: .gymLockAlarmHandoffAvailable, object: nil)
         return .result()
+    }
+
+    @MainActor
+    private static func bookSecondRing(after id: UUID, snoozedAt: Date) async {
+        await AlarmKitAlarmScheduler().scheduleSnoozeRealert(after: id, snoozedAt: snoozedAt)
     }
 }
 #endif

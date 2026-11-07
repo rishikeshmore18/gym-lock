@@ -463,9 +463,24 @@ struct MorningPlan: Hashable {
         if let oneOff = oneOffAlarms.first(where: { $0.id == id }) {
             return enabledSlots.first { $0.id == oneOff.slotID } ?? slots.first { $0.id == oneOff.slotID }
         }
+        // The one-time snooze re-alert: back to the alarm it was derived
+        // from, then to that alarm's slot.
+        if SnoozeAlarmID.isSnooze(id) {
+            guard let source = SnoozeAlarmID.sourceID(for: id, among: snoozeSourceCandidates) else { return nil }
+            return slot(forAlarmID: source)
+        }
         // A gym alarm holding the week after a frozen week (FLOW, Flow 5).
         guard let slotID = PausedWeekAlarmID.slotID(for: id, among: slots.map(\.id)) else { return nil }
         return slots.first { $0.id == slotID }
+    }
+
+    /// Every alarm id a snooze re-alert can have been derived from.
+    private var snoozeSourceCandidates: [UUID] {
+        slots.map(\.id)
+            + oneOffAlarms.filter { $0.kind != .snooze }.map(\.id)
+            + slots.flatMap { slot in
+                Weekday.allCases.map { PausedWeekAlarmID.derive(slotID: slot.id, weekday: $0) }
+            }
     }
 
     /// One-off alarm ids mapped to the slot each stands for.
@@ -478,6 +493,16 @@ struct MorningPlan: Hashable {
             for weekday in Weekday.allCases {
                 map[PausedWeekAlarmID.derive(slotID: slot.id, weekday: weekday)] = slot.id
             }
+        }
+        // The one-time snooze re-alert of any of these, so its second ring
+        // is recognised as the same morning even before the coordinator has
+        // recorded it.
+        let sources = map
+        for (source, slotID) in sources where !SnoozeAlarmID.isSnooze(source) {
+            map[SnoozeAlarmID.derive(from: source)] = slotID
+        }
+        for slot in slots {
+            map[SnoozeAlarmID.derive(from: slot.id)] = slot.id
         }
         return map
     }
@@ -537,8 +562,11 @@ struct MorningPlan: Hashable {
     /// comes back with the override's alarm time so every screen that reads
     /// "next alarm" agrees with what will actually ring.
     func nextOccurrence(after date: Date = Date(), calendar: Calendar = .current) -> (slot: AlarmSlot, fireDate: Date)? {
+        // The snooze re-alert belongs to a morning already running; it is
+        // never "the next alarm".
         let oneOffs = oneOffAlarms.filter { alarm in
-            alarm.isActive(at: date) && slots.contains { $0.id == alarm.slotID && $0.isEnabled }
+            alarm.kind != .snooze
+                && alarm.isActive(at: date) && slots.contains { $0.id == alarm.slotID && $0.isEnabled }
         }
 
         var candidates = enabledSlots.compactMap { slot -> (AlarmSlot, Date)? in

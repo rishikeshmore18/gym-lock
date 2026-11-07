@@ -116,6 +116,36 @@ enum PausedWeekAlarmID {
     }
 }
 
+/// Ids for the one-time snooze re-alert (FLOW, Flow 1: "[5 more min] (only
+/// once) → rings again").
+///
+/// Derived from the id of the alarm that was snoozed, with a fixed "SNZO"
+/// prefix, so the snooze intent (which may run before the app is ever on
+/// screen) and the coordinator arrive at the same id without talking to each
+/// other, and the second ring finds its way back to the slot.
+nonisolated enum SnoozeAlarmID {
+    static func derive(from source: UUID) -> UUID {
+        var bytes = source.uuid
+        bytes.0 = 0x53
+        bytes.1 = 0x4E
+        bytes.2 = 0x5A
+        bytes.3 = 0x4F
+        return UUID(uuid: bytes)
+    }
+
+    static func isSnooze(_ id: UUID?) -> Bool {
+        guard let id else { return false }
+        let bytes = id.uuid
+        return bytes.0 == 0x53 && bytes.1 == 0x4E && bytes.2 == 0x5A && bytes.3 == 0x4F
+    }
+
+    /// The alarm a snooze id was derived from, among `candidates`.
+    static func sourceID(for id: UUID, among candidates: [UUID]) -> UUID? {
+        guard isSnooze(id) else { return nil }
+        return candidates.first { derive(from: $0) == id }
+    }
+}
+
 // MARK: - One-off alarms
 
 /// One alarm that rings once, at an exact moment.
@@ -130,9 +160,13 @@ struct OneOffAlarm: Codable, Hashable, Identifiable {
         case runningLate
         /// A reschedule, added with the skip screen (FLOW, Flow 4).
         case reschedule
+        /// The one-time snooze re-alert (FLOW, Flow 1): the same session
+        /// rings again, with no snooze of its own. Its id is a
+        /// `SnoozeAlarmID`.
+        case snooze
 
         /// Whether this alarm stands in for that day's weekly ring.
-        var replacesWeeklyRing: Bool { self != .runningLate }
+        var replacesWeeklyRing: Bool { self != .runningLate && self != .snooze }
     }
 
     /// The alarm's own id. The alarm backends key alarms by id, so the
@@ -309,15 +343,24 @@ enum AlarmPlan {
             : activeWakeDays
         var oneOffs: [PlannedAlarm] = []
 
-        for oneOff in plan.oneOffAlarms where oneOff.isActive(at: now) && oneOff.fireDate > now {
+        // A snooze re-alert stays in the set after its moment while it is
+        // still in the plan: it may be ringing right now, and the backend
+        // leaves a passed one-off exactly as the system has it.
+        for oneOff in plan.oneOffAlarms
+        where oneOff.isActive(at: now) && (oneOff.fireDate > now || oneOff.kind == .snooze) {
             guard let slotID = oneOff.slotID,
                   plan.slots.contains(where: { $0.id == slotID && $0.isEnabled }),
                   let day = oneOff.weekday(calendar: calendar)
             else { continue }
 
             let rhythm = oneOff.rhythm ?? weekly
-            // Running late only exists in Go Later.
-            let oneOffMode: GymFlowMode = oneOff.kind == .runningLate ? .goLater : rhythm.flowMode
+            // Running late only exists in Go Later; the snooze re-alert only
+            // in Wake & Go.
+            let oneOffMode: GymFlowMode = switch oneOff.kind {
+            case .runningLate: .goLater
+            case .snooze: .wakeAndGo
+            case .nextAlarmChange, .reschedule: rhythm.flowMode
+            }
 
             if oneOff.kind.replacesWeeklyRing {
                 if let index = alarms.firstIndex(where: { $0.id == slotID }) {
@@ -356,7 +399,8 @@ enum AlarmPlan {
                     time: TimeOfDay(from: oneOff.fireDate),
                     weekdays: [day],
                     fireDate: oneOff.fireDate,
-                    allowsSnooze: plan.snoozeEnabled && oneOffMode == .wakeAndGo
+                    // The second ring has no snooze: it was the one snooze.
+                    allowsSnooze: oneOff.kind != .snooze && plan.snoozeEnabled && oneOffMode == .wakeAndGo
                 )
             )
         }

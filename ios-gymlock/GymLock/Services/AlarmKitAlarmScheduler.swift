@@ -50,23 +50,63 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
     }
 
     func replaceAll(with requests: [GymAlarmRequest]) async {
-        await cancelAll()
+        // A one-off whose moment has already come (only the snooze re-alert
+        // is ever sent like this) is either ringing right now or finished.
+        // It is left exactly as the system has it: cancelling would silence
+        // a ringing alarm, rescheduling a past date would make no sense.
+        let now = Date()
+        let held = Set(
+            requests
+                .filter { request in request.fireDate.map { $0 <= now } ?? false }
+                .map(\.slotID)
+        )
+        await cancelAll(except: held)
 
         guard await authorizationStatus() == .authorized else { return }
 
-        for request in requests where !request.weekdays.isEmpty {
+        for request in requests where !request.weekdays.isEmpty && !held.contains(request.slotID) {
             await schedule(request)
         }
     }
 
     func cancelAll() async {
+        await cancelAll(except: [])
+    }
+
+    private func cancelAll(except kept: Set<UUID>) async {
         // Reconciling against the system's own list rather than a local table:
         // if the app was reinstalled or its state restored from a backup, the
         // stored ids may be stale while the alarms are very much still there.
         guard let alarms = try? manager.alarms else { return }
-        for alarm in alarms {
+        for alarm in alarms where !kept.contains(alarm.id) {
             try? manager.cancel(id: alarm.id)
         }
+    }
+
+    /// The one-time snooze re-alert, scheduled straight from the system
+    /// alarm's snooze button (FLOW, Flow 1: "rings again. no more snooze").
+    ///
+    /// Runs inside `SnoozeGymSessionIntent`, which can perform while the
+    /// phone is still locked and before the app has drawn anything, so the
+    /// second ring never depends on the user unlocking first. The id is
+    /// derived from the snoozed alarm, so the coordinator's own sync later
+    /// replaces this same alarm rather than adding another.
+    ///
+    /// - Returns: Whether the system now holds the re-alert.
+    @discardableResult
+    func scheduleSnoozeRealert(after sourceAlarmID: UUID, snoozedAt: Date = Date()) async -> Bool {
+        guard WakeAlarmID.startsSession(alarmID: sourceAlarmID),
+              !SnoozeAlarmID.isSnooze(sourceAlarmID),
+              let template = SnoozeRealertTemplate.load(),
+              await authorizationStatus() == .authorized
+        else { return false }
+
+        let request = template.request(sourceAlarmID: sourceAlarmID, snoozedAt: snoozedAt)
+        // Already there: a second tap, or the intent and the app racing.
+        if let alarms = try? manager.alarms, alarms.contains(where: { $0.id == request.slotID }) {
+            return true
+        }
+        return await schedule(request)
     }
 
     func scheduledSlotIDs() async -> Set<UUID> {
@@ -76,10 +116,10 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
 
     // MARK: - Private
 
-    private func schedule(_ request: GymAlarmRequest) async {
+    @discardableResult
+    private func schedule(_ request: GymAlarmRequest) async -> Bool {
         if request.kind == .plainWake {
-            await schedulePlainWake(request)
-            return
+            return await schedulePlainWake(request)
         }
 
         let stopButton = AlarmButton(
@@ -144,13 +184,14 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
 
         // The slot id is reused as the alarm id, which is what makes a replace a
         // genuine replace: the same slot can never occupy two alarms.
-        _ = try? await manager.schedule(id: request.slotID, configuration: configuration)
+        return (try? await manager.schedule(id: request.slotID, configuration: configuration)) != nil
     }
 
     /// A plain wake-up: AlarmKit's own stop and its own snooze, and no
     /// intents at all, so nothing it does can reach the app or start a
     /// session. Its id is a `WakeAlarmID`, which the observer ignores.
-    private func schedulePlainWake(_ request: GymAlarmRequest) async {
+    @discardableResult
+    private func schedulePlainWake(_ request: GymAlarmRequest) async -> Bool {
         let stopButton = AlarmButton(text: "Stop", textColor: .white, systemImageName: "stop.fill")
         let alert: AlarmPresentation.Alert = if request.allowsSnooze {
             AlarmPresentation.Alert(
@@ -196,7 +237,7 @@ final class AlarmKitAlarmScheduler: AlarmScheduling {
             sound: sound(for: request)
         )
 
-        _ = try? await manager.schedule(id: request.slotID, configuration: configuration)
+        return (try? await manager.schedule(id: request.slotID, configuration: configuration)) != nil
     }
 
     // MARK: - Observing what the system actually did

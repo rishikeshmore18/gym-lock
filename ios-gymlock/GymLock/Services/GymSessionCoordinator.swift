@@ -439,18 +439,21 @@ final class GymSessionCoordinator {
         // (FLOW, Flow 5). A stray note from an alarm that rang before the
         // freeze was planned is dropped.
         if let end = store.frozenWeekEnd, now < end {
-            if AlarmHandoff.peek(now: now) != nil { AlarmHandoff.clear() }
+            if AlarmHandoff.peek(now: now, defaults: defaults) != nil { AlarmHandoff.clear(defaults: defaults) }
             return
         }
 
         // An open skip screen for a past day never holds up a real alarm.
         let isLive = (session?.state.isLive ?? false) && session?.isMakeUpOffer != true
+        // The app's defaults are `.standard`, where the alarm's intents
+        // write; tests pass their own suite.
+        let pending = AlarmHandoff.peek(now: now, defaults: defaults)
         let resolution = SessionResume.resolve(
             now: now,
             isSessionLive: isLive,
             liveSlotID: isLive ? session?.slotID : nil,
             liveSessionDay: isLive ? session?.day : nil,
-            handoff: AlarmHandoff.peek(now: now),
+            handoff: pending,
             // The enabled slots carry the real ring time (wake time, or the
             // time to go), so the clock check follows the flow.
             slots: store.plan.enabledSlots,
@@ -463,17 +466,20 @@ final class GymSessionCoordinator {
         // settled or for the morning already running. A note for a different
         // slot during a live session is left to wait.
         if resolution.clearsHandoff {
-            AlarmHandoff.clear()
+            AlarmHandoff.clear(defaults: defaults)
         }
 
-        // The morning is already running (the observer got there first) and
-        // the user has now tapped Stop or Snooze on the system alarm: the
-        // app's ringer goes quiet with it, and a snooze is taken.
+        // The morning is already running (the observer got there first, or
+        // this is the snooze's second ring) and the user has now tapped the
+        // system alarm: the app's ringer goes quiet with it. "I'm up" /
+        // "I'm going" is the commitment itself; a snooze is taken.
         switch resolution.acknowledgedAction {
-        case .stopped?: ringer.stop()
+        case .stopped?:
+            ringer.stop()
+            commitFromSystemAlarm()
         case .snoozed?:
             ringer.stop()
-            snooze()
+            snooze(at: pending?.firedAt ?? now, sourceAlarmID: pending?.slotID)
         default: break
         }
 
@@ -481,16 +487,68 @@ final class GymSessionCoordinator {
 
         // A one-off alarm carries its own id; the plan maps it back to its slot.
         let slot = store.plan.slot(forAlarmID: decision.slotID)
+        // The snooze's second ring reaching an app that never saw the first
+        // (the phone stayed locked throughout): the same morning, snooze
+        // already spent.
+        let isSecondRing = SnoozeAlarmID.isSnooze(decision.slotID)
 
         // `startAt` rather than `now`: the deadline is measured from when the
         // alarm actually rang, so ignoring it for ten minutes does not quietly
         // buy ten more minutes.
-        // Stop and Snooze on the system alarm never restart the song.
-        beginSession(for: slot, at: decision.startAt, startsRinger: decision.mayStartRinger)
+        // Stop and Snooze on the system alarm never restart the song, and
+        // nothing plays over a system alarm that is still ringing.
+        beginSession(
+            for: slot,
+            at: decision.startAt,
+            startsRinger: decision.mayStartRinger && !isSecondRing
+        )
+        if isSecondRing { markSnoozeSpentBySecondRing(at: decision.startAt) }
 
-        if decision.wantsSnooze {
-            snooze()
+        switch decision.action {
+        case .stopped?:
+            // "I'm up" / "I'm going" on the system alarm: straight on to the
+            // quick task or the countdown. No second "I'm up" in the app.
+            commitFromSystemAlarm()
+        case .snoozed?:
+            snooze(at: decision.startAt, sourceAlarmID: decision.slotID)
+        default:
+            break
         }
+    }
+
+    /// The system alarm's stop button, honoured as the commitment.
+    ///
+    /// Idempotent: only a session still waiting for its answer commits, so
+    /// the intent and the observer racing, a relaunch, or a stale note can
+    /// never commit twice or rewind a morning already under way.
+    private func commitFromSystemAlarm() {
+        guard let current = session,
+              current.isMakeUpOffer != true,
+              !current.state.hasCommitted,
+              Self.awaitsAnswer(current.state)
+        else { return }
+        commitToGoing()
+    }
+
+    /// The states in which the alarm is still waiting for "I'm up".
+    static func awaitsAnswer(_ state: GymSessionState) -> Bool {
+        switch state {
+        case .alarmFired, .awaitingDecision, .snoozed, .runningLate: true
+        default: false
+        }
+    }
+
+    /// A session begun from the snooze's second ring: the one snooze is
+    /// already spent, and the system alarm is the one ringing.
+    private func markSnoozeSpentBySecondRing(at date: Date) {
+        guard var current = session, current.snoozeUsedAt == nil,
+              Self.awaitsAnswer(current.state)
+        else { return }
+        current.snoozeUsedAt = date
+        current.snoozeExpiresAt = nil
+        current.snoozeRealert = .systemAlarm
+        session = current
+        persist()
     }
 
     // MARK: - Wind-down
@@ -732,6 +790,16 @@ final class GymSessionCoordinator {
             snoozeMinutes: plan.snoozeMinutes,
             snoozeEnabled: plan.snoozeEnabled
         )
+
+        // What the system alarm's snooze button needs to book the second
+        // ring by itself, before the app is on screen.
+        SnoozeRealertTemplate(
+            minutes: plan.snoozeMinutes,
+            title: Self.alarmTitle(for: .gym),
+            message: Self.alarmMessage(for: .gym),
+            soundResource: profile.alarmSound.resourceName,
+            soundFileName: soundFile
+        ).save()
 
         await alarms.replaceAll(with: requests)
     }
@@ -1155,6 +1223,7 @@ final class GymSessionCoordinator {
             await notifier.cancelMissedNotice(day: day)
         }
         clearRunningLateAlarm(for: current)
+        clearSnoozeRealert()
 
         // A temporary anchor, captured now and deleted when the session ends.
         // Never labelled or stored as a home address.
@@ -1189,7 +1258,14 @@ final class GymSessionCoordinator {
     /// Morning only: someone whose alarm rings after work is already awake, and
     /// a snooze there would be a procrastination button at exactly the moment
     /// the product exists to remove procrastination.
-    func snooze() {
+    ///
+    /// - Parameters:
+    ///   - now: When the snooze was taken. The system alarm's button passes
+    ///     the moment of the tap, so the second ring lands where the intent
+    ///     already booked it even if the app only catches up later.
+    ///   - sourceAlarmID: The alarm that was snoozed, which the re-alert's id
+    ///     is derived from. The session's slot when snoozed in the app.
+    func snooze(at now: Date = Date(), sourceAlarmID: UUID? = nil) {
         guard var current = session else { return }
         guard SessionVoice(session: current).allowsSnooze else { return }
         guard current.state == .alarmFired || current.state == .awaitingDecision else { return }
@@ -1197,9 +1273,9 @@ final class GymSessionCoordinator {
         // Silence now, and ring again when the snooze runs out.
         ringer.stop()
 
-        let now = Date()
         current.snoozeUsedAt = now
-        current.snoozeExpiresAt = now.addingTimeInterval(Double(current.snoozeDurationMinutes) * 60)
+        let expiresAt = now.addingTimeInterval(Double(current.snoozeDurationMinutes) * 60)
+        current.snoozeExpiresAt = expiresAt
         current.state = .snoozed
         session = current
 
@@ -1207,16 +1283,75 @@ final class GymSessionCoordinator {
         Haptics.soft()
         persist()
 
-        // Two belts. The ticker resolves it while the app is open; the
-        // notification covers the far more likely case of a phone going back
-        // face-down on the nightstand.
+        // The ticker resolves the screen while the app is open. The second
+        // ring itself is a real one-off system alarm (FLOW, Flow 1: "rings
+        // again. apps still locked. no more snooze."); the notification is
+        // only the degraded fallback when that cannot be booked.
         startTicking()
-        Task { [notifier] in
-            await notifier.scheduleSnoozeRefire(
-                at: current.snoozeExpiresAt ?? now,
-                minutes: current.snoozeDurationMinutes
+        let source = sourceAlarmID.flatMap { SnoozeAlarmID.isSnooze($0) ? nil : $0 }
+            ?? current.slotID ?? current.id
+        bookSnoozeRealert(for: current, sourceAlarmID: source, at: expiresAt)
+    }
+
+    /// Books the snooze's second ring and records how it will be delivered.
+    private func bookSnoozeRealert(for snoozed: GymSession, sourceAlarmID: UUID, at fireDate: Date) {
+        let sessionID = snoozed.id
+        let minutes = snoozed.snoozeDurationMinutes
+        let alarmID = SnoozeAlarmID.derive(from: sourceAlarmID)
+
+        // Only on the system alarm backend, and never past the lock deadline
+        // (the session would already be over).
+        let canUseSystemAlarm = alarms.capability == .systemAlarm
+            && snoozed.slotID != nil
+            && fireDate < snoozed.effectiveLockDeadline
+        if canUseSystemAlarm, let store {
+            store.plan.oneOffAlarms.removeAll { $0.kind == .snooze }
+            store.plan.oneOffAlarms.append(
+                OneOffAlarm(id: alarmID, kind: .snooze, slotID: snoozed.slotID, fireDate: fireDate)
             )
         }
+
+        Task { [weak self, notifier, alarms] in
+            var delivery: SnoozeRealertDelivery = .notificationFallback
+            if canUseSystemAlarm {
+                await self?.syncAlarms()
+                if await alarms.scheduledSlotIDs().contains(alarmID) {
+                    delivery = .systemAlarm
+                }
+            }
+
+            guard let self, var current = self.session, current.id == sessionID else { return }
+            current.snoozeRealert = delivery
+            self.session = current
+            self.persist()
+
+            if delivery == .systemAlarm {
+                // No second, competing wake-up on top of the system alarm.
+                await notifier.cancelSnoozeRefire()
+            } else {
+                // Degraded: the system alarm could not be booked. Taken back
+                // off the plan so nothing half-booked lingers, and the
+                // time-sensitive notification stands in.
+                if canUseSystemAlarm {
+                    self.store?.plan.oneOffAlarms.removeAll { $0.kind == .snooze }
+                }
+                await notifier.scheduleSnoozeRefire(at: fireDate, minutes: minutes)
+            }
+        }
+    }
+
+    /// Takes the snooze's second ring back off once the morning has its
+    /// answer, so a committed, skipped or ended morning never rings again.
+    private func clearSnoozeRealert() {
+        guard let store, store.plan.oneOffAlarms.contains(where: { $0.kind == .snooze }) else { return }
+        store.plan.oneOffAlarms.removeAll { $0.kind == .snooze }
+        Task { await syncAlarms() }
+    }
+
+    /// Whether the system alarm owns the second ring, in which case the app
+    /// plays nothing over it.
+    private func systemAlarmOwnsSecondRing(_ session: GymSession) -> Bool {
+        session.snoozeRealert == .systemAlarm && alarms.capability == .systemAlarm
     }
 
     /// Brings the alarm back after the snooze has run out.
@@ -1231,11 +1366,16 @@ final class GymSessionCoordinator {
         session = current
         persist()
 
+        // The system alarm is ringing the second time itself: no custom
+        // audio or haptics over it. Its "I'm up" commits like the first.
+        guard !systemAlarmOwnsSecondRing(current) else { return }
+
         // The shield never came off, so there is nothing to re-apply — only the
         // decision to put back in front of the user.
         Haptics.medium()
 
-        // The whole point of a snooze is that the alarm comes back.
+        // Degraded fallback: the notification stood in, so the app's own
+        // ringer is the alarm when it is in front.
         startRingingIfFrontmost()
     }
 
@@ -1336,6 +1476,7 @@ final class GymSessionCoordinator {
         releaseShield(sessionID: current.id)
         markSlotResolved(current, at: now)
         clearRunningLateAlarm(for: current)
+        clearSnoozeRealert()
 
         // Usually already waiting, scheduled at the ring. Sent now only if it
         // somehow is not (a session saved before this existed).
@@ -1767,6 +1908,7 @@ final class GymSessionCoordinator {
         let day = current.day
         Task { [notifier] in await notifier.cancelMissedNotice(day: day) }
         clearRunningLateAlarm(for: current)
+        clearSnoozeRealert()
         noteSkipScreenShown()
     }
 
@@ -2040,6 +2182,7 @@ final class GymSessionCoordinator {
 
         // No morning ends with the alarm still going.
         ringer.stop()
+        clearSnoozeRealert()
 
         // Before the session is thrown away: remember that this slot is done
         // for today, so the clock check cannot resurrect it ten minutes later.

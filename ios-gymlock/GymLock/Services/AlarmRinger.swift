@@ -206,24 +206,46 @@ final class AlarmRinger {
 
         engine.isAutoShutdownEnabled = false
         // An alarm outliving an audio-session interruption is the entire point,
-        // so the engine restarts itself rather than going quiet.
-        engine.resetHandler = { [weak engine] in try? engine?.start() }
+        // so the vibration comes back rather than going quiet. A reset
+        // invalidates every player made on the engine, so restarting the
+        // engine alone would leave it running silently: the looping player is
+        // rebuilt too.
+        engine.resetHandler = { [weak self] in
+            Task { @MainActor in self?.restartHapticsAfterReset() }
+        }
 
         do {
             try engine.start()
-
-            let pattern = try CHHapticPattern(events: Self.events(for: haptic), parameters: [])
-            let player = try engine.makeAdvancedPlayer(with: pattern)
-            player.loopEnabled = true
-            try player.start(atTime: CHHapticTimeImmediate)
-
             hapticEngine = engine
-            hapticPlayer = player
+            hapticPlayer = try makeLoopingPlayer(on: engine)
             updateHapticIntensity(Double(Self.startVolume))
         } catch {
             hapticEngine = nil
             hapticPlayer = nil
             startFallbackHaptics()
+        }
+    }
+
+    private func makeLoopingPlayer(on engine: CHHapticEngine) throws -> CHHapticAdvancedPatternPlayer {
+        let pattern = try CHHapticPattern(events: Self.events(for: haptic), parameters: [])
+        let player = try engine.makeAdvancedPlayer(with: pattern)
+        player.loopEnabled = true
+        try player.start(atTime: CHHapticTimeImmediate)
+        return player
+    }
+
+    /// The engine was reset by the system (an interruption, a media server
+    /// restart) while the alarm was still ringing.
+    private func restartHapticsAfterReset() {
+        guard isRinging, haptic != .none, let engine = hapticEngine else { return }
+        do {
+            try engine.start()
+            hapticPlayer = try makeLoopingPlayer(on: engine)
+            updateHapticIntensity(intensity)
+        } catch {
+            hapticEngine = nil
+            hapticPlayer = nil
+            if fallbackHaptics == nil { startFallbackHaptics() }
         }
     }
 

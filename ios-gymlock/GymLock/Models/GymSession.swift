@@ -132,6 +132,17 @@ enum CantTodayResolution: String, Codable, Hashable {
     }
 }
 
+/// Who rings the second time after the one snooze (FLOW, Flow 1).
+enum SnoozeRealertDelivery: String, Codable, Hashable {
+    /// A one-off AlarmKit alarm the system holds: it rings through silent
+    /// mode and Focus, locked or closed. The app plays nothing over it.
+    case systemAlarm
+    /// Degraded: the system alarm could not be booked (no AlarmKit, not
+    /// authorised, or scheduling failed), so a time-sensitive notification
+    /// stands in, and the app's own ringer plays if it is in front.
+    case notificationFallback
+}
+
 /// One morning, from the alarm to whatever actually happened.
 ///
 /// Persisted in full. If the app is killed mid-countdown, terminated by the
@@ -205,6 +216,9 @@ struct GymSession: Codable, Hashable, Identifiable {
     var snoozeOffered: Bool?
     /// The snooze length the plan had when this alarm rang.
     var snoozeLengthMinutes: Int?
+    /// How the second ring after the snooze is delivered. Nil until the
+    /// snooze is taken (and on sessions saved before this existed).
+    var snoozeRealert: SnoozeRealertDelivery?
 
     // MARK: Flow
 
