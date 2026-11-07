@@ -31,9 +31,22 @@ extension MatrixLook {
 
 // MARK: - Frame renderer
 
-/// Owns the painters and the reusable frame bitmap. Not thread-safe: main actor only.
-@MainActor
-final class RidgeFrameRenderer {
+/// One frame request, built on the main thread and painted on the render thread.
+nonisolated struct RidgeFrameJob: @unchecked Sendable {
+    var seq: Int
+    var moment: String
+    var day: Int
+    var pos: String
+    var c: RPC
+    var theme: String
+    var t: Double
+    var pxScale: Double
+    var reduceMotion: Bool
+}
+
+/// Owns the painters and the reusable frame bitmap. Not thread-safe: every call to `frame` for one
+/// renderer must come from one thread at a time (the card's go through `RidgeRenderThread`).
+nonisolated final class RidgeFrameRenderer: @unchecked Sendable {
     static let maxPxScale: Double = 0.76
 
     private let painter = RPainter2()
@@ -71,6 +84,36 @@ final class RidgeFrameRenderer {
         ctx.setTransform(1, 0, 0, 1, 0, 0)
         return bm.cg.makeImage()
     }
+
+    private var painted = 0
+
+    /// Paint `job` on the render thread, then hand the image to `deliver` (still on that thread).
+    func enqueue(_ job: RidgeFrameJob, deliver: @escaping @Sendable (Int, CGImage) -> Void) {
+        RidgeRenderThread.shared.submit(self) { [self] in
+            let start = CFAbsoluteTimeGetCurrent()
+            let img = frame(moment: job.moment, day: job.day, pos: job.pos, c: job.c, theme: job.theme, t: job.t, pxScale: job.pxScale, reduceMotion: job.reduceMotion)
+            painted += 1
+            let ms = HeroTrace.ms(since: start)
+            // the first few frames (cold caches) and any slow one
+            if painted <= 3 || ms > 40 {
+                HeroTrace.log("ridge.frame n=\(painted) moment=\(job.moment) day=\(job.day) px=\(job.pxScale) ms=\(ms) ok=\(img != nil)")
+            }
+            if let img { deliver(job.seq, img) }
+        }
+    }
+}
+
+/// The newest finished painting, published on the main thread.
+@MainActor @Observable
+final class RidgeFrameSink {
+    private(set) var image: CGImage?
+    @ObservationIgnored private var shown = -1
+
+    func show(_ seq: Int, _ img: CGImage) {
+        guard seq > shown else { return }
+        shown = seq
+        image = img
+    }
 }
 
 // MARK: - Runtime (clock + haptics + renderer)
@@ -81,10 +124,11 @@ final class RidgeCardRuntime {
 
     let haptics = HeroHapticScheduler()
     let renderer = RidgeFrameRenderer()
+    let sink = RidgeFrameSink()
     private var epoch: Date?
     private var stateKey = ""
     private var stateStart: Double = 0
-    private var last: (key: String, image: CGImage)?
+    private var seq = 0
 
     struct Clock {
         var t: Double
@@ -117,14 +161,22 @@ final class RidgeCardRuntime {
         )
     }
 
-    func image(_ input: MatrixCardInput, clock: Clock, scheme: ColorScheme, pxScale: Double, reduceMotion: Bool) -> CGImage? {
+    /// Plays this tick's haptics and asks the render thread for the matching painting. The image
+    /// lands in `sink` when it is done (normally one frame later); the body never waits for it.
+    func request(_ input: MatrixCardInput, clock: Clock, scheme: ColorScheme, pxScale: Double, reduceMotion: Bool) {
         let c = Self.context(input, t: clock.t, T: clock.T, live: clock.live)
         haptics.isActive = input.hapticsEnabled
         haptics.allowsSuccess = HeroHapticPolicy.allowsSuccess(input.moment)
         haptics.tick(clock.T)
-        let img = renderer.frame(moment: input.moment.rawValue, day: input.day, pos: input.pos.rawValue, c: c, theme: scheme == .dark ? "dark" : "light", t: clock.t, pxScale: pxScale, reduceMotion: reduceMotion)
-        if let img { last = (stateKey, img) }
-        return img ?? last?.image
+        seq += 1
+        if seq == 1 { HeroTrace.log("ridge.request first moment=\(input.moment.rawValue) day=\(input.day) px=\(pxScale)") }
+        let job = RidgeFrameJob(seq: seq, moment: input.moment.rawValue, day: input.day, pos: input.pos.rawValue, c: c, theme: scheme == .dark ? "dark" : "light", t: clock.t, pxScale: pxScale, reduceMotion: reduceMotion)
+        let sink = sink
+        renderer.enqueue(job) { n, img in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { sink.show(n, img) }
+            }
+        }
     }
 }
 
@@ -154,14 +206,9 @@ public struct RidgeCardView: View {
             let px = RidgeFrameRenderer.pxScale(pointWidth: Double(proxy.size.width), displayScale: Double(displayScale))
             TimelineView(.animation(minimumInterval: HeroMotion.minimumInterval, paused: paused)) { tl in
                 let clock = runtime.sync(input, tl.date)
+                let _ = proxy.size.width >= 1 ? runtime.request(input, clock: clock, scheme: scheme, pxScale: px, reduceMotion: reduceMotion) : ()
                 ZStack(alignment: .topLeading) {
-                    if let img = runtime.image(input, clock: clock, scheme: scheme, pxScale: px, reduceMotion: reduceMotion) {
-                        Image(decorative: img, scale: 1)
-                            .resizable()
-                            .interpolation(.medium)
-                            .frame(width: proxy.size.width, height: proxy.size.height)
-                            .accessibilityHidden(true)
-                    }
+                    RidgePaintingLayer(sink: runtime.sink, size: proxy.size)
                     RidgePaperFade(paper: look.card.color)
                         .accessibilityHidden(true)
                     MatrixCardCopyLayer(copy: input.copy, look: look, k: k, f: clock.T * 30, t: clock.t, live: clock.live, reduceMotion: reduceMotion)
@@ -173,6 +220,27 @@ public struct RidgeCardView: View {
         .onAppear { onScreen = true }
         .onDisappear { onScreen = false }
         .onScrollVisibilityChange(threshold: 0.1) { visible in onScreen = visible }
+    }
+}
+
+/// The painting itself. Reads the sink on its own so a finished frame redraws only this layer,
+/// and still shows up while the card's timeline is paused.
+private struct RidgePaintingLayer: View {
+    let sink: RidgeFrameSink
+    let size: CGSize
+
+    var body: some View {
+        ZStack {
+            if let img = sink.image {
+                Image(decorative: img, scale: 1)
+                    .resizable()
+                    .interpolation(.medium)
+                    .frame(width: size.width, height: size.height)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: sink.image == nil)
+        .accessibilityHidden(true)
     }
 }
 

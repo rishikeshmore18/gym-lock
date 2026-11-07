@@ -38,7 +38,9 @@ struct DynamicHeroCard: View {
     /// While today's flow is waiting, or running and not yet 70% home, the card keeps showing the
     /// moment before the proof, so the flow is what reveals verified (spec §3.5).
     private func resolve(_ now: Date) -> (state: HeroMomentState, held: Bool) {
+        let start = CFAbsoluteTimeGetCurrent()
         let state = HeroMomentResolver.resolve(store: store, coordinator: coordinator, now: now)
+        HeroTrace.log("hero.resolve moment=\(state.moment.rawValue) style=\(style) ms=\(HeroTrace.ms(since: start))")
         guard Self.verifiedMoments.contains(state.moment) else { return (state, false) }
         let running = queue.presentation.map { !$0.isReplay && queue.landedSessionID != $0.sessionID } ?? false
         guard queue.hasPendingFlow || running else { return (state, false) }

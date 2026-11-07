@@ -44,7 +44,7 @@ import SwiftUI
 
 /// The handful of JavaScript numeric semantics the prototype relies on, reproduced exactly.
 /// Use these in every ported scene instead of the Swift look-alikes (see PORTING-GUIDE.md §3).
-public enum JSMath {
+public nonisolated enum JSMath {
     private static let two32: Double = 4_294_967_296.0
 
     /// ECMAScript `ToInt32` (what `x | 0` does): truncate toward zero, wrap modulo 2^32.

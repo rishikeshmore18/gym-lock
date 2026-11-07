@@ -471,3 +471,13 @@ enum RidgeShape: Sendable {
 - Idle loops (mist drift, water shimmer, birds) conflict with "nothing loops". The prototype is
   built on them.
 - Prototype copy is title case with curly quotes; UI-RULES wants lowercase chrome.
+
+## Threading
+
+- The card paints off the main thread on `RidgeRenderThread` (16 MB stack, newest job per card wins)
+  and shows the newest finished image through `RidgeFrameSink`, one frame behind the clock.
+- Everything the painter touches is `nonisolated`: `RW` and its generated extensions, the C2D canvas,
+  `RScene`/`RCam`/`RShape`/`RPC`, `JS`, `JSMath`, `HapticCue`, `MatrixLiveData`. ts2swift emits
+  `nonisolated extension RW {` and `nonisolated final class` so regenerated files keep this.
+- The done flow's story still paints on main, so the shared caches (`palette`, `grain`, `frameOf`,
+  `C2DColor.parse`) sit behind locks. Never hold those locks while painting.

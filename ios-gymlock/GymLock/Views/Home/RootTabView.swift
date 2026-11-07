@@ -210,6 +210,7 @@ struct RootTabView: View {
             }
         }
         .task {
+            HeroTrace.log("root.task start")
             // A cold generator is late enough to be felt on the first tick.
             Haptics.prepareSelection()
             Haptics.preparePress()

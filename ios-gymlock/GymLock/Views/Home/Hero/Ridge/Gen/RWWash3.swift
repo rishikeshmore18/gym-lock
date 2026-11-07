@@ -9,7 +9,7 @@
 import Foundation
 import CoreGraphics
 
-extension RW {
+nonisolated extension RW {
     static func rnd3(_ i: Double) -> Double {
         var x: Double = JS.ushr((JS.bitXor(JS.floor(i * 1000.0), 2654435769.0)), 0.0)
         x = JS.ushr(JS.imul(JS.bitXor(x, (JS.ushr(x, 16.0))), 2246822507.0), 0.0)

@@ -26,6 +26,7 @@ struct GymLockApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        HeroTrace.log("app.launch")
         // Both of these must happen before the system can deliver a launch
         // notification. Doing it in `.task` is too late for a cold launch from
         // an alarm tap: the response is dropped and the morning never starts.

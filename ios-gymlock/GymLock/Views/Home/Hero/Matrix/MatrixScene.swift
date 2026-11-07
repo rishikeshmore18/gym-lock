@@ -30,7 +30,7 @@ public enum MatrixWeekPos: String, Sendable, CaseIterable {
 }
 
 /// `MC.d`: the live numbers of the day.
-public struct MatrixLiveData: Sendable, Equatable {
+public nonisolated struct MatrixLiveData: Sendable, Equatable {
     /// The three setup items, done or not.
     public var setupDone: [Bool]
     /// Seconds left before leaving (countdown state).

@@ -9,7 +9,7 @@
 import Foundation
 import CoreGraphics
 
-extension RW {
+nonisolated extension RW {
     static func skyGrad(_ ctx: C2D, _ w: Double, _ h: Double, _ horizon: Double, _ pal: Pal) {
         let g: C2DGradient = ctx.createLinearGradient(0.0, 0.0, 0.0, horizon)
         g.addColorStop(0.0, css(pal.sky0))

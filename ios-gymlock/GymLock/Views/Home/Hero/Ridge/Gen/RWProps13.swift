@@ -9,7 +9,7 @@
 import Foundation
 import CoreGraphics
 
-extension RW {
+nonisolated extension RW {
     static let L: Layout = layoutFor(1000.0, 488.0)
     static let RB: Boulder = boulderGeom(1000.0, 488.0, WSEED[1])
     static let _d32 = toStage(RB.cx, RB.by)

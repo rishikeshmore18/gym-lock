@@ -9,7 +9,7 @@
 import Foundation
 import CoreGraphics
 
-extension RW {
+nonisolated extension RW {
     static let CAM0: RCam = RCam.make([]) { _o in _o.s = 1.0; _o.x = 0.0; _o.y = 0.0; _o.r = 0.0 }
     static func SX(_ x: Double) -> Double {
         return 492.0 + x * 4.75

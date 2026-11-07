@@ -8,7 +8,7 @@
 
 import Foundation
 
-final class O_body_layers_a_v_edge {
+nonisolated final class O_body_layers_a_v_edge {
     var body: Double?
     var layers: Double?
     var a: Double?
@@ -23,7 +23,7 @@ final class O_body_layers_a_v_edge {
     }
 }
 
-final class Layout {
+nonisolated final class Layout {
     var horizon: Double
     var peakX: Double
     var peakTop: Double
@@ -54,7 +54,7 @@ final class Layout {
     }
 }
 
-final class Pal {
+nonisolated final class Pal {
     var paper: (Double, Double, Double)
     var sky0: (Double, Double, Double)
     var sky1: (Double, Double, Double)
@@ -89,7 +89,7 @@ final class Pal {
     }
 }
 
-final class O_back_peak_ridges {
+nonisolated final class O_back_peak_ridges {
     var back: Bool?
     var peak: Bool?
     var ridges: Bool?
@@ -100,7 +100,7 @@ final class O_back_peak_ridges {
     }
 }
 
-final class Boulder {
+nonisolated final class Boulder {
     var outline: [(Double, Double)]
     var cracks: [[(Double, Double)]]
     var cx: Double
@@ -117,7 +117,7 @@ final class Boulder {
     }
 }
 
-final class O_w_h {
+nonisolated final class O_w_h {
     var w: Double
     var h: Double
     init(w: Double, h: Double) {
@@ -126,7 +126,7 @@ final class O_w_h {
     }
 }
 
-final class O_cx_cy_w_h {
+nonisolated final class O_cx_cy_w_h {
     var cx: Double
     var cy: Double
     var w: Double
@@ -139,7 +139,7 @@ final class O_cx_cy_w_h {
     }
 }
 
-final class O_x_bot_w_h_top {
+nonisolated final class O_x_bot_w_h_top {
     var x: Double
     var bot: Double
     var w: Double
@@ -154,7 +154,7 @@ final class O_x_bot_w_h_top {
     }
 }
 
-final class O_cloud_sunX_sunY_sunR_peak2_ledge_rock_treeX_treeTop_water_boat_route_summit_horizon_sand_seaSun_nightWater {
+nonisolated final class O_cloud_sunX_sunY_sunR_peak2_ledge_rock_treeX_treeTop_water_boat_route_summit_horizon_sand_seaSun_nightWater {
     var cloud: Double
     var sunX: Double
     var sunY: (Double) -> Double
@@ -193,7 +193,7 @@ final class O_cloud_sunX_sunY_sunR_peak2_ledge_rock_treeX_treeTop_water_boat_rou
     }
 }
 
-final class Scn {
+nonisolated final class Scn {
     var bd: ((RPC) -> RScene)?
     var draw: (RPC) -> [RShape]
     var cam: ((RPC) -> RCam)?

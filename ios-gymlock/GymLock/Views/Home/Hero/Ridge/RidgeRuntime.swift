@@ -12,11 +12,11 @@ import CoreGraphics
 import Foundation
 
 /// Namespace for everything Ridge (generated code lives in `extension RW` under Gen/).
-enum RW {}
+nonisolated enum RW {}
 
 // MARK: - Array helpers the generated code relies on
 
-extension Array where Element == Double {
+nonisolated extension Array where Element == Double {
     /// `[...pt(x, y)]`: a Pt tuple spread into a flat number list.
     init(_ t: (Double, Double)) { self = [t.0, t.1] }
 
@@ -27,7 +27,7 @@ extension Array where Element == Double {
     }
 }
 
-extension Array {
+nonisolated extension Array {
     /// JS Array.prototype.splice (integral start and count, negative start from the end).
     @discardableResult
     mutating func splice(_ start: Double, _ deleteCount: Double, _ items: Element...) -> [Element] {
@@ -43,7 +43,7 @@ extension Array {
 
 // MARK: - JS helpers the Ridge sources need on top of JSRuntime
 
-extension JS {
+nonisolated extension JS {
     @inline(__always) static func imul(_ a: Double, _ b: Double) -> Double {
         Double(Int32(bitPattern: JSMath.toUint32(a) &* JSMath.toUint32(b)))
     }
@@ -54,7 +54,7 @@ extension JS {
 
 // MARK: - Statics (wash.ts / scenes11.ts / scenes12.ts)
 
-extension RW {
+nonisolated extension RW {
     static let PROOF: Double = 20 * 60
     static let TAU: Double = Double.pi * 2
 
@@ -88,26 +88,33 @@ extension RW {
     private static let darkDay = pal([[14, 14, 16], [26, 26, 29], [70, 70, 74], [88, 88, 92], [66, 66, 70], [150, 150, 154], [48, 48, 52], [34, 34, 37], [7, 7, 8], [74, 74, 78], [122, 122, 126], [30, 30, 33], [128, 128, 132], [6, 6, 7], [230, 230, 232]])
     private static let darkNight = pal([[14, 14, 16], [9, 9, 11], [30, 30, 34], [44, 44, 48], [34, 34, 38], [86, 86, 90], [26, 26, 29], [18, 18, 20], [4, 4, 5], [50, 50, 54], [84, 84, 88], [20, 20, 22], [64, 64, 68], [3, 3, 4], [200, 200, 204]])
 
-    private static var palCache: [String: Pal] = [:]
+    /// Guards the three mutable caches below: the hero card paints on its render thread while the
+    /// done flow's story paints on main. Held only around the dictionary reads and writes, never
+    /// while painting, so it cannot nest.
+    static let cacheLock = NSLock()
+
+    nonisolated(unsafe) private static var palCache: [String: Pal] = [:]
 
     /// wash.ts palette: day and night mixed by `night`.
     static func palette(_ theme: String, _ night: Double) -> Pal {
         let key = "\(theme):\(night)"
-        if let hit = palCache[key] { return hit }
+        if let hit = cacheLock.withLock({ palCache[key] }) { return hit }
         let a = theme == "light" ? lightDay : darkDay
         let b = theme == "light" ? lightNight : darkNight
         let m = { (x: (Double, Double, Double), y: (Double, Double, Double)) in mixc(x, y, night) }
         let p = Pal(paper: m(a.paper, b.paper), sky0: m(a.sky0, b.sky0), sky1: m(a.sky1, b.sky1), far: m(a.far, b.far), farShade: m(a.farShade, b.farShade), snow: m(a.snow, b.snow), mid: m(a.mid, b.mid), mid2: m(a.mid2, b.mid2), near: m(a.near, b.near), rock: m(a.rock, b.rock), rockLight: m(a.rockLight, b.rockLight), rockDark: m(a.rockDark, b.rockDark), mist: m(a.mist, b.mist), crack: m(a.crack, b.crack), sun: m(a.sun, b.sun))
-        if palCache.count > 64 { palCache.removeAll() }
-        palCache[key] = p
+        cacheLock.withLock {
+            if palCache.count > 64 { palCache.removeAll() }
+            palCache[key] = p
+        }
         return p
     }
 
-    private static var grainTex: C2DSurface?
+    nonisolated(unsafe) private static var grainTex: C2DSurface?
 
     /// wash.ts grain: the paper texture tile (noise plus a few fibres), made once.
     static func grain() -> C2DSurface {
-        if let g = grainTex { return g }
+        if let g = cacheLock.withLock({ grainTex }) { return g }
         let s = C2DSurface(width: 256, height: 256)
         let r = rng(99)
         if let cg = s.context, let data = cg.data {
@@ -135,8 +142,11 @@ extension RW {
             }
         }
         s.seal()
-        grainTex = s
-        return s
+        return cacheLock.withLock {
+            if let g = grainTex { return g }
+            grainTex = s
+            return s
+        }
     }
 
     /// props13.ts FIX: shapes `embolden` leaves alone.
@@ -156,7 +166,7 @@ extension RW {
 // MARK: - Builders (TS object literals and spreads)
 
 /// Scene3: the painted world's knobs. Required fields read 0 (kind: "sunrise") when unset.
-final class RScene {
+nonisolated final class RScene {
     var _seed: Double?, _tree: Double?, _cracks: Double?, _broken: Double?, _rubble: Double?
     var _sun: Double?, _night: Double?, _mist: Double?, _rain: Double?, _peak: Double?
     var _kind: String?
@@ -239,7 +249,7 @@ final class RScene {
 }
 
 /// stage13.ts Cam: scale, offset (stage units), roll, and an optional pivot.
-final class RCam {
+nonisolated final class RCam {
     var _s: Double?, _x: Double?, _y: Double?, _r: Double?
     var s: Double { get { _s ?? 0 } set { _s = newValue } }
     var x: Double { get { _x ?? 0 } set { _x = newValue } }
@@ -266,7 +276,7 @@ final class RCam {
 }
 
 /// stage13.ts Shape: one prop drawn over the world.
-final class RShape {
+nonisolated final class RShape {
     var k: String = ""
     var x: Double = 0
     var y: Double = 0
@@ -308,7 +318,7 @@ final class RShape {
 }
 
 /// scenes11.ts Data11: the user's real numbers for the scene.
-struct RData {
+nonisolated struct RData {
     var day: Double
     var week: Double
     var sessions: Double
@@ -317,7 +327,7 @@ struct RData {
 }
 
 /// props13.ts PC: everything a scene reads for one frame.
-struct RPC {
+nonisolated struct RPC {
     var t: Double
     var T: Double
     var at: Double
@@ -332,7 +342,7 @@ struct RPC {
 
 // MARK: - build / frameOf (props13.ts 2639-2751) and clampCam (card13.tsx)
 
-extension RW {
+nonisolated extension RW {
     struct Built {
         var scene: RScene
         var shapes: [RShape]
@@ -350,10 +360,10 @@ extension RW {
         var y1: Double?
     }
 
-    private static var FRAME: [String: Frame] = [:]
+    nonisolated(unsafe) private static var FRAME: [String: Frame] = [:]
 
     private static func frameOf(_ key: String, _ sc: Scn, _ c: RPC) -> Frame {
-        if let hit = FRAME[key] { return hit }
+        if let hit = cacheLock.withLock({ FRAME[key] }) { return hit }
         var x0 = Double.infinity, x1 = -Double.infinity, y0 = Double.infinity, y1 = -Double.infinity
         func add(_ x: Double, _ y: Double) {
             if x < -5 || x > 105 || y < -5 || y > 97 { return }
@@ -398,7 +408,7 @@ extension RW {
             let size = max(x1 - x0, (y1 - y0) * 1.15, 1)
             f = Frame(px: (x0 + x1) / 2, py: (y0 + y1) / 2, s: min(sc.zoom ?? 1.85, max(1, 46 / size)), x0: x0, x1: x1, y0: y0, y1: y1)
         }
-        FRAME[key] = f
+        cacheLock.withLock { FRAME[key] = f }
         return f
     }
 
@@ -472,7 +482,7 @@ extension RW {
 // MARK: - Painters
 
 /// wash.ts Painter: the ridge world in cached layers.
-final class RPainter {
+nonisolated final class RPainter {
     var xf: (Double, Double, Double, Double, Double, Double) = (1, 0, 0, 1, 0, 0)
     private var slots: [String: (key: String, s: C2DSurface)] = [:]
 
@@ -551,7 +561,7 @@ final class RPainter {
 }
 
 /// The shared layer cache (wash.ts / wash2.ts `layer`): repaint only when the key changes.
-enum RLayerCache {
+nonisolated enum RLayerCache {
     static func layer(_ slots: inout [String: (key: String, s: C2DSurface)], _ slot: String, _ key: String, _ w: Double, _ h: Double, _ paint: (C2D) -> Void) -> C2DSurface {
         let cur = slots[slot]
         if let cur, cur.key == key { return cur.s }
@@ -573,7 +583,7 @@ enum RLayerCache {
 }
 
 /// wash2.ts Painter2 (+ wash3.ts Painter3.render3): the other day worlds, birds, extras, paper.
-final class RPainter2 {
+nonisolated final class RPainter2 {
     let ridge = RPainter()
     var xf: (Double, Double, Double, Double, Double, Double) = (1, 0, 0, 1, 0, 0)
     private var caches: [String: (key: String, s: C2DSurface)] = [:]

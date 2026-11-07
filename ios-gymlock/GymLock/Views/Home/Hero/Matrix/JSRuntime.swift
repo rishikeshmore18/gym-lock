@@ -13,7 +13,7 @@ import Foundation
 
 // MARK: - JS
 
-public enum JS {
+public nonisolated enum JS {
     // ---- Math
     @inline(__always) public static func floor(_ x: Double) -> Double { x.rounded(.down) }
     @inline(__always) public static func ceil(_ x: Double) -> Double { x.rounded(.up) }

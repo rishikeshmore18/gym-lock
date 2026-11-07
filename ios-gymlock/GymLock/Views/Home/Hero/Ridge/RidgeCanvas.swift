@@ -17,7 +17,7 @@ import Foundation
 // MARK: - Colour
 
 /// A parsed CSS colour, channels 0...1, non-premultiplied.
-struct C2DColor: Equatable {
+nonisolated struct C2DColor: Equatable {
     var r: Double
     var g: Double
     var b: Double
@@ -28,15 +28,18 @@ struct C2DColor: Equatable {
 
     var cg: CGColor { CGColor(srgbRed: cgF(r), green: cgF(self.g), blue: cgF(b), alpha: cgF(a)) }
 
-    private static var cache: [String: C2DColor] = [:]
+    nonisolated(unsafe) private static var cache: [String: C2DColor] = [:]
+    private static let cacheLock = NSLock()
 
     /// Parses `rgba()`, `rgb()`, `#rgb`, `#rrggbb`, `#rrggbbaa` and a few names. Unknown strings are black,
     /// like a canvas keeps its previous (default black) style.
     static func parse(_ s: String) -> C2DColor {
-        if let hit = cache[s] { return hit }
+        if let hit = cacheLock.withLock({ cache[s] }) { return hit }
         let c = parseUncached(s)
-        if cache.count > 4096 { cache.removeAll(keepingCapacity: true) }
-        cache[s] = c
+        cacheLock.withLock {
+            if cache.count > 4096 { cache.removeAll(keepingCapacity: true) }
+            cache[s] = c
+        }
         return c
     }
 
@@ -74,7 +77,7 @@ struct C2DColor: Equatable {
 
 // MARK: - Gradient
 
-final class C2DGradient {
+nonisolated final class C2DGradient {
     enum Kind {
         case linear(Double, Double, Double, Double)
         case radial(Double, Double, Double, Double, Double, Double)
@@ -109,7 +112,7 @@ final class C2DGradient {
 // MARK: - Surface
 
 /// A bitmap (an offscreen canvas or a snapshot of one).
-final class C2DSurface {
+nonisolated final class C2DSurface {
     let width: Int
     let height: Int
     /// Present for surfaces that can be painted into (layer caches).
@@ -142,7 +145,7 @@ final class C2DSurface {
 
 // MARK: - Style
 
-enum C2DStyle: ExpressibleByStringLiteral {
+nonisolated enum C2DStyle: ExpressibleByStringLiteral {
     case color(C2DColor)
     case gradient(C2DGradient)
     case pattern(CGImage?, Int, Int)
@@ -155,7 +158,7 @@ enum C2DStyle: ExpressibleByStringLiteral {
 
 // MARK: - Path2D
 
-final class C2DPath {
+nonisolated final class C2DPath {
     let path = CGMutablePath()
 
     init() {}
@@ -193,7 +196,7 @@ final class C2DPath {
 
 // MARK: - Context
 
-final class C2D {
+nonisolated final class C2D {
     struct State {
         var ctm: CGAffineTransform = .identity
         var alpha: Double = 1

@@ -29,7 +29,7 @@ import CoreHaptics
 
 // MARK: - Cue types (shared with MatrixScene.swift and the Ridge port)
 
-public enum HapticKind: String, Sendable, CaseIterable {
+public nonisolated enum HapticKind: String, Sendable, CaseIterable {
     case light, medium, heavy, success
 
     /// Order used when several cues land in one frame: the strongest wins.
@@ -44,7 +44,7 @@ public enum HapticKind: String, Sendable, CaseIterable {
 }
 
 /// One haptic on a scene's timeline: `t` in seconds since the scene (or screen) started.
-public struct HapticCue: Sendable, Equatable {
+public nonisolated struct HapticCue: Sendable, Equatable {
     public var t: Double
     public var kind: HapticKind
     public init(t: Double, kind: HapticKind) {
