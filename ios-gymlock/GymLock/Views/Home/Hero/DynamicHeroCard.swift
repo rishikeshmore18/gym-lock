@@ -16,17 +16,25 @@ struct DynamicHeroCard: View {
     private var queue: CelebrationQueue { .shared }
 
     var body: some View {
-        TimelineView(.everyMinute) { tl in
-            let resolved = resolve(tl.date)
-            DynamicHeroFace(
-                state: resolved.state,
-                style: style,
-                isHeldBeforeFlow: resolved.held,
-                canReplay: !resolved.held && Self.verifiedMoments.contains(resolved.state.moment) && queue.canReplay(now: tl.date),
-                onReplay: { queue.replay(store: store, coordinator: coordinator, style: style) }
-            )
-        }
-        .frame(maxWidth: HeroMetrics.maxWidth)
+        // The card's size is fixed here, at the outermost layer, the same way the mini cards size
+        // themselves: full row width (up to the cap) at the card's proportion. Left to the aspect
+        // ratio deep inside the face, the scroll view's open-ended height made it come out narrower
+        // than the row below it.
+        Color.clear
+            .frame(maxWidth: HeroMetrics.maxWidth)
+            .aspectRatio(MatrixCardGeometry.aspect, contentMode: .fit)
+            .overlay {
+                TimelineView(.everyMinute) { tl in
+                    let resolved = resolve(tl.date)
+                    DynamicHeroFace(
+                        state: resolved.state,
+                        style: style,
+                        isHeldBeforeFlow: resolved.held,
+                        canReplay: !resolved.held && Self.verifiedMoments.contains(resolved.state.moment) && queue.canReplay(now: tl.date),
+                        onReplay: { queue.replay(store: store, coordinator: coordinator, style: style) }
+                    )
+                }
+            }
         .frame(maxWidth: .infinity)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             queue.cardFrame = frame

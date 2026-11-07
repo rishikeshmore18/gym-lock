@@ -10,14 +10,18 @@ struct DoneFlowHost: View {
     let queue: CelebrationQueue
 
     var body: some View {
-        ZStack {
-            if let p = queue.presentation {
-                DoneFlowStage(presentation: p, rankUp: queue.rankUp, onClose: { queue.close() }, onContinue: { queue.continueRankUp() })
-                    .id(p.id)
-                    .transition(.opacity.animation(.easeOut(duration: 0.18)))
+        // Read the insets before ignoring them: inside the full-bleed stack they read as zero, which
+        // put the close button under the status bar and Dynamic Island.
+        GeometryReader { safe in
+            ZStack {
+                if let p = queue.presentation {
+                    DoneFlowStage(presentation: p, rankUp: queue.rankUp, topInset: safe.safeAreaInsets.top, onClose: { queue.close() }, onContinue: { queue.continueRankUp() })
+                        .id(p.id)
+                        .transition(.opacity.animation(.easeOut(duration: 0.18)))
+                }
             }
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea()
         .allowsHitTesting(queue.presentation != nil)
     }
 }
@@ -25,6 +29,8 @@ struct DoneFlowHost: View {
 private struct DoneFlowStage: View {
     let presentation: CelebrationQueue.Presentation
     let rankUp: BadgeRankUpRequest?
+    /// The screen's top safe-area inset, measured outside the full-bleed stack.
+    let topInset: CGFloat
     let onClose: () -> Void
     let onContinue: () -> Void
 
@@ -44,7 +50,7 @@ private struct DoneFlowStage: View {
 
                 if model.collapseAt == nil && rankUp == nil {
                     closeButton
-                        .padding(.top, geo.safeAreaInsets.top + 8)
+                        .padding(.top, topInset + 8)
                         .padding(.trailing, 16)
                         .offset(y: dragY)
                         .transition(.opacity.animation(.easeOut(duration: 0.15)))
@@ -57,7 +63,7 @@ private struct DoneFlowStage: View {
                         .ignoresSafeArea()
                         .overlay(alignment: .topTrailing) {
                             closeButton
-                                .padding(.top, geo.safeAreaInsets.top + 8)
+                                .padding(.top, topInset + 8)
                                 .padding(.trailing, 16)
                         }
                 }
