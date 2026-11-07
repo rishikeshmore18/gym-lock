@@ -110,6 +110,8 @@ struct TodayHomeView: View {
                             next: cards.next,
                             path: cards.path
                         )
+                        // keep its own proportion; the stack must not trade its height away for the hero's
+                        .fixedSize(horizontal: false, vertical: true)
 
                         // The second layer. Everything above answers "what do I
                         // do now"; this answers "is this working", so it gets

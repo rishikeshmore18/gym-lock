@@ -796,6 +796,15 @@ final class MatrixStoryRuntime {
         return CGSize(width: JSMath.round((BOX_H * a) / 2) * 2, height: BOX_H)
     }
 
+    /// Bottom edge, in points, of the story's progress bars (top `max(oy,0)+90`, 7 tall, in
+    /// composition units), so chrome laid over the story can sit clear of them.
+    static func progressBottom(_ size: CGSize) -> CGFloat {
+        let comp = composition(size)
+        let s0 = Double(size.width) / max(1, Double(comp.width))
+        let oy = (Double(comp.height) - BOX_H) / 2
+        return CGFloat((max(oy, 0) + 90 + 7) * s0)
+    }
+
     func render(_ ctx: inout GraphicsContext, size: CGSize, date: Date, model: MatrixStoryModel, reduceMotion: Bool, displayScale: CGFloat) {
         let comp = Self.composition(size)
         let w = Double(comp.width), h = Double(comp.height)

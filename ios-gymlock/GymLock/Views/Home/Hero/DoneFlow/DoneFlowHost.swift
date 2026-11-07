@@ -49,8 +49,9 @@ private struct DoneFlowStage: View {
                     .simultaneousGesture(swipe(height: height), including: model.collapseAt == nil && rankUp == nil ? .all : .subviews)
 
                 if model.collapseAt == nil && rankUp == nil {
+                    // below the safe area and below the story's progress bars, never over them
                     closeButton
-                        .padding(.top, topInset + 8)
+                        .padding(.top, max(topInset + 8, MatrixStoryRuntime.progressBottom(geo.size) + 10))
                         .padding(.trailing, 16)
                         .offset(y: dragY)
                         .transition(.opacity.animation(.easeOut(duration: 0.15)))
@@ -90,6 +91,9 @@ private struct DoneFlowStage: View {
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
                 .modifier(DoneFlowGlassCircle())
+                // the whole glass circle is the target; without this a plain-style button only
+                // answers taps on the glyph itself
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close")

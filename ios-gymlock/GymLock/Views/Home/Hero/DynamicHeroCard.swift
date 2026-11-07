@@ -11,18 +11,21 @@ struct DynamicHeroCard: View {
     let coordinator: GymSessionCoordinator
 
     @AppStorage(HeroCardStyle.storageKey) private var styleRaw = HeroCardStyle.ridge.rawValue
+    @State private var rowWidth: CGFloat = 0
 
     private var style: HeroCardStyle { HeroCardStyle(rawValue: styleRaw) ?? .ridge }
     private var queue: CelebrationQueue { .shared }
 
     var body: some View {
-        // The card's size is fixed here, at the outermost layer, the same way the mini cards size
-        // themselves: full row width (up to the cap) at the card's proportion. Left to the aspect
-        // ratio deep inside the face, the scroll view's open-ended height made it come out narrower
-        // than the row below it.
+        // The height is derived from the measured row width, never from a height proposal. With an
+        // aspect-fit frame, the scroll stack sometimes offered the card less height than its
+        // proportion needs, and `.fit` then shrank the width too, leaving it narrower than the row.
+        let w = min(rowWidth, HeroMetrics.maxWidth)
+        let h = w / MatrixCardGeometry.aspect
         Color.clear
-            .frame(maxWidth: HeroMetrics.maxWidth)
-            .aspectRatio(MatrixCardGeometry.aspect, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .frame(height: h)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
             .overlay {
                 TimelineView(.everyMinute) { tl in
                     let resolved = resolve(tl.date)
@@ -34,11 +37,11 @@ struct DynamicHeroCard: View {
                         onReplay: { queue.replay(store: store, coordinator: coordinator, style: style) }
                     )
                 }
+                .frame(width: w, height: h)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    queue.cardFrame = frame
+                }
             }
-        .frame(maxWidth: .infinity)
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-            queue.cardFrame = frame
-        }
     }
 
     static let verifiedMoments: Set<MatrixMoment> = [.verified, .halfway, .automatic]
