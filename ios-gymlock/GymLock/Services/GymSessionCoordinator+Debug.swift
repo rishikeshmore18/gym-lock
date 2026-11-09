@@ -1244,6 +1244,15 @@ extension GymSessionCoordinator {
         Self.debugGymResult = "\(prefix) · \(counted) · \(notice)"
     }
 
+    /// Day Flow Simulator adapter: the same path as `.arriveStay20`, with the
+    /// stay length chosen on the time-at-gym dial. It only backdates the
+    /// arrival; whether the visit counts is decided by the real proof rules.
+    func debugSimulateStay(minutes: Int) {
+        let clamped = max(0, minutes)
+        let visit = debugFreshVisit(minutesAgo: clamped)
+        debugReportVisit(visit.id, prefix: "\(clamped) min, no exit")
+    }
+
     // MARK: - Skips helpers
 
     /// The last skips result, shown in the panel.
