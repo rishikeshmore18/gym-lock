@@ -60,11 +60,29 @@ enum ProgressPreviewData {
         now: Date,
         log: MomentumLog,
         plan: MorningPlan,
-        schedule: GymSchedule = .default
+        schedule: GymSchedule = .default,
+        goals: WeeklyGoals? = nil
     ) -> ProgressPeriodModel {
         let model = ProgressPeriodModel(now: now, calendar: calendar)
-        model.refresh(log: log, plan: plan, schedule: schedule, now: now)
+        // No saved history: every week takes the plan's goal.
+        let resolved = goals ?? WeeklyGoals(
+            saved: [:],
+            ruleStart: .distantPast,
+            plannedDays: plan.effectiveTrainingDays(fallback: schedule).count,
+            firstWeekStart: nil
+        )
+        model.refresh(log: log, plan: plan, schedule: schedule, goals: resolved, now: now)
         return model
+    }
+
+    /// Goals as if the plan never changed.
+    static func goals(_ plan: MorningPlan, schedule: GymSchedule = .default) -> WeeklyGoals {
+        WeeklyGoals(
+            saved: [:],
+            ruleStart: .distantPast,
+            plannedDays: plan.effectiveTrainingDays(fallback: schedule).count,
+            firstWeekStart: nil
+        )
     }
 }
 
@@ -135,9 +153,33 @@ private struct ProgressPreviewStage: View {
         ),
         plan: ProgressPreviewData.plan(days),
         schedule: .default,
+        goals: ProgressPreviewData.goals(ProgressPreviewData.plan(days)),
         now: now
     )
     return ProgressPreviewStage(model: model)
+}
+
+#Preview("2b · Goal changed mid-month · 3 then 5") {
+    // Nov 2026: the week of Nov 2 was saved with a goal of 3, then the plan
+    // moved to 5 days. History keeps 3, this week and the rest show 5.
+    let days: Set<Weekday> = [.monday, .tuesday, .wednesday, .thursday, .friday]
+    let now = ProgressPreviewData.date(2026, 11, 13)
+    var goals = ProgressPreviewData.goals(ProgressPreviewData.plan(days))
+    goals.saved = [ProgressPreviewData.date(2026, 11, 2): 3]
+    return ProgressPreviewStage(
+        model: ProgressPreviewData.model(
+            now: now,
+            log: ProgressPreviewData.log([
+                (ProgressPreviewData.date(2026, 11, 3), .showedUp),
+                (ProgressPreviewData.date(2026, 11, 5), .showedUp),
+                (ProgressPreviewData.date(2026, 11, 10), .showedUp),
+                (ProgressPreviewData.date(2026, 11, 11), .homeWorkout),
+                (ProgressPreviewData.date(2026, 11, 13), .homeWorkout),
+            ]),
+            plan: ProgressPreviewData.plan(days),
+            goals: goals
+        )
+    )
 }
 
 #Preview("3 · All gym · 100%") {
@@ -177,9 +219,9 @@ private struct ProgressPreviewStage: View {
     )
 }
 
-#Preview("6 · Five week groups · Sep 2026") {
-    // September 2026 starts on a Tuesday and ends on a Wednesday, so it spans
-    // five Monday-first groups: Sep 1–6, 7–13, 14–20, 21–27, 28–30.
+#Preview("6 · Whole weeks · Sep 2026") {
+    // A month holds the weeks whose Thursday falls in it: Aug 31–Sep 6,
+    // 7–13, 14–20, 21–27. Sep 28–Oct 4 belongs to October.
     let days: Set<Weekday> = [.monday, .tuesday, .wednesday, .thursday, .friday]
     let now = ProgressPreviewData.date(2026, 9, 24)
     return ProgressPreviewStage(
@@ -256,11 +298,11 @@ private struct ProgressPreviewStage: View {
             log: .empty,
             plan: ProgressPreviewData.plan(days)
         ),
-        expandWeek: 4
+        expandWeek: 3
     )
 }
 
-#Preview("11 · Month boundary week · Sep 28–30") {
+#Preview("11 · Month boundary week · Sep 28–Oct 4") {
     let days: Set<Weekday> = [.monday, .tuesday, .wednesday]
     let now = ProgressPreviewData.date(2026, 9, 30)
     return ProgressPreviewStage(
@@ -272,7 +314,7 @@ private struct ProgressPreviewStage: View {
             ]),
             plan: ProgressPreviewData.plan(days)
         ),
-        expandWeek: 4
+        expandWeek: 0
     )
 }
 #endif

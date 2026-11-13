@@ -254,6 +254,27 @@ final class AppStore {
         return saved
     }
 
+    /// Every week's goal, past, live and future, for screens that show more
+    /// than the live week (Progress, the month hero). Same numbers the streak
+    /// judges by.
+    var weeklyGoals: WeeklyGoals {
+        WeeklyGoals(vault: streakVault, plan: plan, schedule: schedule, joinedAt: joinedAt)
+    }
+
+    /// The Progress month containing `date`, built exactly as the Progress
+    /// tab builds it.
+    func progressMonth(containing date: Date, now: Date = Date(), calendar: Calendar = .current) -> ProgressMonthSummary {
+        ProgressAnalytics.monthSummary(
+            containing: date,
+            log: log,
+            plan: plan,
+            schedule: schedule,
+            goals: weeklyGoals,
+            now: now,
+            calendar: calendar
+        )
+    }
+
     /// The day the user joined, which times their first year's freezes
     /// (FLOW, Flow 5).
     var joinedAt: Date { AppInstallDate.resolve(defaults) }

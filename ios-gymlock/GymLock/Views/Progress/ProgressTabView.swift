@@ -238,7 +238,8 @@ struct ProgressTabView: View {
             by: step,
             log: store.log,
             plan: store.plan,
-            schedule: store.schedule
+            schedule: store.schedule,
+            goals: store.weeklyGoals
         )
         guard moved else { return }
         Haptics.selection()
@@ -253,6 +254,10 @@ struct ProgressTabView: View {
         hasher.combine(store.log)
         hasher.combine(store.plan)
         hasher.combine(store.schedule)
+        // Past weeks' goals live in the vault; a new week starting or a
+        // plan change re-saves them.
+        hasher.combine(store.weeklyGoals)
+        hasher.combine(store.streak.liveWeekStart)
         return hasher.finalize()
     }
 
@@ -268,7 +273,12 @@ struct ProgressTabView: View {
     }
 
     private func refresh() {
-        period.refresh(log: store.log, plan: store.plan, schedule: store.schedule)
+        period.refresh(
+            log: store.log,
+            plan: store.plan,
+            schedule: store.schedule,
+            goals: store.weeklyGoals
+        )
     }
 }
 

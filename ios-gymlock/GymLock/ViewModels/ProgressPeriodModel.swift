@@ -39,7 +39,7 @@ final class ProgressPeriodModel {
 
     init(now: Date = Date(), calendar: Calendar = .current) {
         self.calendar = calendar
-        let start = calendar.dateInterval(of: .month, for: now)?.start ?? now
+        let start = ProgressAnalytics.monthStart(forWeekContaining: now, calendar: calendar)
         monthAnchor = start
         month = .empty(monthStart: start, isCurrentMonth: true)
         earliestMonth = start
@@ -48,8 +48,15 @@ final class ProgressPeriodModel {
 
     // MARK: Derivation
 
-    /// Rebuilds the displayed month from the ledger and the plan.
-    func refresh(log: MomentumLog, plan: MorningPlan, schedule: GymSchedule, now: Date = Date()) {
+    /// Rebuilds the displayed month from the ledger, the plan and the weekly
+    /// goals the streak uses.
+    func refresh(
+        log: MomentumLog,
+        plan: MorningPlan,
+        schedule: GymSchedule,
+        goals: WeeklyGoals,
+        now: Date = Date()
+    ) {
         let bounds = ProgressAnalytics.monthBounds(
             log: log,
             plan: plan,
@@ -73,6 +80,7 @@ final class ProgressPeriodModel {
             log: log,
             plan: plan,
             schedule: schedule,
+            goals: goals,
             now: now,
             calendar: calendar
         )
@@ -148,7 +156,14 @@ final class ProgressPeriodModel {
     /// Steps the displayed month. Any open week closes first — its dates
     /// belong to the month being left behind.
     @discardableResult
-    func step(by months: Int, log: MomentumLog, plan: MorningPlan, schedule: GymSchedule, now: Date = Date()) -> Bool {
+    func step(
+        by months: Int,
+        log: MomentumLog,
+        plan: MorningPlan,
+        schedule: GymSchedule,
+        goals: WeeklyGoals,
+        now: Date = Date()
+    ) -> Bool {
         guard months != 0 else { return false }
         guard months < 0 ? canGoBack : canGoForward else { return false }
         guard let moved = calendar.date(byAdding: .month, value: months, to: monthAnchor) else {
@@ -157,7 +172,7 @@ final class ProgressPeriodModel {
 
         monthAnchor = min(max(moved, earliestMonth), latestMonth)
         selectedWeek = nil
-        refresh(log: log, plan: plan, schedule: schedule, now: now)
+        refresh(log: log, plan: plan, schedule: schedule, goals: goals, now: now)
         return true
     }
 }

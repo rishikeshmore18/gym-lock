@@ -575,23 +575,22 @@ enum HomeCardDeriver {
 
     private static func monthStage(store: AppStore, coordinator: GymSessionCoordinator, now: Date, calendar: Calendar) -> HomeCardModel? {
         let dayOfMonth = calendar.component(.day, from: now)
-        let perWeek = store.plan.enabledSlots.reduce(into: Set<Weekday>()) { $0.formUnion($1.days) }.count
+        // The same month, goal and percentage the Progress tab shows: every
+        // week against its own weekly goal (FLOW, item 19a).
+        let currentStart = ProgressAnalytics.monthStart(forWeekContaining: now, calendar: calendar)
+        let current = store.progressMonth(containing: currentStart, now: now, calendar: calendar)
 
-        func verified(in interval: DateInterval) -> Int {
-            store.log.outcomes.filter {
-                interval.contains($0.countingDay(calendar: calendar)) && $0.isVerifiedWorkout
-            }.count
+        func percent(_ month: ProgressMonthSummary) -> Int {
+            Int(((month.completionFraction ?? 0) * 100).rounded())
         }
 
         // A month that just turned: show the closed month.
         if dayOfMonth <= 3,
-           let current = calendar.dateInterval(of: .month, for: now),
-           let lastStart = calendar.date(byAdding: .month, value: -1, to: current.start),
-           let last = calendar.dateInterval(of: .month, for: lastStart) {
+           let lastStart = calendar.date(byAdding: .month, value: -1, to: currentStart) {
 
-            let lastVerified = verified(in: last)
-            let lastPlanned = max(perWeek * 4, 1)
-            let pct = min(100, Int((Double(lastVerified) / Double(lastPlanned) * 100).rounded()))
+            let last = store.progressMonth(containing: lastStart, now: now, calendar: calendar)
+            let lastVerified = last.tally.completed
+            let pct = percent(last)
 
             if lastVerified >= 8 {
                 return monthModel(
@@ -605,7 +604,7 @@ enum HomeCardDeriver {
                     store: store, coordinator: coordinator,
                     hero: .startMonth(
                         totalSessions: store.log.totalVerifiedGymVisits,
-                        goal: max(perWeek * 4, 4)
+                        goal: max(current.tally.goal, 1)
                     ),
                     now: now, calendar: calendar
                 )
@@ -614,12 +613,11 @@ enum HomeCardDeriver {
 
         // Mid-month: real progress with a bar.
         if dayOfMonth >= 4, dayOfMonth <= 19 {
-            guard let month = calendar.dateInterval(of: .month, for: now) else { return nil }
-            let done = verified(in: month)
-            let planned = max(perWeek * 4, 1)
+            let done = current.tally.completed
+            let planned = max(current.tally.goal, 1)
             guard done >= 2 else { return nil }
 
-            let pct = min(100, Int((Double(done) / Double(planned) * 100).rounded()))
+            let pct = percent(current)
             return monthModel(
                 store: store, coordinator: coordinator,
                 hero: .midMonth(done: done, of: planned, percent: pct),
