@@ -116,47 +116,175 @@ struct ProgressLayeredBar: View {
     var baseDelay: Double = 0
 
     var body: some View {
+        let neutral = layers.filter { $0.kind == .ghost || $0.kind == .missed }
+        let gym = layers.first { $0.kind == .gym }
+        let quick = layers.first { $0.kind == .quick }
+
         VStack(spacing: -overlap) {
-            ForEach(layers) { layer in
+            ForEach(neutral) { layer in
                 card(for: layer)
+            }
+            if gym != nil || quick != nil {
+                workoutCards(gym: gym, quick: quick)
             }
         }
     }
 
-    private func card(for layer: ProgressLayer) -> some View {
-        let height = max(unitHeight, CGFloat(layer.units) * unitHeight) + overlap
+    // MARK: Workout cards
 
-        return RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(layer.kind.fill)
+    /// How far the orange card lifts and steps aside when the counts tie, so
+    /// two equal cards never hide each other.
+    private var tieLift: CGFloat { min(6, unitHeight * 0.3) }
+    private let tieInset: CGFloat = 5
+
+    /// Gym and Quick 25 drawn as two physical cards, one in front of the other,
+    /// rather than two blocks stacked end to end.
+    ///
+    /// Both stand on the baseline at their own height. The bigger one sits
+    /// behind and carries on down behind the smaller one, so its lower edge is
+    /// never seen; the smaller one sits in front with a soft shadow.
+    @ViewBuilder
+    private func workoutCards(gym: ProgressLayer?, quick: ProgressLayer?) -> some View {
+        if let gym, let quick {
+            if gym.units == quick.units {
+                tiedCards(gym: gym, quick: quick)
+            } else {
+                let back = gym.units > quick.units ? gym : quick
+                let front = gym.units > quick.units ? quick : gym
+                layeredCards(back: back, front: front)
+            }
+        } else if let only = gym ?? quick {
+            card(for: only)
+        }
+    }
+
+    private func layeredCards(back: ProgressLayer, front: ProgressLayer) -> some View {
+        let backHeight = height(for: back) + overlap
+        let frontHeight = height(for: front)
+        // The back card stops at the middle of the front card. A card is always
+        // full width there (its radius never exceeds half its height), so the
+        // back card's lower edge is hidden and no corner peeks out beside it.
+        let tuck = frontHeight / 2
+
+        return ZStack(alignment: .bottom) {
+            styledCard(
+                kind: back.kind,
+                height: backHeight - tuck,
+                bottomRadius: 0,
+                shadow: false,
+                riseOrder: 1
+            )
+            .padding(.bottom, tuck)
+
+            styledCard(
+                kind: front.kind,
+                height: frontHeight,
+                bottomRadius: nil,
+                shadow: true,
+                riseOrder: 2
+            )
+        }
+        .frame(height: backHeight, alignment: .bottom)
+    }
+
+    /// Equal counts: equal heights, with the orange card lifted a touch and
+    /// stepped to one side behind the black one, so both stay readable.
+    private func tiedCards(gym: ProgressLayer, quick: ProgressLayer) -> some View {
+        let cardHeight = height(for: gym) + overlap
+
+        return ZStack(alignment: .bottom) {
+            styledCard(
+                kind: quick.kind,
+                height: cardHeight,
+                bottomRadius: nil,
+                shadow: false,
+                riseOrder: 1
+            )
+            .padding(.leading, tieInset)
+            .padding(.bottom, tieLift)
+
+            styledCard(
+                kind: gym.kind,
+                height: cardHeight,
+                bottomRadius: nil,
+                shadow: true,
+                riseOrder: 2
+            )
+            .padding(.trailing, tieInset)
+        }
+        .frame(height: cardHeight + tieLift, alignment: .bottom)
+    }
+
+    // MARK: Cards
+
+    private func height(for layer: ProgressLayer) -> CGFloat {
+        max(unitHeight, CGFloat(layer.units) * unitHeight)
+    }
+
+    private func card(for layer: ProgressLayer) -> some View {
+        styledCard(
+            kind: layer.kind,
+            height: height(for: layer) + overlap,
+            bottomRadius: nil,
+            // Cast upward, onto the card behind: that is where the overlap is,
+            // and it is what separates one layer from the next.
+            shadow: true,
+            riseOrder: layer.kind.riseOrder
+        )
+    }
+
+    /// One card in the shared chart style. `bottomRadius` of nil keeps every
+    /// corner rounded; 0 squares the bottom off for a card that runs behind
+    /// another.
+    private func styledCard(
+        kind: ProgressLayerKind,
+        height: CGFloat,
+        bottomRadius: CGFloat?,
+        shadow: Bool,
+        riseOrder: Int
+    ) -> some View {
+        let top = min(cornerRadius, height / 2)
+        let bottom = bottomRadius ?? top
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: top,
+            bottomLeadingRadius: bottom,
+            bottomTrailingRadius: bottom,
+            topTrailingRadius: top,
+            style: .continuous
+        )
+
+        return shape
+            .fill(kind.fill)
             .frame(height: height)
             .overlay {
-                if let stroke = layer.kind.stroke {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(stroke, lineWidth: 1)
+                if let stroke = kind.stroke {
+                    shape.strokeBorder(stroke, lineWidth: 1)
                 }
             }
             .overlay(alignment: .top) {
-                if layer.kind.wantsTopHighlight {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                if kind.wantsTopHighlight {
+                    shape
                         .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
                         .blendMode(.plusLighter)
                 }
             }
-            // Cast upward, onto the card behind: that is where the overlap is,
-            // and it is what separates one layer from the next.
-            .shadow(color: .black.opacity(layer.kind == .ghost ? 0.03 : 0.14), radius: 3, y: -2)
+            .shadow(
+                color: .black.opacity(shadow ? (kind == .ghost ? 0.03 : 0.16) : 0),
+                radius: 3,
+                y: -2
+            )
             .opacity(hasAppeared ? 1 : 0)
             .offset(y: hasAppeared ? 0 : riseDistance)
-            .animation(animation(for: layer), value: hasAppeared)
+            .animation(animation(order: riseOrder), value: hasAppeared)
     }
 
     /// Cards glide up into place from just below the baseline.
     private var riseDistance: CGFloat { reduceMotion ? 0 : 22 }
 
-    private func animation(for layer: ProgressLayer) -> Animation {
+    private func animation(order: Int) -> Animation {
         guard !reduceMotion else { return .easeOut(duration: 0.2) }
         return .spring(response: 0.42, dampingFraction: 0.82)
-            .delay(baseDelay + Double(layer.kind.riseOrder) * 0.07)
+            .delay(baseDelay + Double(order) * 0.07)
     }
 }
 
@@ -195,3 +323,32 @@ struct ProgressLegend: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+#if DEBUG
+#Preview("Workout cards · layering cases") {
+    let cases: [(gym: Int, quick: Int)] = [(3, 1), (1, 3), (1, 1), (2, 2), (3, 0), (0, 3)]
+    HStack(alignment: .bottom, spacing: 12) {
+        ForEach(Array(cases.enumerated()), id: \.offset) { _, pair in
+            VStack(spacing: 8) {
+                ProgressLayeredBar(
+                    layers: [
+                        pair.quick > 0 ? ProgressLayer(kind: .quick, units: pair.quick) : nil,
+                        pair.gym > 0 ? ProgressLayer(kind: .gym, units: pair.gym) : nil,
+                    ].compactMap { $0 },
+                    unitHeight: 28,
+                    hasAppeared: true,
+                    reduceMotion: true
+                )
+                .frame(height: 130, alignment: .bottom)
+
+                Text("\(pair.gym) / \(pair.quick)")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.inkSecondary)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+    .padding(24)
+    .background(Color.white)
+}
+#endif
