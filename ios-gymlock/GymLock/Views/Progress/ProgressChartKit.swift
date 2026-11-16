@@ -120,13 +120,82 @@ struct ProgressLayeredBar: View {
         let gym = layers.first { $0.kind == .gym }
         let quick = layers.first { $0.kind == .quick }
 
-        VStack(spacing: -overlap) {
-            ForEach(neutral) { layer in
-                card(for: layer)
+        let workout = workoutHeight(gym: gym, quick: quick)
+        let backCards = neutralCards(neutral, above: workout)
+        let total = backCards.first?.top ?? workout
+
+        // Every card stands in one pile on the baseline. Cards higher up the
+        // column sit further back and carry on down behind the cards in front,
+        // so only their top edge and corners are ever seen.
+        ZStack(alignment: .bottom) {
+            ForEach(backCards) { slot in
+                styledCard(
+                    kind: slot.kind,
+                    height: slot.top - slot.bottom,
+                    bottomRadius: slot.bottom > 0 ? 0 : nil,
+                    shadow: slot.castsShadow,
+                    riseOrder: 0
+                )
+                .padding(.bottom, slot.bottom)
             }
             if gym != nil || quick != nil {
                 workoutCards(gym: gym, quick: quick)
             }
+        }
+        .frame(height: total, alignment: .bottom)
+    }
+
+    // MARK: Planned and missed cards
+
+    /// Where a grey card sits in the pile, measured up from the baseline.
+    private struct BackCard: Identifiable {
+        let kind: ProgressLayerKind
+        let top: CGFloat
+        /// Where its hidden lower edge ends, behind the card in front. Zero
+        /// when nothing is in front, so it stands on the baseline itself.
+        let bottom: CGFloat
+        let castsShadow: Bool
+        var id: Int { kind.rawValue }
+    }
+
+    /// The grey cards, back to front (planned behind missed).
+    ///
+    /// Each keeps the height it had when the column was stacked end to end,
+    /// but instead of stopping where the next card starts, it runs on down to
+    /// the middle of the card in front of it, where that card is always full
+    /// width, so no grey corner shows beside or under it.
+    private func neutralCards(_ neutral: [ProgressLayer], above workout: CGFloat) -> [BackCard] {
+        var built: [BackCard] = []
+        var base = workout
+        var frontBottom: CGFloat = 0
+        // Nearest the baseline first: missed, then planned.
+        let frontToBack = neutral.sorted { $0.kind > $1.kind }
+        for (index, layer) in frontToBack.enumerated() {
+            let top = base + height(for: layer) + (base == 0 ? overlap : 0)
+            let bottom = base == 0 ? 0 : (frontBottom + base) / 2
+            built.append(BackCard(
+                kind: layer.kind,
+                top: top,
+                bottom: bottom,
+                castsShadow: index < frontToBack.count - 1 && layer.kind != .ghost
+            ))
+            frontBottom = bottom
+            base = top
+        }
+        return built.reversed()
+    }
+
+    /// Height of the Gym and Quick 25 pile, or zero when there is none.
+    private func workoutHeight(gym: ProgressLayer?, quick: ProgressLayer?) -> CGFloat {
+        switch (gym, quick) {
+        case let (gym?, quick?) where gym.units == quick.units:
+            height(for: gym) + overlap + tieLift
+        case let (gym?, quick?):
+            max(height(for: gym), height(for: quick)) + overlap
+        case let (only?, nil), let (nil, only?):
+            height(for: only) + overlap
+        case (nil, nil):
+            0
         }
     }
 
@@ -171,7 +240,7 @@ struct ProgressLayeredBar: View {
                 kind: back.kind,
                 height: backHeight - tuck,
                 bottomRadius: 0,
-                shadow: false,
+                shadow: true,
                 riseOrder: 1
             )
             .padding(.bottom, tuck)
@@ -197,7 +266,7 @@ struct ProgressLayeredBar: View {
                 kind: quick.kind,
                 height: cardHeight,
                 bottomRadius: nil,
-                shadow: false,
+                shadow: true,
                 riseOrder: 1
             )
             .padding(.leading, tieInset)
@@ -326,26 +395,36 @@ struct ProgressLegend: View {
 
 #if DEBUG
 #Preview("Workout cards · layering cases") {
-    let cases: [(gym: Int, quick: Int)] = [(3, 1), (1, 3), (1, 1), (2, 2), (3, 0), (0, 3)]
-    HStack(alignment: .bottom, spacing: 12) {
-        ForEach(Array(cases.enumerated()), id: \.offset) { _, pair in
-            VStack(spacing: 8) {
-                ProgressLayeredBar(
-                    layers: [
-                        pair.quick > 0 ? ProgressLayer(kind: .quick, units: pair.quick) : nil,
-                        pair.gym > 0 ? ProgressLayer(kind: .gym, units: pair.gym) : nil,
-                    ].compactMap { $0 },
-                    unitHeight: 28,
-                    hasAppeared: true,
-                    reduceMotion: true
-                )
-                .frame(height: 130, alignment: .bottom)
+    // gym / quick / missed / planned
+    let rows: [[(Int, Int, Int, Int)]] = [
+        [(3, 1, 0, 0), (1, 3, 0, 0), (1, 1, 0, 0), (2, 2, 0, 0), (3, 0, 0, 0), (0, 3, 0, 0)],
+        [(2, 0, 0, 1), (1, 2, 0, 2), (1, 1, 1, 0), (1, 0, 1, 1), (0, 0, 1, 2), (0, 0, 0, 5)],
+    ]
+    VStack(spacing: 28) {
+        ForEach(Array(rows.enumerated()), id: \.offset) { _, cases in
+            HStack(alignment: .bottom, spacing: 12) {
+                ForEach(Array(cases.enumerated()), id: \.offset) { _, c in
+                    VStack(spacing: 8) {
+                        ProgressLayeredBar(
+                            layers: [
+                                c.3 > 0 ? ProgressLayer(kind: .ghost, units: c.3) : nil,
+                                c.2 > 0 ? ProgressLayer(kind: .missed, units: c.2) : nil,
+                                c.1 > 0 ? ProgressLayer(kind: .quick, units: c.1) : nil,
+                                c.0 > 0 ? ProgressLayer(kind: .gym, units: c.0) : nil,
+                            ].compactMap { $0 },
+                            unitHeight: 24,
+                            hasAppeared: true,
+                            reduceMotion: true
+                        )
+                        .frame(height: 140, alignment: .bottom)
 
-                Text("\(pair.gym) / \(pair.quick)")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Theme.inkSecondary)
+                        Text("\(c.0)/\(c.1)/\(c.2)/\(c.3)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Theme.inkSecondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
             }
-            .frame(maxWidth: .infinity)
         }
     }
     .padding(24)
