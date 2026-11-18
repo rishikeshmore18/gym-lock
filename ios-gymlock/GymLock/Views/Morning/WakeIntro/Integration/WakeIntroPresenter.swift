@@ -68,7 +68,8 @@ enum WakeIntroLedger {
 struct WakeIntroPresenter: View {
     private let session: GymSession
     private let route: MorningRoute
-    private let onPrimary: () -> Void
+    private let missionChoices: [ActivationMissionType]
+    private let onPrimary: (ActivationMissionType?) -> Void
 
     @Environment(AppStore.self) private var store
     @Environment(GymSessionCoordinator.self) private var coordinator
@@ -78,15 +79,25 @@ struct WakeIntroPresenter: View {
     @State private var claimed: Snapshot?
     @State private var dismissedSessionID: UUID?
     @State private var isShowingPlansChanged = false
+    /// The mission the capsule's reel landed on, if it spun.
+    @State private var landedMission: ActivationMissionType?
 
     /// - Parameters:
     ///   - session: the live session (the screen's own `session`).
     ///   - route: the screen this sits on, `.mission` or `.countdown`.
     ///   - onPrimary: what the mission capsule does after the page closes. On the mission screen,
     ///     start the mission (`isRunning = true`); on the countdown, nothing (the countdown is there).
-    init(session: GymSession, route: MorningRoute, onPrimary: @escaping () -> Void = {}) {
+    ///     It receives the mission the reel landed on (nil when there was no reel).
+    ///   - missionChoices: the missions the capsule spins through (two or more make it a reel).
+    init(
+        session: GymSession,
+        route: MorningRoute,
+        missionChoices: [ActivationMissionType] = [],
+        onPrimary: @escaping (ActivationMissionType?) -> Void = { _ in }
+    ) {
         self.session = session
         self.route = route
+        self.missionChoices = missionChoices
         self.onPrimary = onPrimary
     }
 
@@ -104,7 +115,9 @@ struct WakeIntroPresenter: View {
                 facts: snapshot.facts,
                 showsLockLine: snapshot.showsLockLine,
                 isPaused: isShowingPlansChanged,
-                onPrimary: { close(then: onPrimary) },
+                missionReel: missionChoices.map(WakeFactsProvider.reelItem(for:)),
+                onReelLanded: { id in landedMission = ActivationMissionType(rawValue: id) },
+                onPrimary: { close(then: { onPrimary(landedMission) }) },
                 onPlansChanged: { isShowingPlansChanged = true }
             )
             .transition(.opacity)

@@ -47,11 +47,15 @@ struct WakeIntroView: View {
     private let isPaused: Bool
     private let onPrimary: () -> Void
     private let onPlansChanged: () -> Void
+    private let missionReel: [WakeReelItem]
+    private let onReelLanded: (String) -> Void
 
     @State private var engine: WakeIntroEngine
     @State private var isOnScreen = false
     @State private var isSettled = false
     @State private var slot: CGRect?
+    /// The mission capsule's slot-machine spin, fixed once it starts.
+    @State private var reel: WakeReelSpin?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
@@ -66,12 +70,17 @@ struct WakeIntroView: View {
     ///   - isPaused: something covers the page (a sheet); the clock stops.
     ///   - onPrimary: the mission capsule. The page plays its tap haptic itself.
     ///   - onPlansChanged: "Plans changed".
+    ///   - missionReel: the missions the capsule spins through once the page settles (two or more
+    ///     make it spin; empty keeps the fixed mission).
+    ///   - onReelLanded: the id of the mission the spin landed on.
     init(
         concept: WakeConcept,
         facts: WakeFacts,
         showsLockLine: Bool = true,
         startsSettled: Bool = false,
         isPaused: Bool = false,
+        missionReel: [WakeReelItem] = [],
+        onReelLanded: @escaping (String) -> Void = { _ in },
         onPrimary: @escaping () -> Void,
         onPlansChanged: @escaping () -> Void
     ) {
@@ -79,6 +88,8 @@ struct WakeIntroView: View {
         self.showsLockLine = showsLockLine
         self.startsSettled = startsSettled
         self.isPaused = isPaused
+        self.missionReel = missionReel
+        self.onReelLanded = onReelLanded
         self.onPrimary = onPrimary
         self.onPlansChanged = onPlansChanged
     }
@@ -94,24 +105,41 @@ struct WakeIntroView: View {
     private var look: WakeLook { colorScheme == .dark ? .dark : .light }
 
     var body: some View {
-        GeometryReader { proxy in
-            let size = proxy.size
-            let insets = proxy.safeAreaInsets
-            TimelineView(.animation(minimumInterval: frameInterval, paused: !isRunning)) { timeline in
-                let now = engine.sync(
-                    timeline.date,
-                    running: isRunning,
-                    reduceMotion: reduceMotion,
-                    startSettled: startsSettled || voiceOver
-                )
-                page(now: now, size: size, insets: insets)
-                    // Once settled the idle loop runs at 60 Hz (the schedule is read by the outer body).
-                    .onChange(of: now.t >= now.plan.introEnd, initial: true) { _, settled in
-                        if settled != isSettled { isSettled = settled }
-                    }
+        // Read the insets before ignoring them: inside the full-bleed reader they read as zero, which
+        // put "Today" under the status bar and "Plans changed" on the home indicator.
+        GeometryReader { safe in
+            let insets = WakeIntroView.screenInsets(safe.safeAreaInsets)
+            GeometryReader { proxy in
+                let size = proxy.size
+                TimelineView(.animation(minimumInterval: frameInterval, paused: !isRunning)) { timeline in
+                    let now = engine.sync(
+                        timeline.date,
+                        running: isRunning,
+                        reduceMotion: reduceMotion,
+                        startSettled: startsSettled || voiceOver
+                    )
+                    let spinStart = now.plan.introEnd + WakeReelSpin.delay
+                    page(now: now, size: size, insets: insets)
+                        // Once settled the idle loop runs at 60 Hz (the schedule is read by the outer body).
+                        .onChange(of: now.t >= now.plan.introEnd, initial: true) { _, settled in
+                            if settled != isSettled { isSettled = settled }
+                        }
+                        .onChange(of: now.t >= spinStart, initial: true) { _, due in
+                            if due { startReel(at: spinStart) }
+                        }
+                        .onChange(of: reel?.step(at: now.t)) { _, step in
+                            guard step != nil, let reel, !reel.isLanded(at: now.t) else { return }
+                            if HeroHapticPlayer.shared.isEnabled { Haptics.selection() }
+                        }
+                        .onChange(of: reel?.isLanded(at: now.t) ?? false) { _, landed in
+                            guard landed, let reel else { return }
+                            if HeroHapticPlayer.shared.isEnabled, reel.duration > 0 { Haptics.medium() }
+                            onReelLanded(reel.landedItem.id)
+                        }
+                }
             }
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea()
         .onAppear { isOnScreen = true }
         .onDisappear {
             isOnScreen = false
@@ -123,6 +151,30 @@ struct WakeIntroView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { engine.noteBackgrounded() }
         }
+    }
+
+    /// The screen's insets. Falls back to the window's when the page sits in a container that
+    /// already ignores the safe area (its own reading is then zero).
+    private static func screenInsets(_ measured: EdgeInsets) -> EdgeInsets {
+        guard measured.top <= 0 else { return measured }
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)
+        guard let raw = window?.safeAreaInsets else { return measured }
+        return EdgeInsets(top: raw.top, leading: raw.left, bottom: raw.bottom, trailing: raw.right)
+    }
+
+    /// Fixes the capsule's spin the first time it is due: the choices as they are now, a random
+    /// landing, and no spin at all under Reduce Motion, VoiceOver, or with a single choice.
+    private func startReel(at start: Double) {
+        guard reel == nil, !missionReel.isEmpty else { return }
+        let items = missionReel
+        let from = items.firstIndex { $0.title == engine.facts.missionTitle } ?? 0
+        let land = Int.random(in: 0..<items.count)
+        let still = items.count < 2 || reduceMotion || voiceOver
+        if !still { Haptics.prepareSelection() }
+        reel = WakeReelSpin(items: items, from: from, land: land, start: start, spins: !still)
     }
 
     // MARK: Composition
@@ -144,6 +196,7 @@ struct WakeIntroView: View {
                 concept: concept,
                 look: look,
                 showsLockLine: showsLockLine,
+                reel: reel,
                 onSlot: { rect in if slot != rect { slot = rect } },
                 onPrimary: {
                     engine.tap()
@@ -1512,17 +1565,23 @@ private struct WakeSettledPage: View {
     let concept: WakeConcept
     let look: WakeLook
     let showsLockLine: Bool
+    let reel: WakeReelSpin?
     let onSlot: (CGRect) -> Void
     let onPrimary: () -> Void
     let onPlansChanged: () -> Void
 
     private var stagger: Double { m.plan.staggerAt * WakePlan.fps }
 
+    /// The page's own scale: the screen's width over 390 (capped for iPad), so every phone fills its
+    /// width edge to edge. A short screen (SE) gets a taller-than-tall page that scrolls if it must.
+    private var ps: CGFloat { max(0.1, min(m.size.width / WakeLayout.designWidth, WakeLayout.maxScale)) }
+    /// Left edge of the 390-unit column on screen (non-zero only past the iPad cap).
+    private var pox: CGFloat { (m.size.width - WakeLayout.designWidth * ps) / 2 }
+
     var body: some View {
-        // The page is laid out in design units: 390 wide, as tall as the screen is at the shared scale
-        // (844 when the height sets the scale, so SE, 15 and Pro Max all lay out the same 390 x 844
-        // page), then scaled uniformly and centred in the column. It scrolls only if it must.
-        let s = m.s
+        // The page is laid out in design units: 390 wide, as tall as the screen is at the page scale,
+        // then scaled uniformly and centred. It scrolls only if it must.
+        let s = ps
         let design = CGSize(width: WakeLayout.designWidth, height: m.size.height / s)
         ViewThatFits(in: .vertical) {
             column(scrolls: false)
@@ -1538,7 +1597,7 @@ private struct WakeSettledPage: View {
         .coordinateSpace(.named(WakeLayout.designSpace))
         .scaleEffect(s, anchor: .topLeading)
         .frame(width: m.size.width, height: m.size.height, alignment: .topLeading)
-        .offset(x: m.ox)
+        .offset(x: pox)
         .ignoresSafeArea()
     }
 
@@ -1574,8 +1633,8 @@ private struct WakeSettledPage: View {
         }
         .padding(.horizontal, 18)
         // safe-area insets are screen points; the column is in design units
-        .padding(.top, m.insets.top / m.s + 2)
-        .padding(.bottom, max(m.insets.bottom / m.s, 10))
+        .padding(.top, m.insets.top / ps + 2)
+        .padding(.bottom, max(m.insets.bottom / ps, 10))
     }
 
     // MARK: Header: "Today" and the streak, as on Home
@@ -1603,7 +1662,7 @@ private struct WakeSettledPage: View {
             .aspectRatio(WakeLayout.cardAspect, contentMode: .fit)
             .frame(maxWidth: 480)
             .frame(maxWidth: .infinity)
-            .onGeometryChange(for: CGRect.self) { [ox = m.ox, s = m.s] proxy in
+            .onGeometryChange(for: CGRect.self) { [ox = pox, s = ps] proxy in
                 // design units to page space (the stage condenses into this rect); the scale is part
                 // of the value, so a change of screen size re-reports it
                 let r = proxy.frame(in: .named(WakeLayout.designSpace))
@@ -1652,7 +1711,81 @@ private struct WakeSettledPage: View {
         facts.missionTitle.hasSuffix(".") ? String(facts.missionTitle.dropLast()) : facts.missionTitle
     }
 
+    @ViewBuilder
     private var primary: some View {
+        if let reel {
+            reelPrimary(reel)
+        } else {
+            fixedPrimary
+        }
+    }
+
+    /// One row of the capsule: the mission's icon in its circle, then its name.
+    private func missionRow(symbol: String, title: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .wakeFont(18, .semibold, relativeTo: .headline)
+                .frame(width: 40, height: 40)
+                .background(look.buttonInk.opacity(0.16), in: .circle)
+            Text(title)
+                .wakeFont(19, .bold, relativeTo: .headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The capsule as a slot-machine reel: rows scroll up through the window, clipped to the capsule
+    /// and faded at its top and bottom edges, and settle on the landed mission. Tappable once landed.
+    private func reelPrimary(_ reel: WakeReelSpin) -> some View {
+        let rowHeight: CGFloat = 66
+        let p = reel.position(at: m.t)
+        let base = Int(floor(p))
+        let landed = reel.isLanded(at: m.t)
+        return Button(action: onPrimary) {
+            HStack(spacing: 8) {
+                ZStack {
+                    ForEach(Array((base - 1)...(base + 2)), id: \.self) { i in
+                        let item = reel.item(i)
+                        missionRow(symbol: item.symbol, title: item.title)
+                            .frame(height: rowHeight)
+                            .offset(y: (CGFloat(i) - CGFloat(p)) * rowHeight)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: rowHeight)
+                .clipped()
+                .mask {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black, location: 0.18),
+                            .init(color: .black, location: 0.82),
+                            .init(color: .clear, location: 1),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+                Image(systemName: "arrow.right")
+                    .wakeFont(17, .bold, relativeTo: .headline)
+                    .opacity(landed ? 0.9 : 0.4)
+                    .animation(.easeOut(duration: 0.25), value: landed)
+            }
+            .foregroundStyle(look.buttonInk)
+            .padding(.leading, 13)
+            .padding(.trailing, 22)
+            .frame(maxWidth: .infinity)
+            .frame(height: rowHeight)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(WakePrimaryCapsuleStyle(fill: look.button))
+        .allowsHitTesting(landed)
+        .accessibilityLabel(landed ? reel.landedItem.title : "Picking your mission")
+        .accessibilityHint(landed ? "Starts your mission" : "")
+    }
+
+    private var fixedPrimary: some View {
         Button(action: onPrimary) {
             HStack(spacing: 14) {
                 Image(systemName: WakeFactsProvider.symbol(for: facts.missionKind))
@@ -2041,3 +2174,61 @@ private struct WakePrimaryCapsuleBody: View {
     )
 }
 #endif
+
+// MARK: - Mission reel
+
+/// One mission the capsule's reel can land on.
+struct WakeReelItem: Equatable, Identifiable {
+    let id: String
+    let title: String
+    let symbol: String
+}
+
+/// The capsule's slot-machine spin, driven by the page clock (so it pauses with the page).
+///
+/// Position is measured in rows: it eases out from `from` through at least two full turns of the
+/// reel and stops exactly on `land`. Without a spin (Reduce Motion, VoiceOver, one choice) it is
+/// landed from the start.
+nonisolated struct WakeReelSpin: Equatable {
+    /// Pause between the page settling and the reel starting.
+    static let delay: Double = 0.4
+
+    let items: [WakeReelItem]
+    let from: Int
+    let land: Int
+    let start: Double
+    let duration: Double
+
+    init(items: [WakeReelItem], from: Int, land: Int, start: Double, spins: Bool) {
+        self.items = items
+        self.from = from
+        self.land = land
+        self.start = start
+        self.duration = spins ? 2.4 : 0
+    }
+
+    private var end: Double {
+        let n = max(items.count, 1)
+        guard duration > 0 else { return Double(land) }
+        return Double(from + 2 * n + ((land - from) % n + n) % n)
+    }
+
+    /// The reel's position in rows at page time `t`.
+    func position(at t: Double) -> Double {
+        guard duration > 0 else { return end }
+        let x = (t - start) / duration
+        return Double(from) + (end - Double(from)) * WakeEase.ez5(x)
+    }
+
+    /// The row centred in the window; changes once per row passing, which is when the reel ticks.
+    func step(at t: Double) -> Int { Int(floor(position(at: t) + 0.5)) }
+
+    func isLanded(at t: Double) -> Bool { duration <= 0 || t >= start + duration }
+
+    func item(_ i: Int) -> WakeReelItem {
+        let n = items.count
+        return items[((i % n) + n) % n]
+    }
+
+    var landedItem: WakeReelItem { items[land] }
+}

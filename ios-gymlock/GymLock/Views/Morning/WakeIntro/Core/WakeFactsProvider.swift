@@ -113,6 +113,11 @@ enum WakeFactsProvider {
         }
     }
 
+    /// One row of the mission capsule's reel: the mission's own icon and its sentence-case title.
+    static func reelItem(for mission: ActivationMissionType) -> WakeReelItem {
+        WakeReelItem(id: mission.rawValue, title: sentenceCase(mission.title), symbol: mission.icon)
+    }
+
     private static func sentenceCase(_ s: String) -> String {
         guard let first = s.first else { return s }
         return first.uppercased() + s.dropFirst()

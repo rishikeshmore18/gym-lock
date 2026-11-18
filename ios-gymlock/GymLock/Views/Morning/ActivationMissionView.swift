@@ -82,9 +82,19 @@ struct ActivationMissionView: View {
             await speech.refreshAvailability()
         }
         // The "I'm up" wake page: once per session, over this screen's first frame.
-        // Its mission capsule starts the mission exactly as the card's "start" does.
+        // Its mission capsule spins through the missions this device can verify, lands on one,
+        // and starts it exactly as the card's "start" does (choosing it first if it changed).
         .overlay {
-            WakeIntroPresenter(session: session, route: .mission) {
+            WakeIntroPresenter(
+                session: session,
+                route: .mission,
+                missionChoices: ActivationMissionType.candidates(
+                    available: capabilities,
+                    excluding: nil,
+                    allowingOwnershipMissions: store.usesGymBag
+                )
+            ) { landed in
+                if let landed, landed != mission { onChoose(landed) }
                 isRunning = true
             }
         }
