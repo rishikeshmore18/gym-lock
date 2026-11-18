@@ -241,7 +241,7 @@ All of these are read through `HeroMomentResolver.gather`, which only reads (`re
 - Reduce Motion on: crossfades only, a single heavy haptic about 0.07 s in, about 3 s.
 - Profile > Preferences > Card haptics off: no tap from the intro and none from the two buttons.
 - VoiceOver on: starts settled, and every element is labelled.
-- Tap during the intro: settles at once, and the skipped haptics do not fire.
+- Tap during the intro: moves to the next chapter, like a story. A tap on the last chapter starts the page-into-card condense early, which then plays in full (taps during it are ignored). Jumped-over haptics do not fire.
 - The app is light today, so every run exercises the wipe: the card goes from night to day once, with no flicker on the renderer's second pass.
 - Background the app mid-intro and return: the page is settled.
 - Missions off: the page plays over the countdown, and the capsule reads "Shoes on".

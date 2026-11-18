@@ -232,12 +232,12 @@ struct WakeIntroView: View {
                 Color.clear
                     .contentShape(.rect)
                     .frame(width: size.width, height: size.height)
-                    .onTapGesture { engine.skip(at: Date()) }
+                    .onTapGesture { engine.advance(at: Date()) }
                     .accessibilityElement()
                     .accessibilityLabel(copy.greet)
-                    .accessibilityHint("Tap to skip")
+                    .accessibilityHint("Shows the next part")
                     .accessibilityAddTraits(.isButton)
-                    .accessibilityAction(.default) { engine.skip(at: Date()) }
+                    .accessibilityAction(.default) { engine.advance(at: Date()) }
             }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
@@ -414,7 +414,20 @@ final class WakeIntroEngine {
         haptics?.stop()
     }
 
-    /// Tap to skip: jump to the settled page; the jumped-over cues are dropped.
+    /// A tap on the intro: like a story, it moves to the start of the next chapter. On the last
+    /// chapter it jumps to the condense, so the stage still shrinks into the card exactly as it does
+    /// on its own. Taps during the condense and landing are ignored: that animation always plays.
+    /// Jumped-over haptic cues are dropped; the next chapter's own cue still plays.
+    func advance(at date: Date) {
+        guard let plan, clock.isStarted else { return }
+        let t = clock.t(at: date)
+        guard t < plan.condenseAt else { return }
+        let target = plan.beats.first { $0.start > t + 1e-3 }?.start ?? plan.condenseAt
+        clock.jump(to: target, at: date)
+        haptics?.resync(to: target)
+    }
+
+    /// Jump straight to the settled page; the jumped-over cues are dropped.
     func skip(at date: Date) {
         guard let plan, clock.isStarted else { return }
         guard clock.t(at: date) < plan.introEnd else { return }
@@ -1122,7 +1135,7 @@ private struct WakeStageWords: View {
     private var skipHint: some View {
         let a = 0.36 * E.cl((m.f - 24) / 12) * (1 - E.cl((m.f - m.condenseF) / 6))
         let bottom = max(18 * s, m.insets.bottom + 6)
-        return Text("Tap to skip")
+        return Text("Tap to continue")
             .font(.system(size: 12 * s, weight: .semibold))
             .tracking(0.04 * 12 * s)
             .foregroundStyle(WakePalette.chapterInk.opacity(a))
