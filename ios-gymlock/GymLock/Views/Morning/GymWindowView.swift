@@ -30,6 +30,11 @@ struct GymWindowView: View {
                 }
             }
         }
+        // The "I'm up" wake page when missions are off: once per session, over the countdown's
+        // first frame. Its capsule ("Shoes on") closes it onto the countdown.
+        .overlay {
+            WakeIntroPresenter(session: session, route: .countdown)
+        }
     }
 
     @ViewBuilder

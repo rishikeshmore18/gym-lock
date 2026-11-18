@@ -392,7 +392,7 @@ Call `prepareSelection()` before a surface where the first tick's latency would 
 
 ## 14. Approved exceptions: Dynamic hero card (Rishi, 2026-11-06)
 
-These apply only to the Home hero card (Ridge and Matrix styles), its full-screen done flow and the card-style preview in Preferences. Everywhere else the rules above stand. The behaviour notes (2 and 5) are mirrored in `docs/FLOW.md`, which wins on behaviour.
+These apply only to the Home hero card (Ridge and Matrix styles), its full-screen done flow, the card-style preview in Preferences and the wake page (WakeIntro). Everywhere else the rules above stand. The behaviour notes (2 and 5) are mirrored in `docs/FLOW.md`, which wins on behaviour.
 
 1. **Idle loop.** The hero card, done flow and style preview are never static: entrance, one beat, then a calm idle loop. This overrides "Nothing loops" (§5.7) for these surfaces only. Under Reduce Motion, keep an opacity breathe only.
 2. **Done flow timing.** The done flow plays after a verified workout. From the workout-done notification it runs first, then lands on the Progress spotlight.

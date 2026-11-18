@@ -596,7 +596,7 @@ These were open questions while the flow was being written. They are final.
 
 ### Approved exceptions: Dynamic hero card (Rishi, 2026-11-06)
 
-Approved by Rishi for the Home hero card (Ridge and Matrix styles), its done flow and the card-style preview. They do not change any other rule in this file. Appearance notes are mirrored in `docs/UI-RULES.md` §14.
+Approved by Rishi for the Home hero card (Ridge and Matrix styles), its done flow, the card-style preview and the wake page (WakeIntro). They do not change any other rule in this file. Appearance notes are mirrored in `docs/UI-RULES.md` §14.
 
 1. **Idle loop.** The hero card, done flow and style preview are never static: entrance, one beat, then a calm idle loop. Under Reduce Motion, an opacity breathe only.
 2. **Done flow before the spotlight.** The done flow plays after a verified workout. From the workout-done notification it runs first, then lands on the Progress spotlight (Flow 3).

@@ -14,6 +14,8 @@ struct PlansChangedView: View {
     let onStillGoing: () -> Void
     let onQuickWorkout: () -> Void
     let onCantToday: () -> Void
+    /// False when the window is still open (the wake page): "still going" spends no grace there.
+    var showsGraceNote = true
 
     var body: some View {
         ZStack {
@@ -65,11 +67,13 @@ struct PlansChangedView: View {
                             }
                         }
 
-                        Text("choosing \"still going\" gives you \(GymSession.graceMinutes) more minutes — not a new window.")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.inkTertiary)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if showsGraceNote {
+                            Text("choosing \"still going\" gives you \(GymSession.graceMinutes) more minutes — not a new window.")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.inkTertiary)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(.horizontal, Theme.pageMargin)
                     .padding(.top, 6)

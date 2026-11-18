@@ -81,6 +81,13 @@ struct ActivationMissionView: View {
             motion.refreshAvailability()
             await speech.refreshAvailability()
         }
+        // The "I'm up" wake page: once per session, over this screen's first frame.
+        // Its mission capsule starts the mission exactly as the card's "start" does.
+        .overlay {
+            WakeIntroPresenter(session: session, route: .mission) {
+                isRunning = true
+            }
+        }
         .fullScreenCover(isPresented: $isRunning) {
             MissionRunnerView(
                 mission: mission,
