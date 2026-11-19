@@ -1615,20 +1615,30 @@ private struct WakeSettledPage: View {
     }
 
     private func column(scrolls: Bool) -> some View {
+        // Free height is shared, not dumped above the button: a little lowers the content off the
+        // status bar, a little opens the gaps between header, card and plan, and the rest (always
+        // the largest share) separates the content from the button. Each share is capped, so tall
+        // phones breathe and short ones collapse to the base spacing (or scroll).
         VStack(spacing: 0) {
+            flex(scrolls, max: 44)
+
             header
                 .wakeEntrance(m, at: stagger)
 
             slot
                 .padding(.top, 8)
 
+            flex(scrolls, max: 14)
+
             module
-                .padding(.top, 19)
+                .padding(.top, 18)
+
+            flex(scrolls, max: 22)
 
             if scrolls {
                 Color.clear.frame(height: 24)
             } else {
-                Spacer(minLength: 16)
+                Spacer(minLength: 20)
             }
 
             if showsLockLine {
@@ -1650,13 +1660,23 @@ private struct WakeSettledPage: View {
         .padding(.bottom, max(m.insets.bottom / ps, 10))
     }
 
+    /// A capped share of the free height (nothing in the scrolling fallback).
+    @ViewBuilder
+    private func flex(_ scrolls: Bool, max cap: CGFloat) -> some View {
+        if !scrolls {
+            Spacer(minLength: 0).frame(maxHeight: cap)
+        }
+    }
+
     // MARK: Header: "Today" and the streak, as on Home
 
     private var header: some View {
         HStack(alignment: .center) {
             Text("Today")
-                .wakeFont(28, .bold, relativeTo: .largeTitle)
-                .tracking(-0.28)
+                .wakeFont(36, .heavy, relativeTo: .largeTitle)
+                .tracking(-0.6)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .foregroundStyle(look.ink)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 12)
@@ -1665,7 +1685,7 @@ private struct WakeSettledPage: View {
             }
         }
         .padding(.leading, 4)
-        .frame(minHeight: 48)
+        .frame(minHeight: 56)
     }
 
     // MARK: The card's slot (the stage draws the card into it)
