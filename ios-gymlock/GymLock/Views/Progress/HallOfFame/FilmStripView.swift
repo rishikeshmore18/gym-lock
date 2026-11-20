@@ -47,6 +47,9 @@ struct FilmStripView: View {
     var onPull: (CGFloat) -> Void = { _ in }
     /// The finger left the strip after scrolling it.
     var onInteractionEnd: () -> Void = {}
+    /// Seat the chosen item at the top of the film rather than mid-screen,
+    /// so a week opens with its header (dates, photo count) in full view.
+    var alignsTop: Bool = false
 
     @State private var viewport = CGSize(width: 393, height: 852)
     @State private var offsetBox = ScrollOffsetBox()
@@ -92,7 +95,7 @@ struct FilmStripView: View {
         .contentMargins(.bottom, bottomInset, for: .scrollContent)
         // Photo pages align to the top margin (like the paging snap); every
         // other level keeps the chosen frame in the middle of the screen.
-        .scrollPosition(id: $scrollPosition, anchor: level == .photo ? .top : .center)
+        .scrollPosition(id: $scrollPosition, anchor: level == .photo || alignsTop ? .top : .center)
         .scrollTargetBehavior(FilmSnapBehavior(isPaging: level == .photo))
         .onChange(of: scrollPosition) { _, new in
             if let new, let lead = lay.rowLead[new], lead != new { scrollPosition = lead }

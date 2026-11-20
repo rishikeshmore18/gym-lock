@@ -25,7 +25,11 @@ struct HallOfFameView: View {
     @Environment(\.displayScale) private var displayScale
 
     @State private var phase: Phase = .intro(start: .distantFuture)
-    @State private var level: HallOfFameLevel = .day
+    /// Opens on Week: the latest week, header first.
+    @State private var level: HallOfFameLevel = .week
+    /// While true the strip seats its position at the top (the opening week
+    /// header); the first touch, pinch or level change hands back to centre.
+    @State private var alignsTop = true
     @State private var pinchScale: CGFloat = 1
     @State private var pinchAnchor: UnitPoint = .center
     @State private var scrollPosition: String?
@@ -129,9 +133,13 @@ struct HallOfFameView: View {
                 introLeader: max(introBox - size.height, 0),
                 hapticsEnabled: scrollHaptics && isLive && !isClosing && !isCommitting,
                 onCenterFrame: { centerFrameID = $0 },
-                onUserInteract: { dismiss.isFilmTouching = true },
+                onUserInteract: {
+                    dismiss.isFilmTouching = true
+                    releaseTopAlignment()
+                },
                 onPull: { filmPulled($0, size: size) },
-                onInteractionEnd: { filmReleased() }
+                onInteractionEnd: { filmReleased() },
+                alignsTop: alignsTop
             )
             // While the film lies on the floor the box is taller than the
             // screen (src HBOX) and only the laid length below the strip top
@@ -264,8 +272,18 @@ struct HallOfFameView: View {
         frames.first?.id ?? endIDs(sections, level: level).bottom
     }
 
+    /// The first row of the newest week, which carries its dates and photo count.
+    private func latestWeekID(_ frames: [HallOfFameFrame]) -> String? {
+        displaySections(frames, level: .week).last.map { "\($0.id)-r0" }
+    }
+
+    private func releaseTopAlignment() {
+        if alignsTop { alignsTop = false }
+    }
+
     private func jump(to id: String?) {
         guard let id, isLive, !isClosing else { return }
+        releaseTopAlignment()
         HallOfFameHaptics.levelChanged()
         var t = Transaction(); t.disablesAnimations = true
         withTransaction(t) { scrollPosition = nil }
@@ -429,12 +447,12 @@ struct HallOfFameView: View {
 
     private func start() {
         HallOfFameHaptics.prepare()
-        // Open straight on the present: the bottom of the film, today and
-        // this week. The intro's extra leader keeps the same resting offset.
-        let sections = displaySections(realFrames(), level: level)
-        if let present = endIDs(sections, level: level).bottom {
-            scrollPosition = present
-            centerFrameID = present
+        // Open straight on the present week, its header (dates and photo
+        // count) seated just under the title.
+        level = .week
+        alignsTop = true
+        if let week = latestWeekID(realFrames()) {
+            scrollPosition = week
         }
         if reduceMotion {
             phase = .live
@@ -487,14 +505,15 @@ struct HallOfFameView: View {
             }
             return
         }
-        // The film collapses back to today in Day view, and while it settles
-        // the page starts shrinking into the card, so the two read as one
-        // motion rather than two steps.
-        let target = endIDs(displaySections(frames, level: .day), level: .day).bottom
-        let needsScroll = scrollPosition != nil && scrollPosition != target
-        let needsLevel = level != .day
+        // The film collapses back to how it opened, the latest week, and
+        // while it settles the page starts shrinking into the card, so the
+        // two read as one motion rather than two steps.
+        let target = latestWeekID(frames)
+        let needsScroll = scrollPosition != target
+        let needsLevel = level != .week
         withAnimation(Theme.pageTurn) {
-            if needsLevel { level = .day }
+            if needsLevel { level = .week }
+            alignsTop = true
             scrollPosition = target
             pinchScale = 1
         }
@@ -617,6 +636,7 @@ struct HallOfFameView: View {
                     pinchLimitFired = false
                     pinchAnchor = value.startAnchor
                     pinchAnchorID = centerFrameID
+                    releaseTopAlignment()
                 }
                 let raw = value.magnification
                 let s = rubber(raw, canCoarser: availableCoarser(levels) != nil, canFiner: availableFiner(levels) != nil)
@@ -653,6 +673,7 @@ struct HallOfFameView: View {
     }
 
     private func commit(_ target: HallOfFameLevel, anchorID: String?) {
+        releaseTopAlignment()
         isCommitting = true
         let id = anchorID ?? scrollPosition
         pinchAnchor = .center
@@ -672,6 +693,7 @@ struct HallOfFameView: View {
 
     private func openPhoto(_ frame: HallOfFameFrame) {
         guard isLive, !isClosing, level != .photo else { return }
+        releaseTopAlignment()
         isCommitting = true
         pinchAnchor = .center
         centerFrameID = frame.id
