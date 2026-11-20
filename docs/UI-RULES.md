@@ -23,8 +23,9 @@ Craft principles in the Motion, Gesture and Anti-slop sections are adapted from 
 
 ## 1. Identity and voice
 
-- **Semi-premium, editorial, quiet.** Warm off-white canvas, white cards with hairline borders, one coral accent, near-black ink. Nothing shouts.
-- **One accent per screen, and it is coral.** Never two coral elements competing for the same glance.
+- **Black and white first, quiet, premium.** Near-white canvas (Theme.canvas), white cards with hairlines, near-black ink.
+- **Colour is rare.** At most one small coral element per screen, only as a live signal (streak flame, alert, destructive). Never a button fill or a background. Primary buttons are ink fill with a white label.
+- **Art is rare.** At most one Matrix or Ridge element per screen (following gymlock.home.cardStyle), only where it explains a state (morning flow, celebrations, empty states, onboarding). Never in settings, lists or pickers.
 - **Copy is lowercase and terse.** `you're here. 🔥` · `apps unlocked. go train.` · `stored only on this iPhone. never uploaded.` Short sentences, full stops, no exclamation marks in chrome. Public artifacts (share frames) may use uppercase statements; app chrome never does.
 - **Honesty over fullness.** An empty state says what is true (`no plan yet`, `nothing due yet`). Never a placeholder number, never a fabricated stat, never a fake date.
 
@@ -352,7 +353,8 @@ Call `prepareSelection()` before a surface where the first tick's latency would 
 
 ## 12. Anti-slop checklist — run before calling any visual work done
 
-- [ ] One accent per screen, and it is coral
+- [ ] At most one small coral signal per screen; no coral fills
+- [ ] At most one Matrix/Ridge art element per screen
 - [ ] No gradients except a flat dark canvas; no glows, textures, metal, grunge
 - [ ] No pure `#000` / `#FFF` as content colours
 - [ ] One corner-radius system, no fourth value
@@ -400,3 +402,9 @@ These apply only to the Home hero card (Ridge and Matrix styles), its full-scree
 4. **Long celebrations.** Done-flow and celebration durations may exceed 300 ms (§5.3).
 5. **Week position.** First / middle / last session of the week, and the 5 or 7 taps of the finish, come from real sessions against the weekly goal (3 to 7), never from the weekday.
 6. The mission screens (Missions).
+
+---
+
+## 15. Design language v2 (Rishi, 2026-11-20)
+
+Sections 1 and 12 were updated to black-and-white first. Screens still using coral fills are being migrated one at a time; do not restyle a screen unless the task asks.
