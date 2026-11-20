@@ -49,6 +49,9 @@ struct ProgressPhotosCard: View {
     /// The Add Photo button, in the card's space, so pressing it does not
     /// push the whole card in.
     @State private var addButtonFrame: CGRect = .null
+    /// The photo stack, in the card's space: its taps and drags belong to
+    /// the photos, so they never push the card in either.
+    @State private var stackFrame: CGRect = .null
 
     // MARK: Progress reveal (presentation only, never persisted)
 
@@ -123,18 +126,22 @@ struct ProgressPhotosCard: View {
         }
         .padding(ProgressCardMetrics.padding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: .rect(cornerRadius: ProgressCardMetrics.cornerRadius))
+        // The card's own surface opens the Hall of Fame. It sits behind the
+        // content rather than wrapping it, so Add Photo and the photos never
+        // see this tap: only the bare card, its padding and the copy do.
+        .background {
+            RoundedRectangle(cornerRadius: ProgressCardMetrics.cornerRadius)
+                .fill(Theme.surface)
+                .contentShape(.rect(cornerRadius: ProgressCardMetrics.cornerRadius))
+                .onTapGesture { openHallOfFame() }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: ProgressCardMetrics.cornerRadius)
                 .strokeBorder(Theme.border, lineWidth: 1)
+                .allowsHitTesting(false)
         }
-        // A tap anywhere on the card opens the Hall of Fame. Buttons inside it
-        // (the header, Add Photo) and the stack's drag and long press keep
-        // their own behaviour.
-        .contentShape(.rect(cornerRadius: ProgressCardMetrics.cornerRadius))
-        .onTapGesture { openHallOfFame() }
         .coordinateSpace(.named(Self.cardSpace))
-        .gesture(CardPressTracker(excluded: addButtonFrame) { pressed in
+        .gesture(CardPressTracker(excluded: [addButtonFrame, stackFrame]) { pressed in
             guard onOpenHallOfFame != nil else { return }
             if pressed { pressHaptic() }
             withAnimation(pressAnimation(pressed)) { isPressed = pressed }
@@ -307,8 +314,12 @@ struct ProgressPhotosCard: View {
                 onShare: isDemo || onShare == nil ? nil : { onShare?(.progressPhoto($0)) },
                 transitionNamespace: transitionNamespace,
                 isRevealRequested: isRevealRequested,
-                onOpenHallOfFame: onOpenHallOfFame == nil ? nil : { openHallOfFame() }
+                // Photos keep their own tap: bring to front, then share.
+                onOpenHallOfFame: nil
             )
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.cardSpace)) } action: {
+                stackFrame = $0
+            }
         } else {
             // First layout pass, before the width is known. Reserves nothing
             // so the card does not flash at the wrong size.
@@ -332,6 +343,10 @@ struct ProgressPhotosCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .lineSpacing(1)
+            .contentShape(Rectangle())
+            .onTapGesture { openHallOfFame() }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Opens the Hall of Fame")
 
             addButton
         }

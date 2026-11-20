@@ -6,8 +6,8 @@ import UIKit
 /// still get it. The press ends as soon as the finger travels, so scrolling
 /// past the card never leaves it pushed in.
 struct CardPressTracker: UIGestureRecognizerRepresentable {
-    /// Touches inside this rect (in the card's own space) are ignored.
-    var excluded: CGRect = .null
+    /// Touches inside these rects (in the card's own space) are ignored.
+    var excluded: [CGRect] = []
     var onChange: (Bool) -> Void
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
@@ -41,7 +41,7 @@ struct CardPressTracker: UIGestureRecognizerRepresentable {
         switch recognizer.state {
         case .began:
             c.start = point
-            guard !excluded.contains(point) else { return }
+            guard !excluded.contains(where: { $0.contains(point) }) else { return }
             set(true, c)
         case .changed:
             guard let start = c.start, c.isPressed else { return }
