@@ -210,12 +210,10 @@ struct MissionCameraStage: View {
             } else {
                 pill(m)
 
-                HStack(spacing: 0) {
-                    Group {
-                        if canSwap { swapButton(m) }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
+                // The shutter stays dead centre; the swap and light buttons are
+                // pinned to the edges over it, so their appearing or vanishing
+                // never shifts it.
+                ZStack {
                     Button(action: onShutter) {
                         Color.clear.frame(width: m(78), height: m(78))
                     }
@@ -224,10 +222,12 @@ struct MissionCameraStage: View {
                     .opacity(canTakePhoto ? 1 : 0.4)
                     .accessibilityLabel("Take the photo")
 
-                    Group {
+                    HStack(spacing: 0) {
+                        if canSwap { swapButton(m) }
+                        Spacer(minLength: 0)
                         if showsLight { lightButton(m) }
                     }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .frame(maxWidth: m.contentWidth)
                 }
 
                 HStack(spacing: m(6)) {
@@ -298,14 +298,10 @@ struct MissionCameraStage: View {
         Button {
             onLight()
         } label: {
-            HStack(spacing: m(8)) {
-                Image(systemName: isTorchOn ? "bolt.fill" : "bolt")
-                    .font(.system(size: m(17), weight: .semibold))
-                Text("Light")
-                    .font(.system(size: m(17), weight: .semibold))
-            }
-            .foregroundStyle(isTorchOn ? Color(red: 0.067, green: 0.067, blue: 0.067) : Color.white)
-            .padding(.horizontal, m(20))
+            Image(systemName: isTorchOn ? "bolt.fill" : "bolt")
+                .font(.system(size: m(20), weight: .semibold))
+                .foregroundStyle(isTorchOn ? Color(red: 0.067, green: 0.067, blue: 0.067) : Color.white)
+                .padding(.horizontal, m(24))
             .frame(height: m.tapSize)
             .background(Color.white.opacity(isTorchOn ? 1 : 0.16), in: Capsule())
             .background(.ultraThinMaterial, in: Capsule())
