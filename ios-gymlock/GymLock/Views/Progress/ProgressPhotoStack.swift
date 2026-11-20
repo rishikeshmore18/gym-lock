@@ -33,6 +33,9 @@ struct ProgressPhotoStack: View {
     /// newest, as if swiped once. Raised by the card when it is fully on
     /// screen; the deck reports the landing through `onFocus`.
     var isRevealRequested: Bool = false
+    /// Opens the Hall of Fame. When set, a tap on any card opens it; drag and
+    /// long press are unchanged.
+    var onOpenHallOfFame: (() -> Void)?
 
     /// Continuous position while a finger is down. `nil` means settled, and
     /// the focused card is the source of truth again.
@@ -188,7 +191,11 @@ struct ProgressPhotoStack: View {
         // Removing the button removed its accessibility action, so the card
         // brings its own — VoiceOver must still be able to activate it.
         .accessibilityAction {
-            withAnimation(settle) { onFocus(slide) }
+            if let onOpenHallOfFame {
+                onOpenHallOfFame()
+            } else {
+                withAnimation(settle) { onFocus(slide) }
+            }
         }
         .photoContextMenu(slide: slide, onShare: onShare, onDelete: onDelete)
     }
@@ -481,6 +488,11 @@ struct ProgressPhotoStack: View {
     /// one", so a user browsing their history is never surprised by an
     /// editor appearing.
     private func handleTap(at location: CGPoint) {
+        // With the Hall of Fame wired, every tap on the deck opens it.
+        if let onOpenHallOfFame {
+            onOpenHallOfFame()
+            return
+        }
         guard let index = slideIndex(at: location.x),
               let slide = slides[safe: index]
         else { return }

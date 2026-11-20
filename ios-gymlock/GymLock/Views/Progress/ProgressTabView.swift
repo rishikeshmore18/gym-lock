@@ -33,6 +33,7 @@ struct ProgressTabView: View {
     @Namespace private var shareTransition
     @State private var badges = BadgeStore.shared
     @State private var isShowingBadges = false
+    @State private var isShowingHallOfFame = false
 
     /// The zoom between the two levels of the chart.
     ///
@@ -79,6 +80,13 @@ struct ProgressTabView: View {
         .task(id: badgeKey) { badges.refresh(store: store) }
         .sheet(isPresented: $isShowingBadges) {
             BadgesScreen(badges: badges)
+        }
+        .fullScreenCover(isPresented: $isShowingHallOfFame) {
+            HallOfFameView(store: photos) {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { isShowingHallOfFame = false }
+            }
         }
         // The Day 0 photograph the user took during onboarding is their real
         // before-picture; the stack starts from it rather than asking for the
@@ -130,7 +138,13 @@ struct ProgressTabView: View {
                 ProgressPhotosCard(
                     store: photos,
                     onShare: { shareOrigin = $0 },
-                    transitionNamespace: shareTransition
+                    transitionNamespace: shareTransition,
+                    onOpenHallOfFame: {
+                        HallOfFameHaptics.open()
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { isShowingHallOfFame = true }
+                    }
                 )
                 // A small lift once lit. Black and faint: depth, not glow.
                 .shadow(

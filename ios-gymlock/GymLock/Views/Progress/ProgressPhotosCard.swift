@@ -16,6 +16,8 @@ struct ProgressPhotosCard: View {
     var onShare: ((ShareOrigin) -> Void)?
     /// The zoom transition's source namespace, shared with the presenter.
     var transitionNamespace: Namespace.ID?
+    /// Opens the full-screen Hall of Fame. Nil hides the affordance.
+    var onOpenHallOfFame: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -32,6 +34,9 @@ struct ProgressPhotosCard: View {
     @State private var hasAppeared = false
     /// A photo the user has asked to delete, awaiting confirmation.
     @State private var photoPendingDeletion: ProgressPhoto?
+    /// When the Hall of Fame was last asked for, so a tap that reaches both
+    /// the stack and the card behind it opens it once.
+    @State private var lastHallOfFameOpen: Date = .distantPast
 
     // MARK: Progress reveal (presentation only, never persisted)
 
@@ -111,6 +116,11 @@ struct ProgressPhotosCard: View {
             RoundedRectangle(cornerRadius: ProgressCardMetrics.cornerRadius)
                 .strokeBorder(Theme.border, lineWidth: 1)
         }
+        // A tap anywhere on the card opens the Hall of Fame. Buttons inside it
+        // (the header, Add Photo) and the stack's drag and long press keep
+        // their own behaviour.
+        .contentShape(.rect(cornerRadius: ProgressCardMetrics.cornerRadius))
+        .onTapGesture { openHallOfFame() }
         .shadow(color: .black.opacity(0.045), radius: 10, y: 4)
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.width - ProgressCardMetrics.padding * 2
@@ -178,19 +188,34 @@ struct ProgressPhotosCard: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Progress Photos")
-                .font(.system(size: 21, weight: .bold))
-                .foregroundStyle(Theme.ink)
-
-            Spacer(minLength: 8)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Theme.inkTertiary)
+        Button {
+            onOpenHallOfFame?()
+        } label: {
+            HStack(alignment: .center) {
+                Text("Progress Photos")
+                    .font(.system(size: 21, weight: .bold))
+                    .foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.inkTertiary)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .disabled(onOpenHallOfFame == nil)
+        .accessibilityLabel("Open Hall of Fame")
         .accessibilityAddTraits(.isHeader)
+    }
+
+    /// One open per tap, whichever layer heard it first.
+    private func openHallOfFame() {
+        guard let onOpenHallOfFame else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastHallOfFameOpen) > 0.5 else { return }
+        lastHallOfFameOpen = now
+        onOpenHallOfFame()
     }
 
     // MARK: Photographs
@@ -219,7 +244,8 @@ struct ProgressPhotosCard: View {
                 onDelete: isDemo ? nil : { photoPendingDeletion = $0 },
                 onShare: isDemo || onShare == nil ? nil : { onShare?(.progressPhoto($0)) },
                 transitionNamespace: transitionNamespace,
-                isRevealRequested: isRevealRequested
+                isRevealRequested: isRevealRequested,
+                onOpenHallOfFame: onOpenHallOfFame == nil ? nil : { openHallOfFame() }
             )
         } else {
             // First layout pass, before the width is known. Reserves nothing
