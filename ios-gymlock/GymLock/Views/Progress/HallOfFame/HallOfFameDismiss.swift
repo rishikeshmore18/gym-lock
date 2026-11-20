@@ -1,4 +1,38 @@
 import SwiftUI
+import Observation
+
+/// Live state of a drag-to-close and the zoom into the card. Kept outside
+/// the Hall of Fame's own state so a finger moving 120 times a second only
+/// re-renders the small stage that reads it, never the film.
+@Observable
+final class HallOfFameDismissModel {
+    var drag: CGSize = .zero
+    var pull: CGFloat = 0
+    var exit: CGFloat = 0
+    /// The pose the zoom starts from, frozen when closing begins.
+    var frozen: (drag: CGSize, pull: CGFloat)?
+    @ObservationIgnored var pastThreshold = false
+    @ObservationIgnored var isFilmTouching = false
+}
+
+/// Applies the page zoom from the model. Only this view observes the model.
+struct HallOfFameZoomStage<Content: View>: View {
+    let model: HallOfFameDismissModel
+    let size: CGSize
+    let target: CGRect
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content.modifier(HallOfFamePageZoom(
+            size: size,
+            drag: model.frozen?.drag ?? model.drag,
+            pull: model.frozen?.pull ?? model.pull,
+            exit: model.exit,
+            target: target,
+            cornerRadius: ProgressCardMetrics.cornerRadius
+        ))
+    }
+}
 
 /// The Hall of Fame page as a card: it follows a dismiss drag (shrinking,
 /// rounding its corners and moving under the finger, over a dimmed Progress
@@ -90,7 +124,14 @@ struct HallOfFamePageZoom: ViewModifier, Animatable {
                 .scaleEffect(scale)
                 .frame(width: clip.width, height: clip.height)
                 .clipShape(shape)
-                .shadow(color: .black.opacity(moving ? 0.16 * Double(1 - e * 0.6) : 0), radius: 24, y: 10)
+                // The shadow is cast by a plain shape behind the page, not by
+                // the page itself, so the film is never re-rasterised for it.
+                .background {
+                    if moving {
+                        shape.fill(Theme.canvas)
+                            .shadow(color: .black.opacity(0.16 * Double(1 - e * 0.6)), radius: 24, y: 10)
+                    }
+                }
                 .position(center)
                 .opacity(opacity)
         }

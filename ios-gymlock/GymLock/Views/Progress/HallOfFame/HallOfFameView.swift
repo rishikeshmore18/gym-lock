@@ -42,16 +42,9 @@ struct HallOfFameView: View {
     @State private var didClose = false
     /// The photo in the middle of the screen, reported by the strip.
     @State private var centerFrameID: String?
-    /// Opening: hold on the oldest photo, then glide to the newest.
-    @State private var glideTask: Task<Void, Never>?
-    @State private var glideScheduled = false
-    /// Drag to close: finger travel, film overscroll, and the zoom into the card.
-    @State private var dismissDrag: CGSize = .zero
-    @State private var pull: CGFloat = 0
-    @State private var exitProgress: CGFloat = 0
-    @State private var exitFrom: (drag: CGSize, pull: CGFloat)?
-    @State private var isFilmTouching = false
-    @State private var pastDismissThreshold = false
+    /// Drag to close and the zoom into the card. Not read by this body, so
+    /// moving the page never rebuilds the film.
+    @State private var dismiss = HallOfFameDismissModel()
     @Namespace private var pillSpace
 
     private let allEvents: ReelEvents = [.reelLanded, .titleComplete, .revolution1, .revolution2, .revolution3, .stripSeated]
@@ -76,6 +69,7 @@ struct HallOfFameView: View {
             let insets = outer.safeAreaInsets
             GeometryReader { geo in
                 let layout = makeLayout(size: geo.size, insets: insets)
+                HallOfFameZoomStage(model: dismiss, size: geo.size, target: sourceFrame) {
                 ZStack(alignment: .topLeading) {
                     Theme.canvas
                     TimelineView(.animation(paused: isLive)) { ctx in
@@ -88,23 +82,12 @@ struct HallOfFameView: View {
                     }
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-                .modifier(HallOfFamePageZoom(
-                    size: geo.size,
-                    drag: exitFrom?.drag ?? dismissDrag,
-                    pull: exitFrom?.pull ?? pull,
-                    exit: exitProgress,
-                    target: sourceFrame,
-                    cornerRadius: ProgressCardMetrics.cornerRadius
-                ))
+                }
                 .opacity(configured ? fade : 0)
             }
             .ignoresSafeArea()
         }
         .onAppear { start() }
-        .onChange(of: isLive) { _, live in
-            if live { scheduleGlide() }
-        }
-        .onDisappear { glideTask?.cancel() }
     }
 
     // MARK: Screen
@@ -146,10 +129,7 @@ struct HallOfFameView: View {
                 introLeader: max(introBox - size.height, 0),
                 hapticsEnabled: scrollHaptics && isLive && !isClosing && !isCommitting,
                 onCenterFrame: { centerFrameID = $0 },
-                onUserInteract: {
-                    cancelGlide()
-                    isFilmTouching = true
-                },
+                onUserInteract: { dismiss.isFilmTouching = true },
                 onPull: { filmPulled($0, size: size) },
                 onInteractionEnd: { filmReleased() }
             )
@@ -278,7 +258,7 @@ struct HallOfFameView: View {
         return (sections.first.flatMap { ids($0).first }, sections.last.flatMap { ids($0).last })
     }
 
-    /// Where the opening glide and "Jump to Latest" land: the newest photo,
+    /// Where "Jump to Latest" lands: the newest photo,
     /// or today when there are none.
     private func latestID(_ frames: [HallOfFameFrame], _ sections: [HallOfFameSection]) -> String? {
         frames.first?.id ?? endIDs(sections, level: level).bottom
@@ -286,7 +266,6 @@ struct HallOfFameView: View {
 
     private func jump(to id: String?) {
         guard let id, isLive, !isClosing else { return }
-        cancelGlide()
         HallOfFameHaptics.levelChanged()
         var t = Transaction(); t.disablesAnimations = true
         withTransaction(t) { scrollPosition = nil }
@@ -450,13 +429,12 @@ struct HallOfFameView: View {
 
     private func start() {
         HallOfFameHaptics.prepare()
-        // Open on where it started: the oldest photo, which the glide then
-        // leaves for the newest.
-        let frames = realFrames()
-        let sections = displaySections(frames, level: level)
-        if let oldest = frames.last?.id ?? endIDs(sections, level: level).top {
-            scrollPosition = oldest
-            centerFrameID = oldest
+        // Open straight on the present: the bottom of the film, today and
+        // this week. The intro's extra leader keeps the same resting offset.
+        let sections = displaySections(realFrames(), level: level)
+        if let present = endIDs(sections, level: level).bottom {
+            scrollPosition = present
+            centerFrameID = present
         }
         if reduceMotion {
             phase = .live
@@ -482,40 +460,6 @@ struct HallOfFameView: View {
         if !seated { HallOfFameHaptics.stripSeated() }
     }
 
-    // MARK: Opening glide
-
-    /// Once the strip is live: one second on the oldest photo, then a smooth
-    /// glide down to the newest. Any touch, pinch, tap or close cancels it.
-    private func scheduleGlide() {
-        guard !glideScheduled else { return }
-        glideScheduled = true
-        let frames = realFrames()
-        let sections = displaySections(frames, level: level)
-        let opening = frames.last?.id ?? endIDs(sections, level: level).top
-        guard let target = latestID(frames, sections), target != opening else { return }
-        let distance = max(frames.count, min(sections.count, 14))
-        glideTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled, isLive, !isClosing, !isCommitting else { return }
-            if reduceMotion {
-                var t = Transaction(); t.disablesAnimations = true
-                withTransaction(t) { scrollPosition = target }
-            } else {
-                // Longer films take a little longer, but never drag.
-                let duration = min(0.9 + Double(distance) * 0.06, 2.0)
-                withAnimation(.timingCurve(0.45, 0, 0.2, 1, duration: duration)) {
-                    scrollPosition = target
-                }
-            }
-            glideTask = nil
-        }
-    }
-
-    private func cancelGlide() {
-        glideTask?.cancel()
-        glideTask = nil
-    }
-
     /// Settles the strip exactly on `id` after a level change. Setting the
     /// same id twice is ignored by the scroll view, so it is cleared first;
     /// if the strip already sits there, nothing moves.
@@ -533,7 +477,6 @@ struct HallOfFameView: View {
 
     private func close(frames: [HallOfFameFrame]) {
         guard isLive, !isClosing else { return }
-        cancelGlide()
         isClosing = true
         HallOfFameHaptics.close()
         if reduceMotion {
@@ -544,9 +487,10 @@ struct HallOfFameView: View {
             }
             return
         }
-        // The film collapses back to the newest day, and while it settles the
-        // page starts zooming into the card, so the two read as one motion.
-        let target = frames.first?.id ?? endIDs(displaySections(frames, level: .day), level: .day).bottom
+        // The film collapses back to today in Day view, and while it settles
+        // the page starts shrinking into the card, so the two read as one
+        // motion rather than two steps.
+        let target = endIDs(displaySections(frames, level: .day), level: .day).bottom
         let needsScroll = scrollPosition != nil && scrollPosition != target
         let needsLevel = level != .day
         withAnimation(Theme.pageTurn) {
@@ -554,18 +498,19 @@ struct HallOfFameView: View {
             scrollPosition = target
             pinchScale = 1
         }
-        let wait: Duration = (needsScroll || needsLevel) ? .milliseconds(300) : .zero
+        let wait: Duration = (needsScroll || needsLevel) ? .milliseconds(220) : .zero
         Task { @MainActor in
             try? await Task.sleep(for: wait)
             zoomOut()
         }
     }
 
-    /// Zooms the page, from wherever the finger left it, into the card.
+    /// Shrinks the page, from wherever the finger left it, into the card.
+    /// Critically damped, so it lands on the card without overshooting.
     private func zoomOut() {
-        exitFrom = (dismissDrag, pull)
-        withAnimation(.spring(duration: 0.44, bounce: 0)) {
-            exitProgress = 1
+        dismiss.frozen = (dismiss.drag, dismiss.pull)
+        withAnimation(.spring(duration: 0.46, bounce: 0)) {
+            dismiss.exit = 1
         } completion: {
             finishClose()
         }
@@ -583,34 +528,31 @@ struct HallOfFameView: View {
         DragGesture(minimumDistance: 6, coordinateSpace: .global)
             .onChanged { value in
                 guard isLive, !isClosing, !pinchActive else { return }
-                if dismissDrag == .zero {
-                    cancelGlide()
-                    Haptics.prepareSelection()
-                }
+                if dismiss.drag == .zero { Haptics.prepareSelection() }
                 let t = value.translation
                 // Upwards is resisted: the page only really leaves downwards or right.
-                dismissDrag = CGSize(width: t.width, height: t.height > 0 ? t.height : t.height * 0.15)
+                dismiss.drag = CGSize(width: t.width, height: t.height > 0 ? t.height : t.height * 0.15)
                 updateDismissThreshold(size: size)
             }
             .onEnded { value in
-                guard isLive, !isClosing, dismissDrag != .zero else { return }
-                let p = HallOfFamePageZoom.progress(drag: dismissDrag, pull: 0, size: size)
+                guard isLive, !isClosing, dismiss.drag != .zero else { return }
+                let p = HallOfFamePageZoom.progress(drag: dismiss.drag, pull: 0, size: size)
                 let predicted = value.predictedEndTranslation
                 if p > 0.22 || predicted.height > size.height * 0.4 || predicted.width > size.width * 0.55 {
                     closeFromDrag()
                 } else {
-                    pastDismissThreshold = false
-                    withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) { dismissDrag = .zero }
+                    dismiss.pastThreshold = false
+                    withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) { dismiss.drag = .zero }
                 }
             }
     }
 
     /// A light tick when the page crosses the point where letting go closes it.
     private func updateDismissThreshold(size: CGSize) {
-        let p = HallOfFamePageZoom.progress(drag: dismissDrag, pull: pull, size: size)
-        let past = p > 0.22 || pull > 80
-        if past != pastDismissThreshold {
-            pastDismissThreshold = past
+        let p = HallOfFamePageZoom.progress(drag: dismiss.drag, pull: dismiss.pull, size: size)
+        let past = p > 0.22 || dismiss.pull > 80
+        if past != dismiss.pastThreshold {
+            dismiss.pastThreshold = past
             Haptics.selection()
         }
     }
@@ -618,24 +560,25 @@ struct HallOfFameView: View {
     /// Pulling the film down past its top shrinks the page like a drag.
     private func filmPulled(_ value: CGFloat, size: CGSize) {
         guard !isClosing else { return }
-        guard isLive else { pull = 0; return }
-        pull = value
-        if isFilmTouching { updateDismissThreshold(size: size) }
+        let next = isLive ? value : 0
+        // Ignore sub-point jitter so a resting film never re-renders the stage.
+        guard abs(next - dismiss.pull) > 0.25 || (next == 0 && dismiss.pull != 0) else { return }
+        dismiss.pull = next
+        if dismiss.isFilmTouching { updateDismissThreshold(size: size) }
     }
 
     private func filmReleased() {
-        isFilmTouching = false
+        dismiss.isFilmTouching = false
         guard isLive, !isClosing else { return }
-        if pull > 80 {
+        if dismiss.pull > 80 {
             closeFromDrag()
         } else {
-            pastDismissThreshold = false
+            dismiss.pastThreshold = false
         }
     }
 
     private func closeFromDrag() {
         guard isLive, !isClosing else { return }
-        cancelGlide()
         isClosing = true
         HallOfFameHaptics.close()
         zoomOut()
@@ -674,7 +617,6 @@ struct HallOfFameView: View {
                     pinchLimitFired = false
                     pinchAnchor = value.startAnchor
                     pinchAnchorID = centerFrameID
-                    cancelGlide()
                 }
                 let raw = value.magnification
                 let s = rubber(raw, canCoarser: availableCoarser(levels) != nil, canFiner: availableFiner(levels) != nil)
@@ -711,7 +653,6 @@ struct HallOfFameView: View {
     }
 
     private func commit(_ target: HallOfFameLevel, anchorID: String?) {
-        cancelGlide()
         isCommitting = true
         let id = anchorID ?? scrollPosition
         pinchAnchor = .center
@@ -731,7 +672,6 @@ struct HallOfFameView: View {
 
     private func openPhoto(_ frame: HallOfFameFrame) {
         guard isLive, !isClosing, level != .photo else { return }
-        cancelGlide()
         isCommitting = true
         pinchAnchor = .center
         centerFrameID = frame.id

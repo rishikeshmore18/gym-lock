@@ -36,6 +36,8 @@ struct ProgressTabView: View {
     @State private var isShowingHallOfFame = false
     /// Where the Hall of Fame zooms back to on close.
     @State private var photosCardFrame: CGRect = .zero
+    /// Counts closes, so the card can catch the page as it lands.
+    @State private var hallOfFameReturns = 0
 
     /// The zoom between the two levels of the chart.
     ///
@@ -88,6 +90,7 @@ struct ProgressTabView: View {
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { isShowingHallOfFame = false }
+                hallOfFameReturns += 1
             }
             // Clear, so the Progress page shows behind a page being dragged
             // or zoomed back into its card.
@@ -149,7 +152,8 @@ struct ProgressTabView: View {
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
                         withTransaction(transaction) { isShowingHallOfFame = true }
-                    }
+                    },
+                    hallOfFameReturns: hallOfFameReturns
                 )
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
                     photosCardFrame = $0

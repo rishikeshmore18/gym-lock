@@ -18,6 +18,8 @@ struct ProgressPhotosCard: View {
     var transitionNamespace: Namespace.ID?
     /// Opens the full-screen Hall of Fame. Nil hides the affordance.
     var onOpenHallOfFame: (() -> Void)?
+    /// Bumped each time the Hall of Fame finishes closing into this card.
+    var hallOfFameReturns: Int = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -39,6 +41,11 @@ struct ProgressPhotosCard: View {
     @State private var lastHallOfFameOpen: Date = .distantPast
     /// A finger resting on the card: it sinks a little, like a button.
     @State private var isPressed = false
+    /// Held down from the tap until the Hall of Fame covers the card.
+    @State private var isOpening = false
+    /// The small give when the closing page lands in the card.
+    @State private var landingScale: CGFloat = 1
+    @State private var lastPressHaptic: Date = .distantPast
     /// The Add Photo button, in the card's space, so pressing it does not
     /// push the whole card in.
     @State private var addButtonFrame: CGRect = .null
@@ -129,10 +136,11 @@ struct ProgressPhotosCard: View {
         .coordinateSpace(.named(Self.cardSpace))
         .gesture(CardPressTracker(excluded: addButtonFrame) { pressed in
             guard onOpenHallOfFame != nil else { return }
-            if pressed { Haptics.press(intensity: 0.4) }
+            if pressed { pressHaptic() }
             withAnimation(pressAnimation(pressed)) { isPressed = pressed }
         })
-        .scaleEffect(isPressed ? 0.97 : 1)
+        .scaleEffect((isPressed || isOpening ? 0.965 : 1) * landingScale)
+        .onChange(of: hallOfFameReturns) { _, _ in absorbLanding() }
         .shadow(color: .black.opacity(0.045), radius: 10, y: 4)
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.width - ProgressCardMetrics.padding * 2
@@ -201,7 +209,7 @@ struct ProgressPhotosCard: View {
 
     private var header: some View {
         Button {
-            onOpenHallOfFame?()
+            openHallOfFame()
         } label: {
             HStack(alignment: .center) {
                 Text("Progress Photos")
@@ -231,13 +239,45 @@ struct ProgressPhotosCard: View {
             : .spring(response: 0.4, dampingFraction: 0.62)
     }
 
-    /// One open per tap, whichever layer heard it first.
+    private func pressHaptic() {
+        let now = Date()
+        guard now.timeIntervalSince(lastPressHaptic) > 0.3 else { return }
+        lastPressHaptic = now
+        Haptics.press(intensity: 0.4)
+    }
+
+    /// One open per tap, whichever layer heard it first. The card is seen
+    /// going down first, even on a quick tap, then the page opens over it.
     private func openHallOfFame() {
         guard let onOpenHallOfFame else { return }
         let now = Date()
         guard now.timeIntervalSince(lastHallOfFameOpen) > 0.5 else { return }
         lastHallOfFameOpen = now
-        onOpenHallOfFame()
+        let wasDown = isPressed
+        pressHaptic()
+        withAnimation(pressAnimation(true)) { isOpening = true }
+        Task { @MainActor in
+            if !wasDown && !reduceMotion {
+                try? await Task.sleep(for: .milliseconds(120))
+            }
+            onOpenHallOfFame()
+            // Covered by now: come back up unseen, ready for the return.
+            try? await Task.sleep(for: .milliseconds(500))
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) { isOpening = false; isPressed = false }
+        }
+    }
+
+    /// The page has just shrunk into the card: the card gives a little,
+    /// then settles, as if it caught it.
+    private func absorbLanding() {
+        guard !reduceMotion else { return }
+        Haptics.press(intensity: 0.3)
+        withAnimation(.spring(response: 0.16, dampingFraction: 1)) {
+            landingScale = 0.98
+        } completion: {
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.58)) { landingScale = 1 }
+        }
     }
 
     // MARK: Photographs
