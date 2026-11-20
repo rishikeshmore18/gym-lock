@@ -8,6 +8,9 @@ struct HallOfFameView: View {
     /// Called after the close animation ends.
     let onClose: () -> Void
     @AppStorage(HeroCardStyle.storageKey) private var styleRaw = HeroCardStyle.default.rawValue
+    /// Hall of Fame only film style; empty follows Home's card style.
+    @AppStorage(HallOfFameSettings.styleKey) private var filmStyleRaw = ""
+    @AppStorage(HallOfFameSettings.scrollHapticsKey) private var scrollHaptics = true
 
     private enum Phase: Equatable {
         case intro(start: Date)
@@ -43,19 +46,17 @@ struct HallOfFameView: View {
 
     private let allEvents: ReelEvents = [.reelLanded, .titleComplete, .revolution1, .revolution2, .revolution3, .stripSeated]
 
-    private var style: HeroCardStyle { HeroCardStyle(rawValue: styleRaw) ?? .default }
+    private var style: HeroCardStyle {
+        HeroCardStyle(rawValue: filmStyleRaw) ?? HeroCardStyle(rawValue: styleRaw) ?? .default
+    }
     private var isDemo: Bool { store.photos.isEmpty }
     private var isLive: Bool { phase == .live }
 
     // MARK: Body
 
     var body: some View {
-        let frames = HallOfFameModel.frames(photos: store.photos, installDate: store.installDate)
-        // Shown oldest at the top, newest at the bottom; the strip opens on the newest.
-        let sections = HallOfFameModel.sections(frames, level: level).reversed().map {
-            HallOfFameSection(id: $0.id, title: $0.title, countText: $0.countText,
-                              frames: $0.frames.reversed(), cells: $0.cells)
-        }
+        let frames = realFrames()
+        let sections = displaySections(frames, level: level)
         let levels = HallOfFameModel.availableLevels(isDemo: isDemo)
 
         // The outer reader respects the safe area so its insets are the real
@@ -125,7 +126,7 @@ struct HallOfFameView: View {
                 onTapFrame: { openPhoto($0) },
                 onReachStart: { reachedStart() },
                 introLeader: max(introBox - size.height, 0),
-                hapticsEnabled: isLive && !isClosing && !isCommitting,
+                hapticsEnabled: scrollHaptics && isLive && !isClosing && !isCommitting,
                 onCenterFrame: { centerFrameID = $0 },
                 onUserInteract: { cancelGlide() }
             )
@@ -188,6 +189,14 @@ struct HallOfFameView: View {
                 .opacity(chrome)
                 .allowsHitTesting(isLive && !isClosing)
 
+            settingsMenu(sections: sections, frames: frames)
+                .frame(width: 44, height: 44)
+                .padding(.trailing, 14)
+                .padding(.top, max(safeTop - 3, 0))
+                .frame(width: size.width, alignment: .trailing)
+                .opacity(chrome)
+                .allowsHitTesting(isLive && !isClosing)
+
             capsule(levels: levels, frames: frames, layout: layout, size: size)
                 .frame(width: size.width, height: size.height, alignment: .bottom)
                 .padding(.bottom, 0)
@@ -205,7 +214,115 @@ struct HallOfFameView: View {
         return false
     }
 
+    // MARK: Film
+
+    /// Real photos only. With none, the film is empty dated days, never the
+    /// demo artwork: nothing here may imply a photo that was not taken.
+    private func realFrames() -> [HallOfFameFrame] {
+        guard !store.photos.isEmpty else { return [] }
+        return HallOfFameModel.frames(photos: store.photos, installDate: store.installDate)
+    }
+
+    /// Shown oldest at the top, newest at the bottom.
+    private func displaySections(_ frames: [HallOfFameFrame], level: HallOfFameLevel) -> [HallOfFameSection] {
+        HallOfFameModel.sections(frames, level: level, installDate: store.installDate).reversed().map {
+            HallOfFameSection(id: $0.id, title: $0.title, countText: $0.countText,
+                              frames: $0.frames.reversed(), cells: $0.cells)
+        }
+    }
+
+    /// The top and bottom of the film as scroll ids (a frame, or a day cell,
+    /// which the strip maps to its row in Week and Month).
+    private func endIDs(_ sections: [HallOfFameSection], level: HallOfFameLevel) -> (top: String?, bottom: String?) {
+        let grid = level == .week || level == .month
+        func ids(_ s: HallOfFameSection) -> [String] {
+            let cells = s.cells.filter { !$0.isPadding }.map(\.id)
+            if grid { return cells }
+            return s.frames.isEmpty ? cells : s.frames.map(\.id)
+        }
+        return (sections.first.flatMap { ids($0).first }, sections.last.flatMap { ids($0).last })
+    }
+
+    /// Where the opening glide and "Jump to Latest" land: the newest photo,
+    /// or today when there are none.
+    private func latestID(_ frames: [HallOfFameFrame], _ sections: [HallOfFameSection]) -> String? {
+        frames.first?.id ?? endIDs(sections, level: level).bottom
+    }
+
+    private func jump(to id: String?) {
+        guard let id, isLive, !isClosing else { return }
+        cancelGlide()
+        HallOfFameHaptics.levelChanged()
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { scrollPosition = nil }
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .timingCurve(0.45, 0, 0.2, 1, duration: 0.9)) {
+                scrollPosition = id
+            }
+        }
+    }
+
     // MARK: Chrome
+
+    /// The slider circle at the top right: jumps, film style, scroll haptics.
+    @ViewBuilder
+    private func settingsMenu(sections: [HallOfFameSection], frames: [HallOfFameFrame]) -> some View {
+        let menu = Menu {
+            Section {
+                Button {
+                    jump(to: latestID(frames, sections))
+                } label: {
+                    Label("Jump to Latest", systemImage: "arrow.down.to.line")
+                }
+                Button {
+                    jump(to: endIDs(sections, level: level).top)
+                } label: {
+                    Label("Jump to Where It Started", systemImage: "arrow.up.to.line")
+                }
+            }
+            Section {
+                Picker(selection: $filmStyleRaw) {
+                    Text("Match Home").tag("")
+                    Text("Ridge").tag(HeroCardStyle.ridge.rawValue)
+                    Text("Matrix").tag(HeroCardStyle.matrix.rawValue)
+                } label: {
+                    Label("Film Style", systemImage: "film")
+                }
+                .pickerStyle(.menu)
+                Toggle(isOn: $scrollHaptics) {
+                    Label("Scroll Haptics", systemImage: "water.waves")
+                }
+            }
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .accessibilityLabel("Film options")
+        .onChange(of: scrollHaptics) { _, on in
+            if on { HallOfFameHaptics.levelChanged() }
+        }
+        .onChange(of: filmStyleRaw) { _, _ in
+            HallOfFameHaptics.levelChanged()
+        }
+
+        if #available(iOS 26.0, *) {
+            menu
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            menu
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .background(.ultraThinMaterial, in: .circle)
+                .overlay { Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 1) }
+                .shadow(color: .black.opacity(0.14), radius: 8, y: 3)
+        }
+    }
 
     private func capsule(levels: [HallOfFameLevel], frames: [HallOfFameFrame],
                          layout: ReelLayout, size: CGSize) -> some View {
@@ -300,10 +417,11 @@ struct HallOfFameView: View {
         HallOfFameHaptics.prepare()
         // Open on where it started: the oldest photo, which the glide then
         // leaves for the newest.
-        let frames = HallOfFameModel.frames(photos: store.photos, installDate: store.installDate)
-        if let oldest = frames.last {
-            scrollPosition = oldest.id
-            centerFrameID = oldest.id
+        let frames = realFrames()
+        let sections = displaySections(frames, level: level)
+        if let oldest = frames.last?.id ?? endIDs(sections, level: level).top {
+            scrollPosition = oldest
+            centerFrameID = oldest
         }
         if reduceMotion {
             phase = .live
@@ -336,20 +454,22 @@ struct HallOfFameView: View {
     private func scheduleGlide() {
         guard !glideScheduled else { return }
         glideScheduled = true
-        let frames = HallOfFameModel.frames(photos: store.photos, installDate: store.installDate)
-        guard frames.count > 1, let newest = frames.first else { return }
-        let distance = frames.count
+        let frames = realFrames()
+        let sections = displaySections(frames, level: level)
+        let opening = frames.last?.id ?? endIDs(sections, level: level).top
+        guard let target = latestID(frames, sections), target != opening else { return }
+        let distance = max(frames.count, min(sections.count, 14))
         glideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled, isLive, !isClosing, !isCommitting else { return }
             if reduceMotion {
                 var t = Transaction(); t.disablesAnimations = true
-                withTransaction(t) { scrollPosition = newest.id }
+                withTransaction(t) { scrollPosition = target }
             } else {
                 // Longer films take a little longer, but never drag.
                 let duration = min(0.9 + Double(distance) * 0.06, 2.0)
                 withAnimation(.timingCurve(0.45, 0, 0.2, 1, duration: duration)) {
-                    scrollPosition = newest.id
+                    scrollPosition = target
                 }
             }
             glideTask = nil
@@ -389,11 +509,12 @@ struct HallOfFameView: View {
             }
             return
         }
-        let needsScroll = scrollPosition != nil && scrollPosition != frames.first?.id
+        let target = frames.first?.id ?? endIDs(displaySections(frames, level: .day), level: .day).bottom
+        let needsScroll = scrollPosition != nil && scrollPosition != target
         let needsLevel = level != .day
         withAnimation(Theme.pageTurn) {
             if needsLevel { level = .day }
-            scrollPosition = frames.first?.id
+            scrollPosition = target
             pinchScale = 1
         }
         let wait: Duration = (needsScroll || needsLevel) ? .milliseconds(420) : .milliseconds(0)
@@ -519,9 +640,18 @@ struct HallOfFameView: View {
 
     // MARK: Counter
 
+    /// The counter follows the photo mid-screen, so it stays right when the
+    /// strip is dragged rather than paged.
     private func counterText(frames: [HallOfFameFrame]) -> String? {
         guard level == .photo, isLive || isClosingPhase, !frames.isEmpty else { return nil }
-        let frame = scrollPosition.flatMap { id in frames.first { $0.id == id } } ?? frames[0]
+        let frame = (centerFrameID ?? scrollPosition).flatMap { id in frames.first { $0.id == id } } ?? frames[0]
         return HallOfFameModel.counterText(for: frame, total: frames.count)
     }
+}
+
+/// Hall of Fame only preferences, kept apart from Home's card style so a
+/// film choice here never changes the Home screen.
+enum HallOfFameSettings {
+    static let styleKey = "gymlock.hallOfFame.style"
+    static let scrollHapticsKey = "gymlock.hallOfFame.scrollHaptics"
 }

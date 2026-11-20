@@ -20,14 +20,25 @@ nonisolated enum HallOfFameLevel: Int, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Cells per row. Photo and Day are one tall frame at a time; Week is a
-    /// seven-day block (Mon-Thu over Fri-Sun); Month is a calendar grid.
+    /// Cells per row. Photo and Day are one tall frame at a time; Week is two
+    /// across and Month three across, as on the reference contact sheet. The
+    /// grid holds every day of the period, in calendar order.
     var columns: Int {
         switch self {
         case .photo: 1
         case .day: 1
-        case .week: 4
-        case .month: 7
+        case .week: 2
+        case .month: 3
+        }
+    }
+
+    /// How far back the film reaches even with no history, so there is
+    /// always a strip of dated frames to scroll through.
+    var minimumSpan: (component: Calendar.Component, value: Int) {
+        switch self {
+        case .photo, .day: (.day, 14)
+        case .week: (.weekOfYear, 7)
+        case .month: (.month, 2)
         }
     }
 
@@ -115,6 +126,10 @@ nonisolated struct HallOfFameCell: Identifiable, Hashable, Sendable {
     let frame: HallOfFameFrame?
     /// Every photo taken that day, newest first (for scroll anchoring).
     var dayFrameIDs: [String] = []
+    /// "NOV 5"; nil for an offset slot.
+    var dateText: String? = nil
+    /// "DAY 73" counted from the install day; nil before install or unknown.
+    var dayText: String? = nil
 
     /// An offset slot: takes up a grid position but draws nothing.
     var isPadding: Bool { date == nil }
@@ -201,20 +216,49 @@ nonisolated enum HallOfFameModel {
     /// gap reads as black cells rather than disappearing. Demo frames carry no
     /// dates, so with no real photos those levels show the current week or
     /// month as empty days: real dates, no implied photos.
+    ///
+    /// Day shows one page per photo and one empty, dated page per day without
+    /// one. Photo shows real photos only, and falls back to the empty day
+    /// pages when there are none, so the film is never blank. Every level
+    /// reaches back at least `minimumSpan` and to the install day.
     static func sections(
         _ frames: [HallOfFameFrame],
         level: HallOfFameLevel,
         calendar: Calendar = .current,
-        now: Date = Date()
+        now: Date = Date(),
+        installDate: Date? = nil
     ) -> [HallOfFameSection] {
+        let dated = frames.filter { $0.date != nil }
         switch level {
-        case .photo, .day:
-            guard !frames.isEmpty else { return [] }
-            return singleFrameSections(frames, calendar: calendar)
+        case .photo:
+            if !frames.isEmpty {
+                return singleFrameSections(frames, calendar: calendar)
+            }
+            return daySections([], level: level, calendar: calendar, now: now, installDate: installDate)
+        case .day:
+            // Demo frames carry no dates and keep their own pages.
+            if dated.isEmpty, !frames.isEmpty {
+                return singleFrameSections(frames, calendar: calendar)
+            }
+            return daySections(dated, level: level, calendar: calendar, now: now, installDate: installDate)
         case .week, .month:
-            let dated = frames.filter { $0.date != nil }
-            return gridSections(dated, level: level, calendar: calendar, now: now)
+            return gridSections(dated, level: level, calendar: calendar, now: now, installDate: installDate)
         }
+    }
+
+    /// The first day the film covers for a level.
+    static func rangeStart(
+        oldestPhoto: Date?,
+        level: HallOfFameLevel,
+        calendar: Calendar,
+        now: Date,
+        installDate: Date?
+    ) -> Date {
+        let span = level.minimumSpan
+        var earliest = calendar.date(byAdding: span.component, value: -span.value, to: now) ?? now
+        if let oldestPhoto { earliest = min(earliest, oldestPhoto) }
+        if let installDate { earliest = min(earliest, installDate) }
+        return calendar.startOfDay(for: earliest)
     }
 
     /// Every level is always offered; Week and Month show empty days when
@@ -287,13 +331,94 @@ nonisolated enum HallOfFameModel {
         }
     }
 
+    /// One cell for a calendar day, with its print text resolved.
+    private static func cell(
+        day: Date,
+        frames dayFrames: [HallOfFameFrame],
+        installDay: Date?,
+        calendar: Calendar
+    ) -> HallOfFameCell {
+        let c = calendar.dateComponents([.year, .month, .day], from: day)
+        var dayText: String?
+        if let installDay, day >= installDay {
+            let n = calendar.dateComponents([.day], from: installDay, to: day).day ?? 0
+            dayText = "DAY \(max(n, 0))"
+        }
+        return HallOfFameCell(
+            id: "c-\(pad(c.year, 4))-\(pad(c.month))-\(pad(c.day))",
+            date: day,
+            frame: dayFrames.first,
+            dayFrameIDs: dayFrames.map(\.id),
+            dateText: day.formatted(format(calendar).month(.abbreviated).day()).uppercased(),
+            dayText: dayText
+        )
+    }
+
+    /// One page per photo, and one empty page per day without a photo, from
+    /// the start of the range to today. Newest first. `frames` must carry dates.
+    private static func daySections(
+        _ frames: [HallOfFameFrame],
+        level: HallOfFameLevel,
+        calendar: Calendar,
+        now: Date,
+        installDate: Date?
+    ) -> [HallOfFameSection] {
+        var byDay: [Date: [HallOfFameFrame]] = [:]
+        for frame in frames {
+            guard let date = frame.date else { continue }
+            byDay[calendar.startOfDay(for: date), default: []].append(frame)
+        }
+        let dates = frames.compactMap(\.date)
+        let start = rangeStart(
+            oldestPhoto: dates.min(), level: level, calendar: calendar, now: now, installDate: installDate
+        )
+        let end = calendar.startOfDay(for: max(dates.max() ?? now, now))
+        let installDay = installDate.map { calendar.startOfDay(for: $0) }
+
+        var sections: [HallOfFameSection] = []
+        var used = Set<String>()
+        var day = start
+        var guardCount = 0
+        while day <= end, guardCount < 3_000 {
+            guardCount += 1
+            let dayFrames = byDay[day] ?? []
+            let c = calendar.dateComponents([.year, .month, .day], from: day)
+            let dayID = "d-\(pad(c.year, 4))-\(pad(c.month))-\(pad(c.day))"
+            if dayFrames.isEmpty {
+                used.insert(dayID)
+                sections.append(HallOfFameSection(
+                    id: dayID,
+                    title: nil,
+                    countText: nil,
+                    frames: [],
+                    cells: [cell(day: day, frames: [], installDay: installDay, calendar: calendar)]
+                ))
+            } else {
+                // Frames arrive newest first; pages within a day go oldest first
+                // here and the whole list is reversed at the end.
+                for frame in dayFrames.reversed() {
+                    var id = dayID
+                    if !used.insert(id).inserted {
+                        id += "-\(frame.id)"
+                        used.insert(id)
+                    }
+                    sections.append(HallOfFameSection(id: id, title: nil, countText: nil, frames: [frame]))
+                }
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = calendar.startOfDay(for: next)
+        }
+        return sections.reversed()
+    }
+
     /// Week or month sections over a continuous range of periods, each with
     /// one cell per day. `frames` must all carry dates.
     private static func gridSections(
         _ frames: [HallOfFameFrame],
         level: HallOfFameLevel,
         calendar: Calendar,
-        now: Date
+        now: Date,
+        installDate: Date? = nil
     ) -> [HallOfFameSection] {
         let component: Calendar.Component = level == .week ? .weekOfYear : .month
 
@@ -306,7 +431,10 @@ nonisolated enum HallOfFameModel {
 
         let dates = frames.compactMap(\.date)
         let latest = max(dates.max() ?? now, now)
-        let earliest = dates.min() ?? now
+        let earliest = rangeStart(
+            oldestPhoto: dates.min(), level: level, calendar: calendar, now: now, installDate: installDate
+        )
+        let installDay = installDate.map { calendar.startOfDay(for: $0) }
         guard let first = calendar.dateInterval(of: component, for: earliest),
               let last = calendar.dateInterval(of: component, for: latest)
         else { return [] }
@@ -332,25 +460,11 @@ nonisolated enum HallOfFameModel {
             }
 
             var cells: [HallOfFameCell] = []
-            if level == .month {
-                // Offset so the 1st sits under its weekday column.
-                let weekday = calendar.component(.weekday, from: interval.start)
-                let lead = (weekday - calendar.firstWeekday + 7) % 7
-                for i in 0..<lead {
-                    cells.append(HallOfFameCell(id: "p-\(id)-\(i)", date: nil, frame: nil))
-                }
-            }
             var periodFrames: [HallOfFameFrame] = []
             var day = interval.start
             while day < interval.end {
                 let dayFrames = byDay[day] ?? []
-                let c = calendar.dateComponents([.year, .month, .day], from: day)
-                cells.append(HallOfFameCell(
-                    id: "c-\(pad(c.year, 4))-\(pad(c.month))-\(pad(c.day))",
-                    date: day,
-                    frame: dayFrames.first,
-                    dayFrameIDs: dayFrames.map(\.id)
-                ))
+                cells.append(cell(day: day, frames: dayFrames, installDay: installDay, calendar: calendar))
                 periodFrames.append(contentsOf: dayFrames.reversed())
                 guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
                 day = calendar.startOfDay(for: next)

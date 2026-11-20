@@ -99,12 +99,19 @@ struct FilmStripView: View {
         .onScrollGeometryChange(for: CGFloat.self) { $0.visibleRect.midY } action: { _, mid in
             centerMoved(to: mid, lay)
         }
+        .onScrollGeometryChange(for: FilmScrollSample.self) { geo in
+            FilmScrollSample(geo, pitch: sprocketPitch)
+        } action: { _, sample in
+            filmMoved(sample)
+        }
         .onScrollPhaseChange { _, phase in
             if phase == .interacting { onUserInteract() }
         }
         .onChange(of: level) { _, _ in
             // A new layout: re-read the centre without ticking for the jump.
             ticker.index = nil
+            ticker.notch = nil
+            ticker.quietUntil = CACurrentMediaTime() + 0.35
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { viewport = $0 }
         .overlay {
@@ -202,10 +209,43 @@ struct FilmStripView: View {
         if let id = item.centerFrameID { onCenterFrame(id) }
         guard hadIndex, hapticsEnabled, y > 0, y < lay.itemsHeight else { return }
         let now = CACurrentMediaTime()
-        if now - ticker.lastTick >= 0.045 {
+        guard now >= ticker.quietUntil else { return }
+        if now - ticker.lastDetent >= 0.045 {
+            ticker.lastDetent = now
             ticker.lastTick = now
             HallOfFameHaptics.detent()
         }
+    }
+
+    private var sprocketPitch: CGFloat {
+        style == .matrix ? HallOfFameStyle.sprocketPitch.matrix : HallOfFameStyle.sprocketPitch.ridge
+    }
+
+    /// The film ratchet: a faint tick for every sprocket hole that passes,
+    /// and one bump when the strip is pulled past either end. A frame detent
+    /// always wins over a ratchet tick that would land on top of it.
+    private func filmMoved(_ sample: FilmScrollSample) {
+        let previous = ticker.notch
+        let previousEdge = ticker.edge
+        ticker.notch = sample.notch
+        ticker.edge = sample.edge
+        guard hapticsEnabled, previous != nil else { return }
+        let now = CACurrentMediaTime()
+        guard now >= ticker.quietUntil else { return }
+
+        if sample.edge != 0 {
+            if previousEdge == 0 {
+                ticker.lastTick = now
+                HallOfFameHaptics.edge()
+            }
+            return
+        }
+        guard sample.notch != previous,
+              now - ticker.lastTick >= 0.032,
+              now - ticker.lastDetent >= 0.06
+        else { return }
+        ticker.lastTick = now
+        HallOfFameHaptics.ratchet()
     }
 
     private func scaleAnchor(total: CGFloat) -> UnitPoint {
@@ -220,13 +260,25 @@ struct FilmStripView: View {
         switch item.kind {
         case .page(let frame):
             VStack(spacing: 0) {
-                PrintRow(frame: frame, style: style)
+                PrintRow(dateText: frame.dateText, markerText: frame.markerText,
+                         isLatest: frame.marker == .latest, dayText: frame.dayText, style: style)
                     .frame(height: 34)
                 FilmFrameView(frame: frame, level: level, width: lay.frameWidth, height: lay.frameHeight,
                               showsCornerMarker: false, onTap: onTapFrame)
             }
             .padding(.horizontal, sprocketWidth)
             .frame(width: stripWidth, height: item.height, alignment: .top)
+        case .emptyPage(let cell):
+            VStack(spacing: 0) {
+                PrintRow(dateText: cell.dateText, markerText: nil, isLatest: false,
+                         dayText: cell.dayText, style: style)
+                    .frame(height: 34)
+                EmptyDayCell(width: lay.frameWidth, height: lay.frameHeight)
+            }
+            .padding(.horizontal, sprocketWidth)
+            .frame(width: stripWidth, height: item.height, alignment: .top)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(emptyLabel(cell)))
         case .row(let cells, let header):
             VStack(alignment: .leading, spacing: 0) {
                 if let header {
@@ -250,6 +302,11 @@ struct FilmStripView: View {
             .padding(.horizontal, sprocketWidth)
             .frame(width: stripWidth, height: item.height, alignment: .topLeading)
         }
+    }
+
+    private func emptyLabel(_ cell: HallOfFameCell) -> String {
+        guard let date = cell.date else { return "" }
+        return date.formatted(.dateTime.month(.wide).day()) + ", no photo"
     }
 
     // MARK: End of the strip
@@ -280,6 +337,8 @@ struct FilmStripView: View {
 private struct StripLayout {
     enum Kind {
         case page(HallOfFameFrame)
+        /// A day with no photo at Photo or Day level: dated print over black.
+        case emptyPage(HallOfFameCell)
         case row(cells: [HallOfFameCell], header: HallOfFameSection?)
     }
 
@@ -295,12 +354,20 @@ private struct StripLayout {
             switch kind {
             case .page(let frame):
                 return frame.id
+            case .emptyPage(let cell):
+                return cell.id
             case .row(let cells, _):
                 let mid = Double(cells.count - 1) / 2
-                return cells.enumerated()
-                    .filter { $0.element.frame != nil }
-                    .min { abs(Double($0.offset) - mid) < abs(Double($1.offset) - mid) }?
-                    .element.frame?.id
+                func nearest(_ keep: (HallOfFameCell) -> Bool) -> HallOfFameCell? {
+                    cells.enumerated()
+                        .filter { keep($0.element) }
+                        .min { abs(Double($0.offset) - mid) < abs(Double($1.offset) - mid) }?
+                        .element
+                }
+                // A photo if the row has one; otherwise the day itself, so
+                // an empty stretch still keeps its place across levels.
+                if let id = nearest({ $0.frame != nil })?.frame?.id { return id }
+                return nearest { !$0.isPadding }?.id
             }
         }
     }
@@ -311,7 +378,8 @@ private struct StripLayout {
     let frameWidth: CGFloat
     let frameHeight: CGFloat
     let gap: CGFloat
-    /// Frame id -> id of the scroll target that contains it (week and month rows).
+    /// Frame or cell id -> id of the scroll target that contains it (week and
+    /// month rows).
     let rowLead: [String: String]
 
     var total: CGFloat { topPad + itemsHeight + 80 }
@@ -341,6 +409,11 @@ private struct StripLayout {
         case .photo, .day:
             let height = level == .photo ? pageHeight : 34 + fh + 12
             for section in sections {
+                if section.frames.isEmpty, let cell = section.cells.first {
+                    built.append(Item(id: cell.id, y: y, height: height, kind: .emptyPage(cell)))
+                    y += height
+                    continue
+                }
                 for frame in section.frames {
                     built.append(Item(id: frame.id, y: y, height: height, kind: .page(frame)))
                     y += height
@@ -363,6 +436,7 @@ private struct StripLayout {
                     // including second photos a day cell does not show.
                     for cell in slice {
                         for fid in cell.dayFrameIDs { lead[fid] = id }
+                        if !cell.isPadding { lead[cell.id] = id }
                     }
                     built.append(Item(id: id, y: y, height: height,
                                       kind: .row(cells: slice, header: (isFirst && hasHeader) ? section : nil)))
@@ -407,7 +481,30 @@ private final class ScrollOffsetBox {
 private final class CenterTicker {
     var index: Int?
     var itemID: String?
+    /// Last haptic of any kind, and last frame detent.
     var lastTick: CFTimeInterval = 0
+    var lastDetent: CFTimeInterval = 0
+    /// Sprocket hole currently at the top of the viewport.
+    var notch: Int?
+    /// -1 pulled past the top, 1 past the bottom, 0 inside.
+    var edge = 0
+    /// No scroll haptics until then (a level change jumps the offset).
+    var quietUntil: CFTimeInterval = 0
+}
+
+/// What the ratchet needs from each scroll update. Equatable on whole notches
+/// so the action runs once per sprocket hole, not once per frame.
+private struct FilmScrollSample: Equatable {
+    let notch: Int
+    let edge: Int
+
+    init(_ geo: ScrollGeometry, pitch: CGFloat) {
+        let y = geo.contentOffset.y
+        notch = Int((y / max(pitch, 1)).rounded(.down))
+        let minY = -geo.contentInsets.top
+        let maxY = max(minY, geo.contentSize.height + geo.contentInsets.bottom - geo.containerSize.height)
+        edge = y < minY - 1 ? -1 : (y > maxY + 1 ? 1 : 0)
+    }
 }
 
 /// A day with no photo in the Week or Month grid: just black.
@@ -697,20 +794,23 @@ private struct FilmPill: View {
 
 /// Edge print above each frame at Photo and Day level: date, marker, day number.
 private struct PrintRow: View {
-    let frame: HallOfFameFrame
+    let dateText: String?
+    let markerText: String?
+    let isLatest: Bool
+    let dayText: String?
     let style: HeroCardStyle
 
     var body: some View {
         HStack(spacing: 0) {
             Group {
-                if let t = frame.dateText { PrintText(text: t, style: style) } else { Color.clear }
+                if let t = dateText { PrintText(text: t, style: style) } else { Color.clear }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if let m = frame.markerText {
-                FilmPill(text: m, isLatest: frame.marker == .latest, compact: false)
+            if let m = markerText {
+                FilmPill(text: m, isLatest: isLatest, compact: false)
             }
             Group {
-                if let t = frame.dayText { PrintText(text: t, style: style) } else { Color.clear }
+                if let t = dayText { PrintText(text: t, style: style) } else { Color.clear }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }

@@ -13,17 +13,34 @@ enum HallOfFameHaptics {
         Haptics.prepareSelection()
         Haptics.preparePress()
         detentGenerator.prepare()
+        ratchetGenerator.prepare()
+        edgeGenerator.prepare()
     }
 
-    /// Kept alive and pre-warmed: detents fire in quick runs while scrolling,
+    /// Kept alive and pre-warmed: these fire in quick runs while scrolling,
     /// and a cold generator lags behind the finger.
     @MainActor private static let detentGenerator = UIImpactFeedbackGenerator(style: .rigid)
+    @MainActor private static let ratchetGenerator = UIImpactFeedbackGenerator(style: .rigid)
+    @MainActor private static let edgeGenerator = UIImpactFeedbackGenerator(style: .heavy)
 
     /// A frame (or grid row) crossing the middle of the screen while the strip
-    /// scrolls: a short, tight click like a detent wheel. The strip rate-limits it.
+    /// scrolls: a firm click, the notch of a detent wheel. The strip rate-limits it.
     @MainActor static func detent() {
-        detentGenerator.impactOccurred(intensity: 0.6)
+        detentGenerator.impactOccurred(intensity: 0.78)
         detentGenerator.prepare()
+    }
+
+    /// One sprocket hole passing while the film moves: a faint, fast tick, so
+    /// scrolling feels like film running through a gate rather than glass.
+    @MainActor static func ratchet() {
+        ratchetGenerator.impactOccurred(intensity: 0.32)
+        ratchetGenerator.prepare()
+    }
+
+    /// The film hitting either end and rubber-banding: one dull bump.
+    @MainActor static func edge() {
+        edgeGenerator.impactOccurred(intensity: 0.7)
+        edgeGenerator.prepare()
     }
 
     /// Tap on the card that opens the screen.

@@ -59,19 +59,53 @@ struct HallOfFameModelTests {
         #expect(HallOfFameModel.availableLevels(isDemo: false) == HallOfFameLevel.allCases)
     }
 
-    @Test func demoWeekAndMonthShowTheCurrentPeriodAsEmptyDays() {
+    @Test func demoWeekAndMonthShowAMinimumSpanOfEmptyDays() {
         let result = frames([], install: date(2026, 11, 1))
         let now = date(2026, 11, 18)
         let week = HallOfFameModel.sections(result, level: .week, calendar: calendar, now: now)
-        #expect(week.map(\.id) == ["w-2026-47"])
-        #expect(week[0].cells.count == 7)
-        #expect(week[0].cells.allSatisfy { $0.frame == nil && !$0.isPadding })
-        #expect(week[0].frames.isEmpty)
-        #expect(week[0].countText == "0 PHOTOS")
+        #expect(week.count == 8)
+        #expect(week.first?.id == "w-2026-47")
+        #expect(week.last?.id == "w-2026-40")
+        #expect(week.allSatisfy { $0.cells.count == 7 && $0.frames.isEmpty && $0.countText == "0 PHOTOS" })
+        #expect(week.allSatisfy { $0.cells.allSatisfy { $0.frame == nil && !$0.isPadding } })
 
         let month = HallOfFameModel.sections(result, level: .month, calendar: calendar, now: now)
-        #expect(month.map(\.id) == ["m-2026-11"])
-        #expect(month[0].cells.allSatisfy { $0.frame == nil })
+        #expect(month.map(\.id) == ["m-2026-11", "m-2026-10", "m-2026-09"])
+        #expect(month.allSatisfy { $0.cells.allSatisfy { $0.frame == nil } })
+    }
+
+    @Test func noPhotosStillGivesADatedFilmAtEveryLevel() {
+        let now = date(2026, 11, 18)
+        let install = date(2026, 11, 1)
+        for level in [HallOfFameLevel.photo, .day] {
+            let pages = HallOfFameModel.sections([], level: level, calendar: calendar, now: now, installDate: install)
+            // Nov 4 (14 days back) to Nov 18, newest first, one empty page each.
+            #expect(pages.count == 15)
+            #expect(pages.first?.id == "d-2026-11-18")
+            #expect(pages.last?.id == "d-2026-11-04")
+            #expect(pages.allSatisfy { $0.frames.isEmpty && $0.cells.count == 1 })
+            #expect(pages.first?.cells.first?.id == "c-2026-11-18")
+            #expect(pages.first?.cells.first?.dayText == "DAY 17")
+        }
+    }
+
+    @Test func dayLevelReachesBackToInstallAndHidesDayNumbersBeforeIt() {
+        let now = date(2026, 11, 18)
+        let install = date(2026, 10, 1)
+        let pages = HallOfFameModel.sections([], level: .day, calendar: calendar, now: now, installDate: install)
+        #expect(pages.last?.id == "d-2026-10-01")
+        #expect(pages.last?.cells.first?.dayText == "DAY 0")
+
+        let late = HallOfFameModel.sections([], level: .day, calendar: calendar, now: now, installDate: date(2026, 11, 10))
+        #expect(late.last?.id == "d-2026-11-04")
+        #expect(late.last?.cells.first?.dayText == nil)
+    }
+
+    @Test func dayLevelInterleavesPhotosWithEmptyDays() {
+        let all = frames([photo(date(2026, 11, 15)), photo(date(2026, 11, 17))], install: date(2026, 11, 1))
+        let pages = HallOfFameModel.sections(all, level: .day, calendar: calendar, now: date(2026, 11, 18))
+        #expect(pages.prefix(4).map(\.id) == ["d-2026-11-18", "d-2026-11-17", "d-2026-11-16", "d-2026-11-15"])
+        #expect(pages.prefix(4).map { $0.frames.count } == [0, 1, 0, 1])
     }
 
     // MARK: Day numbers
@@ -148,7 +182,9 @@ struct HallOfFameModelTests {
             [photo(date(2026, 11, 2)), photo(date(2026, 11, 4)), photo(date(2026, 11, 18))],
             install: date(2026, 11, 1)
         )
-        let sections = HallOfFameModel.sections(all, level: .week, calendar: calendar, now: date(2026, 11, 18))
+        let sections = Array(
+            HallOfFameModel.sections(all, level: .week, calendar: calendar, now: date(2026, 11, 18)).prefix(3)
+        )
         #expect(sections.count == 3)
         #expect(sections.map { $0.frames.count } == [1, 0, 2])
         #expect(sections.map(\.countText) == ["1 PHOTO", "0 PHOTOS", "2 PHOTOS"])
@@ -164,7 +200,9 @@ struct HallOfFameModelTests {
     @Test func weekRangeRunsToTheCurrentWeek() {
         let all = frames([photo(date(2026, 11, 2))], install: date(2026, 11, 1))
         let sections = HallOfFameModel.sections(all, level: .week, calendar: calendar, now: date(2026, 11, 18))
-        #expect(sections.map(\.id) == ["w-2026-47", "w-2026-46", "w-2026-45"])
+        #expect(sections.prefix(3).map(\.id) == ["w-2026-47", "w-2026-46", "w-2026-45"])
+        // A minimum of eight weeks, so a new film is never a single row.
+        #expect(sections.count == 8)
     }
 
     @Test func dayCellShowsTheNewestPhotoOfThatDay() {
@@ -178,13 +216,13 @@ struct HallOfFameModelTests {
         #expect(sections[0].frames.map(\.id) == [evening.id.uuidString, morning.id.uuidString])
     }
 
-    @Test func monthGridStartsTheFirstUnderItsWeekday() {
-        // Nov 1 2026 is a Sunday: six offset slots in a Monday-first grid.
+    @Test func monthGridHoldsEveryDayFromTheFirstWithoutPadding() {
         let all = frames([photo(date(2026, 11, 2))], install: date(2026, 11, 1))
         let month = HallOfFameModel.sections(all, level: .month, calendar: calendar, now: date(2026, 11, 2))[0]
-        #expect(month.cells.prefix(6).allSatisfy(\.isPadding))
-        #expect(month.cells[6].id == "c-2026-11-01")
-        #expect(month.cells.filter { !$0.isPadding }.count == 30)
+        #expect(month.cells.count == 30)
+        #expect(month.cells.first?.id == "c-2026-11-01")
+        #expect(!month.cells.contains(where: \.isPadding))
+        #expect(month.cells[1].frame != nil)
     }
 
     @Test(.enabled(if: HallOfFameModelTests.isEnglish))
@@ -195,7 +233,7 @@ struct HallOfFameModelTests {
         )
         let titles = HallOfFameModel.sections(all, level: .week, calendar: calendar, now: date(2026, 11, 18))
             .compactMap(\.title)
-        #expect(titles == ["NOV 16 - 22", "NOV 9 - 15", "NOV 2 - 8", "OCT 26 - NOV 1"])
+        #expect(Array(titles.prefix(4)) == ["NOV 16 - 22", "NOV 9 - 15", "NOV 2 - 8", "OCT 26 - NOV 1"])
         #expect(titles.allSatisfy { !$0.contains("\u{2013}") && !$0.contains("\u{2014}") })
     }
 
@@ -204,7 +242,7 @@ struct HallOfFameModelTests {
         let all = frames([photo(date(2025, 12, 31)), photo(date(2026, 1, 2))], install: date(2025, 12, 1))
         let titles = HallOfFameModel.sections(all, level: .week, calendar: calendar, now: date(2026, 1, 2))
             .compactMap(\.title)
-        #expect(titles == ["DEC 29, 2025 - JAN 4, 2026"])
+        #expect(titles.first == "DEC 29, 2025 - JAN 4, 2026")
     }
 
     @Test(.enabled(if: HallOfFameModelTests.isEnglish))
@@ -214,9 +252,9 @@ struct HallOfFameModelTests {
             install: date(2026, 10, 1)
         )
         let sections = HallOfFameModel.sections(all, level: .month, calendar: calendar, now: date(2026, 11, 20))
-        #expect(sections.map(\.title) == ["NOVEMBER 2026", "OCTOBER 2026"])
-        #expect(sections.map(\.countText) == ["2 PHOTOS", "1 PHOTO"])
-        #expect(sections.map(\.id) == ["m-2026-11", "m-2026-10"])
+        #expect(sections.map(\.title) == ["NOVEMBER 2026", "OCTOBER 2026", "SEPTEMBER 2026"])
+        #expect(sections.map(\.countText) == ["2 PHOTOS", "1 PHOTO", "0 PHOTOS"])
+        #expect(sections.map(\.id) == ["m-2026-11", "m-2026-10", "m-2026-09"])
     }
 
     @Test func monthGroupingKeepsEmptyMonths() {
@@ -229,16 +267,18 @@ struct HallOfFameModelTests {
         #expect(sections.map(\.countText) == ["1 PHOTO", "0 PHOTOS", "0 PHOTOS", "1 PHOTO"])
     }
 
-    @Test func dayAndPhotoLevelsAreOneFramePerSectionWithoutHeaders() {
+    @Test func photoLevelIsOnlyRealPhotosWithoutHeaders() {
         let all = frames(
             [photo(date(2026, 11, 2)), photo(date(2026, 11, 4))],
             install: date(2026, 11, 1)
         )
-        for level in [HallOfFameLevel.photo, .day] {
-            let sections = HallOfFameModel.sections(all, level: level, calendar: calendar)
-            #expect(sections.map(\.id) == ["d-2026-11-04", "d-2026-11-02"])
-            #expect(sections.allSatisfy { $0.title == nil && $0.countText == nil && $0.frames.count == 1 })
-        }
+        let sections = HallOfFameModel.sections(all, level: .photo, calendar: calendar, now: date(2026, 11, 18))
+        #expect(sections.map(\.id) == ["d-2026-11-04", "d-2026-11-02"])
+        #expect(sections.allSatisfy { $0.title == nil && $0.countText == nil && $0.frames.count == 1 })
+
+        let days = HallOfFameModel.sections(all, level: .day, calendar: calendar, now: date(2026, 11, 4))
+        #expect(days.allSatisfy { $0.title == nil && $0.countText == nil })
+        #expect(days.filter { !$0.frames.isEmpty }.map(\.id) == ["d-2026-11-04", "d-2026-11-02"])
     }
 
     // MARK: Counter and levels
@@ -257,7 +297,7 @@ struct HallOfFameModelTests {
         #expect(HallOfFameLevel.day.finer == .photo)
         #expect(HallOfFameLevel.month.coarser == nil)
         #expect(HallOfFameLevel.week.coarser == .month)
-        #expect(HallOfFameLevel.allCases.map(\.columns) == [1, 1, 4, 7])
+        #expect(HallOfFameLevel.allCases.map(\.columns) == [1, 1, 2, 3])
         #expect(HallOfFameLevel.allCases.map(\.title) == ["Photo", "Day", "Week", "Month"])
     }
 }
