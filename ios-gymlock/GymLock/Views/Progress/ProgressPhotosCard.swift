@@ -37,6 +37,11 @@ struct ProgressPhotosCard: View {
     /// When the Hall of Fame was last asked for, so a tap that reaches both
     /// the stack and the card behind it opens it once.
     @State private var lastHallOfFameOpen: Date = .distantPast
+    /// A finger resting on the card: it sinks a little, like a button.
+    @State private var isPressed = false
+    /// The Add Photo button, in the card's space, so pressing it does not
+    /// push the whole card in.
+    @State private var addButtonFrame: CGRect = .null
 
     // MARK: Progress reveal (presentation only, never persisted)
 
@@ -121,6 +126,13 @@ struct ProgressPhotosCard: View {
         // their own behaviour.
         .contentShape(.rect(cornerRadius: ProgressCardMetrics.cornerRadius))
         .onTapGesture { openHallOfFame() }
+        .coordinateSpace(.named(Self.cardSpace))
+        .gesture(CardPressTracker(excluded: addButtonFrame) { pressed in
+            guard onOpenHallOfFame != nil else { return }
+            if pressed { Haptics.press(intensity: 0.4) }
+            withAnimation(pressAnimation(pressed)) { isPressed = pressed }
+        })
+        .scaleEffect(isPressed ? 0.97 : 1)
         .shadow(color: .black.opacity(0.045), radius: 10, y: 4)
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.width - ProgressCardMetrics.padding * 2
@@ -209,6 +221,16 @@ struct ProgressPhotosCard: View {
         .accessibilityAddTraits(.isHeader)
     }
 
+    private static let cardSpace = "progressPhotosCard"
+
+    /// In quickly, out with a little spring, as the page opens over it.
+    private func pressAnimation(_ pressed: Bool) -> Animation {
+        if reduceMotion { return .easeOut(duration: 0.12) }
+        return pressed
+            ? .spring(response: 0.22, dampingFraction: 0.9)
+            : .spring(response: 0.4, dampingFraction: 0.62)
+    }
+
     /// One open per tap, whichever layer heard it first.
     private func openHallOfFame() {
         guard let onOpenHallOfFame else { return }
@@ -281,6 +303,9 @@ struct ProgressPhotosCard: View {
             isBusy: store.isImporting,
             hasCamera: ProgressPhotoCameraAvailability.hasCamera
         )
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.cardSpace)) } action: {
+            addButtonFrame = $0
+        }
     }
 
     // MARK: Focus

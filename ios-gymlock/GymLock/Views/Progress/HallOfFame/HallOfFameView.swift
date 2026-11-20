@@ -5,6 +5,9 @@ import SwiftUI
 /// level capsule. The Progress tab presents it with the system animation off.
 struct HallOfFameView: View {
     let store: ProgressPhotoStore
+    /// The Progress Photos card in global coordinates: the page zooms back
+    /// into it on close.
+    var sourceFrame: CGRect = .zero
     /// Called after the close animation ends.
     let onClose: () -> Void
     @AppStorage(HeroCardStyle.storageKey) private var styleRaw = HeroCardStyle.default.rawValue
@@ -42,6 +45,13 @@ struct HallOfFameView: View {
     /// Opening: hold on the oldest photo, then glide to the newest.
     @State private var glideTask: Task<Void, Never>?
     @State private var glideScheduled = false
+    /// Drag to close: finger travel, film overscroll, and the zoom into the card.
+    @State private var dismissDrag: CGSize = .zero
+    @State private var pull: CGFloat = 0
+    @State private var exitProgress: CGFloat = 0
+    @State private var exitFrom: (drag: CGSize, pull: CGFloat)?
+    @State private var isFilmTouching = false
+    @State private var pastDismissThreshold = false
     @Namespace private var pillSpace
 
     private let allEvents: ReelEvents = [.reelLanded, .titleComplete, .revolution1, .revolution2, .revolution3, .stripSeated]
@@ -78,6 +88,14 @@ struct HallOfFameView: View {
                     }
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .modifier(HallOfFamePageZoom(
+                    size: geo.size,
+                    drag: exitFrom?.drag ?? dismissDrag,
+                    pull: exitFrom?.pull ?? pull,
+                    exit: exitProgress,
+                    target: sourceFrame,
+                    cornerRadius: ProgressCardMetrics.cornerRadius
+                ))
                 .opacity(configured ? fade : 0)
             }
             .ignoresSafeArea()
@@ -128,7 +146,12 @@ struct HallOfFameView: View {
                 introLeader: max(introBox - size.height, 0),
                 hapticsEnabled: scrollHaptics && isLive && !isClosing && !isCommitting,
                 onCenterFrame: { centerFrameID = $0 },
-                onUserInteract: { cancelGlide() }
+                onUserInteract: {
+                    cancelGlide()
+                    isFilmTouching = true
+                },
+                onPull: { filmPulled($0, size: size) },
+                onInteractionEnd: { filmReleased() }
             )
             // While the film lies on the floor the box is taller than the
             // screen (src HBOX) and only the laid length below the strip top
@@ -180,6 +203,18 @@ struct HallOfFameView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { skipIntro() }
                     .frame(width: size.width, height: size.height)
+            }
+
+            // Drag to close: from the title area, or from the left edge.
+            if isLive, !isClosing {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .frame(width: size.width, height: layout.stripTop)
+                    .gesture(dismissGesture(size: size))
+                Color.clear
+                    .contentShape(Rectangle())
+                    .frame(width: 22, height: size.height)
+                    .gesture(dismissGesture(size: size))
             }
 
             GlassCircleButton(symbol: "xmark", label: "Close") { close(frames: frames) }
@@ -509,6 +544,8 @@ struct HallOfFameView: View {
             }
             return
         }
+        // The film collapses back to the newest day, and while it settles the
+        // page starts zooming into the card, so the two read as one motion.
         let target = frames.first?.id ?? endIDs(displaySections(frames, level: .day), level: .day).bottom
         let needsScroll = scrollPosition != nil && scrollPosition != target
         let needsLevel = level != .day
@@ -517,11 +554,91 @@ struct HallOfFameView: View {
             scrollPosition = target
             pinchScale = 1
         }
-        let wait: Duration = (needsScroll || needsLevel) ? .milliseconds(420) : .milliseconds(0)
+        let wait: Duration = (needsScroll || needsLevel) ? .milliseconds(300) : .zero
         Task { @MainActor in
             try? await Task.sleep(for: wait)
-            phase = .closing(start: Date())
+            zoomOut()
         }
+    }
+
+    /// Zooms the page, from wherever the finger left it, into the card.
+    private func zoomOut() {
+        exitFrom = (dismissDrag, pull)
+        withAnimation(.spring(duration: 0.44, bounce: 0)) {
+            exitProgress = 1
+        } completion: {
+            finishClose()
+        }
+    }
+
+    private func finishClose() {
+        guard !didClose else { return }
+        didClose = true
+        onClose()
+    }
+
+    // MARK: Drag to close
+
+    private func dismissGesture(size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .global)
+            .onChanged { value in
+                guard isLive, !isClosing, !pinchActive else { return }
+                if dismissDrag == .zero {
+                    cancelGlide()
+                    Haptics.prepareSelection()
+                }
+                let t = value.translation
+                // Upwards is resisted: the page only really leaves downwards or right.
+                dismissDrag = CGSize(width: t.width, height: t.height > 0 ? t.height : t.height * 0.15)
+                updateDismissThreshold(size: size)
+            }
+            .onEnded { value in
+                guard isLive, !isClosing, dismissDrag != .zero else { return }
+                let p = HallOfFamePageZoom.progress(drag: dismissDrag, pull: 0, size: size)
+                let predicted = value.predictedEndTranslation
+                if p > 0.22 || predicted.height > size.height * 0.4 || predicted.width > size.width * 0.55 {
+                    closeFromDrag()
+                } else {
+                    pastDismissThreshold = false
+                    withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) { dismissDrag = .zero }
+                }
+            }
+    }
+
+    /// A light tick when the page crosses the point where letting go closes it.
+    private func updateDismissThreshold(size: CGSize) {
+        let p = HallOfFamePageZoom.progress(drag: dismissDrag, pull: pull, size: size)
+        let past = p > 0.22 || pull > 80
+        if past != pastDismissThreshold {
+            pastDismissThreshold = past
+            Haptics.selection()
+        }
+    }
+
+    /// Pulling the film down past its top shrinks the page like a drag.
+    private func filmPulled(_ value: CGFloat, size: CGSize) {
+        guard !isClosing else { return }
+        guard isLive else { pull = 0; return }
+        pull = value
+        if isFilmTouching { updateDismissThreshold(size: size) }
+    }
+
+    private func filmReleased() {
+        isFilmTouching = false
+        guard isLive, !isClosing else { return }
+        if pull > 80 {
+            closeFromDrag()
+        } else {
+            pastDismissThreshold = false
+        }
+    }
+
+    private func closeFromDrag() {
+        guard isLive, !isClosing else { return }
+        cancelGlide()
+        isClosing = true
+        HallOfFameHaptics.close()
+        zoomOut()
     }
 
     // MARK: Levels

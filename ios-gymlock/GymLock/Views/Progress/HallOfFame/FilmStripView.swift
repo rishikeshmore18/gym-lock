@@ -43,6 +43,10 @@ struct FilmStripView: View {
     var onCenterFrame: (String) -> Void = { _ in }
     /// A finger started scrolling the strip.
     var onUserInteract: () -> Void = {}
+    /// How far the film is pulled down past its top (0 when not overscrolled).
+    var onPull: (CGFloat) -> Void = { _ in }
+    /// The finger left the strip after scrolling it.
+    var onInteractionEnd: () -> Void = {}
 
     @State private var viewport = CGSize(width: 393, height: 852)
     @State private var offsetBox = ScrollOffsetBox()
@@ -104,8 +108,14 @@ struct FilmStripView: View {
         } action: { _, sample in
             filmMoved(sample)
         }
-        .onScrollPhaseChange { _, phase in
+        .onScrollGeometryChange(for: CGFloat.self) { geo in
+            max(0, -(geo.contentOffset.y + geo.contentInsets.top))
+        } action: { _, pull in
+            onPull(pull)
+        }
+        .onScrollPhaseChange { old, phase in
             if phase == .interacting { onUserInteract() }
+            if old == .interacting, phase != .interacting { onInteractionEnd() }
         }
         .onChange(of: level) { _, _ in
             // A new layout: re-read the centre without ticking for the jump.

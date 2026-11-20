@@ -34,6 +34,8 @@ struct ProgressTabView: View {
     @State private var badges = BadgeStore.shared
     @State private var isShowingBadges = false
     @State private var isShowingHallOfFame = false
+    /// Where the Hall of Fame zooms back to on close.
+    @State private var photosCardFrame: CGRect = .zero
 
     /// The zoom between the two levels of the chart.
     ///
@@ -82,11 +84,14 @@ struct ProgressTabView: View {
             BadgesScreen(badges: badges)
         }
         .fullScreenCover(isPresented: $isShowingHallOfFame) {
-            HallOfFameView(store: photos) {
+            HallOfFameView(store: photos, sourceFrame: photosCardFrame) {
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { isShowingHallOfFame = false }
             }
+            // Clear, so the Progress page shows behind a page being dragged
+            // or zoomed back into its card.
+            .presentationBackground(.clear)
         }
         // The Day 0 photograph the user took during onboarding is their real
         // before-picture; the stack starts from it rather than asking for the
@@ -146,6 +151,9 @@ struct ProgressTabView: View {
                         withTransaction(transaction) { isShowingHallOfFame = true }
                     }
                 )
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                    photosCardFrame = $0
+                }
                 // A small lift once lit. Black and faint: depth, not glow.
                 .shadow(
                     color: .black.opacity(spotlight.phase == .focused ? 0.09 : 0),
