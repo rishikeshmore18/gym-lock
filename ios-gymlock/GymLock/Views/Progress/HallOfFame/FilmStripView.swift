@@ -37,18 +37,28 @@ struct FilmStripView: View {
     /// floor (the intro stage is taller than the screen). Keeps the scroll
     /// offset identical before and after the strip goes live.
     var introLeader: CGFloat = 0
+    /// Tick once each time a frame (or grid row) crosses the middle of the screen.
+    var hapticsEnabled: Bool = false
+    /// The photo nearest the middle of the screen, reported as it changes.
+    var onCenterFrame: (String) -> Void = { _ in }
+    /// A finger started scrolling the strip.
+    var onUserInteract: () -> Void = {}
 
     @State private var viewport = CGSize(width: 393, height: 852)
     @State private var offsetBox = ScrollOffsetBox()
+    @State private var ticker = CenterTicker()
 
     private let leaderHeight: CGFloat = 80
     private let sprocketWidth: CGFloat = 26
 
     private var isDemo: Bool {
-        guard let first = sections.first?.frames.first else { return false }
+        guard let first = sections.lazy.compactMap(\.frames.first).first else { return true }
         if case .demo = first.content { return true }
         return false
     }
+
+    /// Height of the start art above the leader (see `endArt`).
+    private var endArtHeight: CGFloat { style == .ridge ? 190 - 34 : 150 }
 
     private var layout: StripLayout {
         StripLayout(
@@ -76,15 +86,25 @@ struct FilmStripView: View {
         }
         .contentMargins(.top, topInset, for: .scrollContent)
         .contentMargins(.bottom, bottomInset, for: .scrollContent)
-        // Opens on the newest photo.
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .scrollPosition(id: $scrollPosition, anchor: .top)
+        // Photo pages align to the top margin (like the paging snap); every
+        // other level keeps the chosen frame in the middle of the screen.
+        .scrollPosition(id: $scrollPosition, anchor: level == .photo ? .top : .center)
         .scrollTargetBehavior(FilmSnapBehavior(isPaging: level == .photo))
         .onChange(of: scrollPosition) { _, new in
             if let new, let lead = lay.rowLead[new], lead != new { scrollPosition = lead }
         }
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, y in
             offsetBox.y = y
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.visibleRect.midY } action: { _, mid in
+            centerMoved(to: mid, lay)
+        }
+        .onScrollPhaseChange { _, phase in
+            if phase == .interacting { onUserInteract() }
+        }
+        .onChange(of: level) { _, _ in
+            // A new layout: re-read the centre without ticking for the jump.
+            ticker.index = nil
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { viewport = $0 }
         .overlay {
@@ -158,6 +178,36 @@ struct FilmStripView: View {
         .scaleEffect(pinchScale, anchor: scaleAnchor(total: lay.total + introLeader))
     }
 
+    /// Finds the item under the middle of the screen. A change of item is one
+    /// detent: a single tight tick, rate-limited so a fast fling stays crisp
+    /// instead of buzzing.
+    private func centerMoved(to mid: CGFloat, _ lay: StripLayout) {
+        let y = mid - endArtHeight - leaderHeight
+        guard !lay.items.isEmpty else { return }
+        var lo = 0, hi = lay.items.count - 1
+        if y <= 0 {
+            hi = 0
+        } else {
+            while lo < hi {
+                let m = (lo + hi + 1) / 2
+                if lay.items[m].y <= y { lo = m } else { hi = m - 1 }
+            }
+        }
+        let index = min(lo, hi)
+        let item = lay.items[index]
+        guard ticker.index != index || ticker.itemID != item.id else { return }
+        let hadIndex = ticker.index != nil && ticker.itemID != nil
+        ticker.index = index
+        ticker.itemID = item.id
+        if let id = item.centerFrameID { onCenterFrame(id) }
+        guard hadIndex, hapticsEnabled, y > 0, y < lay.itemsHeight else { return }
+        let now = CACurrentMediaTime()
+        if now - ticker.lastTick >= 0.045 {
+            ticker.lastTick = now
+            HallOfFameHaptics.detent()
+        }
+    }
+
     private func scaleAnchor(total: CGFloat) -> UnitPoint {
         guard pinchScale != 1, total > 0, stripWidth > 0 else { return pinchAnchor }
         let cx = pinchAnchor.x * viewport.width - (viewport.width - stripWidth) / 2
@@ -177,15 +227,23 @@ struct FilmStripView: View {
             }
             .padding(.horizontal, sprocketWidth)
             .frame(width: stripWidth, height: item.height, alignment: .top)
-        case .row(let frames, let header):
+        case .row(let cells, let header):
             VStack(alignment: .leading, spacing: 0) {
                 if let header {
                     SectionHeader(section: header, style: style)
                 }
                 HStack(alignment: .top, spacing: lay.gap) {
-                    ForEach(frames) { frame in
-                        FilmFrameView(frame: frame, level: level, width: lay.frameWidth, height: lay.frameHeight,
-                                      showsCornerMarker: true, onTap: onTapFrame)
+                    ForEach(cells) { cell in
+                        if let frame = cell.frame {
+                            FilmFrameView(frame: frame, level: level, width: lay.frameWidth, height: lay.frameHeight,
+                                          showsCornerMarker: true, onTap: onTapFrame)
+                        } else if cell.isPadding {
+                            Color.clear
+                                .frame(width: lay.frameWidth, height: lay.frameHeight)
+                                .accessibilityHidden(true)
+                        } else {
+                            EmptyDayCell(width: lay.frameWidth, height: lay.frameHeight)
+                        }
                     }
                 }
             }
@@ -222,7 +280,7 @@ struct FilmStripView: View {
 private struct StripLayout {
     enum Kind {
         case page(HallOfFameFrame)
-        case row(frames: [HallOfFameFrame], header: HallOfFameSection?)
+        case row(cells: [HallOfFameCell], header: HallOfFameSection?)
     }
 
     struct Item: Identifiable {
@@ -230,6 +288,21 @@ private struct StripLayout {
         let y: CGFloat
         let height: CGFloat
         let kind: Kind
+
+        /// The photo this item stands for when it sits mid-screen: the page
+        /// itself, or the photo in a row nearest its middle column.
+        var centerFrameID: String? {
+            switch kind {
+            case .page(let frame):
+                return frame.id
+            case .row(let cells, _):
+                let mid = Double(cells.count - 1) / 2
+                return cells.enumerated()
+                    .filter { $0.element.frame != nil }
+                    .min { abs(Double($0.offset) - mid) < abs(Double($1.offset) - mid) }?
+                    .element.frame?.id
+            }
+        }
     }
 
     let items: [Item]
@@ -254,7 +327,9 @@ private struct StripLayout {
         if level == .photo {
             let visible = max(260, viewportHeight - topInset - bottomInset)
             fw = inner
-            fh = visible - 34 - 10
+            // Equal space above (the print row) and below, so the photo sits
+            // dead centre between the title and the level capsule.
+            fh = visible - 34 - 34
             pageHeight = viewportHeight - topInset + 4
         }
 
@@ -273,19 +348,24 @@ private struct StripLayout {
             }
         case .week, .month:
             for section in sections {
-                let frames = section.frames
-                let rowCount = Int((Double(frames.count) / Double(cols)).rounded(.up))
+                let cells = section.cells
+                guard !cells.isEmpty else { continue }
+                let rowCount = Int((Double(cells.count) / Double(cols)).rounded(.up))
                 let hasHeader = section.title != nil
                 for r in 0..<rowCount {
-                    let slice = Array(frames[(r * cols)..<min(frames.count, (r + 1) * cols)])
+                    let slice = Array(cells[(r * cols)..<min(cells.count, (r + 1) * cols)])
                     let isFirst = r == 0
                     let isLast = r == rowCount - 1
                     let header: CGFloat = (isFirst && hasHeader) ? 46 : 0
                     let height = header + fh + (isLast ? 22 : gap)
-                    let id = slice[0].id
-                    for f in slice { lead[f.id] = id }
+                    let id = "\(section.id)-r\(r)"
+                    // Every photo of every day in the row scrolls to this row,
+                    // including second photos a day cell does not show.
+                    for cell in slice {
+                        for fid in cell.dayFrameIDs { lead[fid] = id }
+                    }
                     built.append(Item(id: id, y: y, height: height,
-                                      kind: .row(frames: slice, header: (isFirst && hasHeader) ? section : nil)))
+                                      kind: .row(cells: slice, header: (isFirst && hasHeader) ? section : nil)))
                     y += height
                 }
             }
@@ -319,6 +399,31 @@ private struct FilmSnapBehavior: ScrollTargetBehavior {
 @MainActor @Observable
 private final class ScrollOffsetBox {
     var y: CGFloat = 0
+}
+
+/// Which item sits mid-screen and when the last detent fired. Plain class,
+/// not observed: updating it never re-renders the strip.
+@MainActor
+private final class CenterTicker {
+    var index: Int?
+    var itemID: String?
+    var lastTick: CFTimeInterval = 0
+}
+
+/// A day with no photo in the Week or Month grid: just black.
+private struct EmptyDayCell: View {
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 3)
+            .fill(Color.black)
+            .overlay {
+                RoundedRectangle(cornerRadius: 3).strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
+            }
+            .frame(width: width, height: height)
+            .accessibilityHidden(true)
+    }
 }
 
 // MARK: - Sprockets
@@ -688,8 +793,16 @@ private struct FilmFrameView: View {
             }
             .overlay(alignment: .topLeading) {
                 if showsCornerMarker, let m = frame.markerText {
-                    FilmPill(text: m, isLatest: frame.marker == .latest, compact: true)
-                        .padding(4)
+                    if width >= 56 {
+                        FilmPill(text: m, isLatest: frame.marker == .latest, compact: true)
+                            .padding(4)
+                    } else if frame.marker == .latest {
+                        // Month cells are too small for a pill: just the dot.
+                        Circle().fill(Theme.accent)
+                            .frame(width: 6, height: 6)
+                            .padding(4)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
     }

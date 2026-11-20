@@ -34,6 +34,11 @@ struct HallOfFameView: View {
     @State private var isCommitting = false
     @State private var isClosing = false
     @State private var didClose = false
+    /// The photo in the middle of the screen, reported by the strip.
+    @State private var centerFrameID: String?
+    /// Opening: hold on the oldest photo, then glide to the newest.
+    @State private var glideTask: Task<Void, Never>?
+    @State private var glideScheduled = false
     @Namespace private var pillSpace
 
     private let allEvents: ReelEvents = [.reelLanded, .titleComplete, .revolution1, .revolution2, .revolution3, .stripSeated]
@@ -48,7 +53,8 @@ struct HallOfFameView: View {
         let frames = HallOfFameModel.frames(photos: store.photos, installDate: store.installDate)
         // Shown oldest at the top, newest at the bottom; the strip opens on the newest.
         let sections = HallOfFameModel.sections(frames, level: level).reversed().map {
-            HallOfFameSection(id: $0.id, title: $0.title, countText: $0.countText, frames: $0.frames.reversed())
+            HallOfFameSection(id: $0.id, title: $0.title, countText: $0.countText,
+                              frames: $0.frames.reversed(), cells: $0.cells)
         }
         let levels = HallOfFameModel.availableLevels(isDemo: isDemo)
 
@@ -76,11 +82,10 @@ struct HallOfFameView: View {
             .ignoresSafeArea()
         }
         .onAppear { start() }
-        .onChange(of: scrollPosition) { _, new in
-            if level == .photo, isLive, !isCommitting, !isClosing, new != nil {
-                HallOfFameHaptics.pageChanged()
-            }
+        .onChange(of: isLive) { _, live in
+            if live { scheduleGlide() }
         }
+        .onDisappear { glideTask?.cancel() }
     }
 
     // MARK: Screen
@@ -119,7 +124,10 @@ struct HallOfFameView: View {
                 scrollPosition: $scrollPosition,
                 onTapFrame: { openPhoto($0) },
                 onReachStart: { reachedStart() },
-                introLeader: max(introBox - size.height, 0)
+                introLeader: max(introBox - size.height, 0),
+                hapticsEnabled: isLive && !isClosing && !isCommitting,
+                onCenterFrame: { centerFrameID = $0 },
+                onUserInteract: { cancelGlide() }
             )
             // While the film lies on the floor the box is taller than the
             // screen (src HBOX) and only the laid length below the strip top
@@ -290,6 +298,13 @@ struct HallOfFameView: View {
 
     private func start() {
         HallOfFameHaptics.prepare()
+        // Open on where it started: the oldest photo, which the glide then
+        // leaves for the newest.
+        let frames = HallOfFameModel.frames(photos: store.photos, installDate: store.installDate)
+        if let oldest = frames.last {
+            scrollPosition = oldest.id
+            centerFrameID = oldest.id
+        }
         if reduceMotion {
             phase = .live
             firedEvents = allEvents
@@ -314,10 +329,56 @@ struct HallOfFameView: View {
         if !seated { HallOfFameHaptics.stripSeated() }
     }
 
+    // MARK: Opening glide
+
+    /// Once the strip is live: one second on the oldest photo, then a smooth
+    /// glide down to the newest. Any touch, pinch, tap or close cancels it.
+    private func scheduleGlide() {
+        guard !glideScheduled else { return }
+        glideScheduled = true
+        let frames = HallOfFameModel.frames(photos: store.photos, installDate: store.installDate)
+        guard frames.count > 1, let newest = frames.first else { return }
+        let distance = frames.count
+        glideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, isLive, !isClosing, !isCommitting else { return }
+            if reduceMotion {
+                var t = Transaction(); t.disablesAnimations = true
+                withTransaction(t) { scrollPosition = newest.id }
+            } else {
+                // Longer films take a little longer, but never drag.
+                let duration = min(0.9 + Double(distance) * 0.06, 2.0)
+                withAnimation(.timingCurve(0.45, 0, 0.2, 1, duration: duration)) {
+                    scrollPosition = newest.id
+                }
+            }
+            glideTask = nil
+        }
+    }
+
+    private func cancelGlide() {
+        glideTask?.cancel()
+        glideTask = nil
+    }
+
+    /// Settles the strip exactly on `id` after a level change. Setting the
+    /// same id twice is ignored by the scroll view, so it is cleared first;
+    /// if the strip already sits there, nothing moves.
+    private func reseat(_ id: String?) async {
+        guard let id else { return }
+        try? await Task.sleep(for: .milliseconds(420))
+        guard !isClosing else { return }
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { scrollPosition = nil }
+        await Task.yield()
+        withAnimation(.snappy(duration: 0.25)) { scrollPosition = id }
+    }
+
     // MARK: Close
 
     private func close(frames: [HallOfFameFrame]) {
         guard isLive, !isClosing else { return }
+        cancelGlide()
         isClosing = true
         HallOfFameHaptics.close()
         if reduceMotion {
@@ -374,7 +435,8 @@ struct HallOfFameView: View {
                     pinchActive = true
                     pinchLimitFired = false
                     pinchAnchor = value.startAnchor
-                    pinchAnchorID = frameID(atFraction: value.startAnchor.y, frames: frames, layout: layout, size: size)
+                    pinchAnchorID = centerFrameID
+                    cancelGlide()
                 }
                 let raw = value.magnification
                 let s = rubber(raw, canCoarser: availableCoarser(levels) != nil, canFiner: availableFiner(levels) != nil)
@@ -407,11 +469,11 @@ struct HallOfFameView: View {
 
     private func step(to l: HallOfFameLevel, frames: [HallOfFameFrame], size: CGSize, layout: ReelLayout) {
         guard isLive, !isClosing, l != level, !pinchActive else { return }
-        let id = frameID(atFraction: 0.5, frames: frames, layout: layout, size: size)
-        commit(l, anchorID: id)
+        commit(l, anchorID: centerFrameID)
     }
 
     private func commit(_ target: HallOfFameLevel, anchorID: String?) {
+        cancelGlide()
         isCommitting = true
         let id = anchorID ?? scrollPosition
         pinchAnchor = .center
@@ -422,17 +484,19 @@ struct HallOfFameView: View {
         }
         HallOfFameHaptics.levelChanged()
         Task { @MainActor in
-            // Re-seat after the new layout exists, then allow page haptics again.
-            scrollPosition = id
-            try? await Task.sleep(for: .milliseconds(450))
+            // Re-seat once the new layout has settled, then allow detents again.
+            await reseat(id)
+            try? await Task.sleep(for: .milliseconds(250))
             isCommitting = false
         }
     }
 
     private func openPhoto(_ frame: HallOfFameFrame) {
         guard isLive, !isClosing, level != .photo else { return }
+        cancelGlide()
         isCommitting = true
         pinchAnchor = .center
+        centerFrameID = frame.id
         withAnimation(Theme.pageTurn) {
             level = .photo
             pinchScale = 1
@@ -440,8 +504,9 @@ struct HallOfFameView: View {
         }
         HallOfFameHaptics.openPhoto()
         Task { @MainActor in
-            scrollPosition = frame.id
-            try? await Task.sleep(for: .milliseconds(450))
+            // The tapped photo, and only it, ends up centred on screen.
+            await reseat(frame.id)
+            try? await Task.sleep(for: .milliseconds(250))
             isCommitting = false
         }
     }
@@ -450,25 +515,6 @@ struct HallOfFameView: View {
         guard !reachedStartFired, isLive else { return }
         reachedStartFired = true
         HallOfFameHaptics.reachedStart()
-    }
-
-    /// The frame near a vertical fraction of the viewport, estimated from the
-    /// frame at the top (`scrollPosition`) and the row height of the level.
-    private func frameID(atFraction f: CGFloat, frames: [HallOfFameFrame],
-                         layout: ReelLayout, size: CGSize) -> String? {
-        guard !frames.isEmpty else { return nil }
-        // Display order: oldest at the top.
-        let frames = Array(frames.reversed())
-        let top = scrollPosition.flatMap { id in frames.firstIndex { $0.id == id } } ?? 0
-        let cols = max(level.columns, 1)
-        let rowH: CGFloat
-        switch level {
-        case .photo: rowH = size.height
-        default: rowH = max(layout.stripWidth / CGFloat(cols) * 1.25, 1)
-        }
-        let rows = Int(max(0, f * size.height - layout.stripTop) / rowH)
-        let idx = min(max(top + rows * cols + cols / 2, 0), frames.count - 1)
-        return frames[idx].id
     }
 
     // MARK: Counter

@@ -20,14 +20,14 @@ nonisolated enum HallOfFameLevel: Int, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Frames per row. Photo and Day are one tall frame at a time; the grids
-    /// only start at Week.
+    /// Cells per row. Photo and Day are one tall frame at a time; Week is a
+    /// seven-day block (Mon-Thu over Fri-Sun); Month is a calendar grid.
     var columns: Int {
         switch self {
         case .photo: 1
         case .day: 1
-        case .week: 2
-        case .month: 3
+        case .week: 4
+        case .month: 7
         }
     }
 
@@ -105,10 +105,25 @@ nonisolated struct HallOfFameFrame: Identifiable, Hashable, Sendable {
     }
 }
 
+/// One calendar day in a Week or Month grid.
+nonisolated struct HallOfFameCell: Identifiable, Hashable, Sendable {
+    /// `c-yyyy-mm-dd`, or `p-<section>-<i>` for a calendar offset slot.
+    let id: String
+    /// Start of the day; nil for an offset slot before the 1st of a month.
+    let date: Date?
+    /// The newest photo taken that day; nil draws a plain black cell.
+    let frame: HallOfFameFrame?
+    /// Every photo taken that day, newest first (for scroll anchoring).
+    var dayFrameIDs: [String] = []
+
+    /// An offset slot: takes up a grid position but draws nothing.
+    var isPadding: Bool { date == nil }
+}
+
 /// A run of frames under one header, or a single frame at the finer levels.
 nonisolated struct HallOfFameSection: Identifiable, Hashable, Sendable {
     /// Stable across rebuilds so scroll anchoring survives a level change:
-    /// `d-yyyy-mm-dd`, `w-yyyy-ww`, `m-yyyy-mm` or `all`.
+    /// `d-yyyy-mm-dd`, `w-yyyy-ww` or `m-yyyy-mm`.
     let id: String
     /// Week range or month name; nil where the frame's own print says it all.
     let title: String?
@@ -116,6 +131,9 @@ nonisolated struct HallOfFameSection: Identifiable, Hashable, Sendable {
     let countText: String?
     /// Newest first.
     let frames: [HallOfFameFrame]
+    /// Week and Month only: every day of the period in calendar order (oldest
+    /// first, whatever order sections are shown in), empty days included.
+    var cells: [HallOfFameCell] = []
 }
 
 // MARK: - Model
@@ -176,35 +194,33 @@ nonisolated enum HallOfFameModel {
         .reversed()
     }
 
-    /// Groups frames for a level, keeping their newest-first order.
+    /// Groups frames for a level, newest section first.
     ///
-    /// Groups are built from the frames that exist, so a week or month with
-    /// no photo never appears as an empty header. Demo frames have no dates to
-    /// group by, so week and month fall back to one untitled section.
+    /// Week and Month cover every period from the oldest photo's to the one
+    /// containing `now`, empty ones included, and every day inside them, so a
+    /// gap reads as black cells rather than disappearing. Demo frames carry no
+    /// dates, so with no real photos those levels show the current week or
+    /// month as empty days: real dates, no implied photos.
     static func sections(
         _ frames: [HallOfFameFrame],
         level: HallOfFameLevel,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        now: Date = Date()
     ) -> [HallOfFameSection] {
-        guard !frames.isEmpty else { return [] }
-
         switch level {
         case .photo, .day:
+            guard !frames.isEmpty else { return [] }
             return singleFrameSections(frames, calendar: calendar)
         case .week, .month:
-            guard frames.allSatisfy({ $0.date != nil }) else {
-                return [HallOfFameSection(id: "all", title: nil, countText: nil, frames: frames)]
-            }
-            return level == .week
-                ? weekSections(frames, calendar: calendar)
-                : monthSections(frames, calendar: calendar)
+            let dated = frames.filter { $0.date != nil }
+            return gridSections(dated, level: level, calendar: calendar, now: now)
         }
     }
 
-    /// The Week and Month levels need real dates, so demo offers only the two
-    /// finer ones.
+    /// Every level is always offered; Week and Month show empty days when
+    /// there is nothing to put in them.
     static func availableLevels(isDemo: Bool) -> [HallOfFameLevel] {
-        isDemo ? [.photo, .day] : HallOfFameLevel.allCases
+        HallOfFameLevel.allCases
     }
 
     /// "12 of 26" under the title at Photo level. Nil for demo, where a
@@ -271,78 +287,86 @@ nonisolated enum HallOfFameModel {
         }
     }
 
-    private static func weekSections(
+    /// Week or month sections over a continuous range of periods, each with
+    /// one cell per day. `frames` must all carry dates.
+    private static func gridSections(
         _ frames: [HallOfFameFrame],
-        calendar: Calendar
+        level: HallOfFameLevel,
+        calendar: Calendar,
+        now: Date
     ) -> [HallOfFameSection] {
-        var sections: [HallOfFameSection] = []
-        var currentStart: Date?
-        var bucket: [HallOfFameFrame] = []
-        var bucketID = ""
-        var bucketTitle = ""
+        let component: Calendar.Component = level == .week ? .weekOfYear : .month
 
-        func flush() {
-            guard !bucket.isEmpty else { return }
-            sections.append(HallOfFameSection(
-                id: bucketID,
-                title: bucketTitle,
-                countText: countText(bucket.count),
-                frames: bucket
-            ))
-            bucket = []
-        }
-
-        for frame in frames {
-            guard let date = frame.date,
-                  let interval = calendar.dateInterval(of: .weekOfYear, for: date)
-            else { continue }
-            if currentStart != interval.start {
-                flush()
-                currentStart = interval.start
-                let c = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: interval.start)
-                bucketID = "w-\(pad(c.yearForWeekOfYear, 4))-\(pad(c.weekOfYear))"
-                bucketTitle = weekTitle(interval: interval, calendar: calendar)
-            }
-            bucket.append(frame)
-        }
-        flush()
-        return sections
-    }
-
-    private static func monthSections(
-        _ frames: [HallOfFameFrame],
-        calendar: Calendar
-    ) -> [HallOfFameSection] {
-        var sections: [HallOfFameSection] = []
-        var currentKey: DateComponents?
-        var bucket: [HallOfFameFrame] = []
-        var bucketID = ""
-        var bucketTitle = ""
-
-        func flush() {
-            guard !bucket.isEmpty else { return }
-            sections.append(HallOfFameSection(
-                id: bucketID,
-                title: bucketTitle,
-                countText: countText(bucket.count),
-                frames: bucket
-            ))
-            bucket = []
-        }
-
+        // Frames by day, newest first within a day (frames arrive newest first).
+        var byDay: [Date: [HallOfFameFrame]] = [:]
         for frame in frames {
             guard let date = frame.date else { continue }
-            let key = calendar.dateComponents([.year, .month], from: date)
-            if currentKey != key {
-                flush()
-                currentKey = key
-                bucketID = "m-\(pad(key.year, 4))-\(pad(key.month))"
-                bucketTitle = date.formatted(format(calendar).month(.wide).year()).uppercased()
-            }
-            bucket.append(frame)
+            byDay[calendar.startOfDay(for: date), default: []].append(frame)
         }
-        flush()
-        return sections
+
+        let dates = frames.compactMap(\.date)
+        let latest = max(dates.max() ?? now, now)
+        let earliest = dates.min() ?? now
+        guard let first = calendar.dateInterval(of: component, for: earliest),
+              let last = calendar.dateInterval(of: component, for: latest)
+        else { return [] }
+
+        var sections: [HallOfFameSection] = []
+        var periodStart = first.start
+        // Hard stop so a broken calendar can never spin forever.
+        var guardCount = 0
+        while periodStart <= last.start, guardCount < 2_000 {
+            guardCount += 1
+            guard let interval = calendar.dateInterval(of: component, for: periodStart) else { break }
+
+            let id: String
+            let title: String
+            if level == .week {
+                let c = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: interval.start)
+                id = "w-\(pad(c.yearForWeekOfYear, 4))-\(pad(c.weekOfYear))"
+                title = weekTitle(interval: interval, calendar: calendar)
+            } else {
+                let c = calendar.dateComponents([.year, .month], from: interval.start)
+                id = "m-\(pad(c.year, 4))-\(pad(c.month))"
+                title = interval.start.formatted(format(calendar).month(.wide).year()).uppercased()
+            }
+
+            var cells: [HallOfFameCell] = []
+            if level == .month {
+                // Offset so the 1st sits under its weekday column.
+                let weekday = calendar.component(.weekday, from: interval.start)
+                let lead = (weekday - calendar.firstWeekday + 7) % 7
+                for i in 0..<lead {
+                    cells.append(HallOfFameCell(id: "p-\(id)-\(i)", date: nil, frame: nil))
+                }
+            }
+            var periodFrames: [HallOfFameFrame] = []
+            var day = interval.start
+            while day < interval.end {
+                let dayFrames = byDay[day] ?? []
+                let c = calendar.dateComponents([.year, .month, .day], from: day)
+                cells.append(HallOfFameCell(
+                    id: "c-\(pad(c.year, 4))-\(pad(c.month))-\(pad(c.day))",
+                    date: day,
+                    frame: dayFrames.first,
+                    dayFrameIDs: dayFrames.map(\.id)
+                ))
+                periodFrames.append(contentsOf: dayFrames.reversed())
+                guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+                day = calendar.startOfDay(for: next)
+            }
+
+            sections.append(HallOfFameSection(
+                id: id,
+                title: title,
+                countText: countText(periodFrames.count),
+                // Days were walked oldest first; sections keep frames newest first.
+                frames: periodFrames.reversed(),
+                cells: cells
+            ))
+            periodStart = interval.end
+        }
+        return sections.reversed()
     }
 
     // MARK: Text
