@@ -46,25 +46,35 @@ struct HallOfFameView: View {
 
     var body: some View {
         let frames = HallOfFameModel.frames(photos: store.photos, installDate: store.installDate)
-        let sections = HallOfFameModel.sections(frames, level: level)
+        // Shown oldest at the top, newest at the bottom; the strip opens on the newest.
+        let sections = HallOfFameModel.sections(frames, level: level).reversed().map {
+            HallOfFameSection(id: $0.id, title: $0.title, countText: $0.countText, frames: $0.frames.reversed())
+        }
         let levels = HallOfFameModel.availableLevels(isDemo: isDemo)
 
-        GeometryReader { geo in
-            let layout = makeLayout(geo)
-            ZStack(alignment: .topLeading) {
-                Theme.canvas
-                TimelineView(.animation(paused: isLive)) { ctx in
-                    let pose = currentPose(date: ctx.date, layout: layout)
-                    screen(pose: pose, layout: layout, geo: geo, frames: frames, sections: sections, levels: levels)
-                        .onChange(of: ctx.date) { _, date in
-                            tick(date: date, layout: layout)
-                        }
+        // The outer reader respects the safe area so its insets are the real
+        // notch / Dynamic Island / home indicator; the inner one fills the screen
+        // (a reader that ignores the safe area reports zero insets).
+        GeometryReader { outer in
+            let insets = outer.safeAreaInsets
+            GeometryReader { geo in
+                let layout = makeLayout(size: geo.size, insets: insets)
+                ZStack(alignment: .topLeading) {
+                    Theme.canvas
+                    TimelineView(.animation(paused: isLive)) { ctx in
+                        let pose = currentPose(date: ctx.date, layout: layout)
+                        screen(pose: pose, layout: layout, size: geo.size, insets: insets,
+                               frames: frames, sections: sections, levels: levels)
+                            .onChange(of: ctx.date) { _, date in
+                                tick(date: date, layout: layout)
+                            }
+                    }
                 }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .opacity(configured ? fade : 0)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .opacity(configured ? fade : 0)
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea()
         .onAppear { start() }
         .onChange(of: scrollPosition) { _, new in
             if level == .photo, isLive, !isCommitting, !isClosing, new != nil {
@@ -76,12 +86,12 @@ struct HallOfFameView: View {
     // MARK: Screen
 
     @ViewBuilder
-    private func screen(pose: ReelPose?, layout: ReelLayout, geo: GeometryProxy,
+    private func screen(pose: ReelPose?, layout: ReelLayout, size: CGSize, insets: EdgeInsets,
                         frames: [HallOfFameFrame], sections: [HallOfFameSection],
                         levels: [HallOfFameLevel]) -> some View {
-        let size = geo.size
-        let safeTop = geo.safeAreaInsets.top
-        let capB = max(geo.safeAreaInsets.bottom, 8) + 8
+        let safeTop = insets.top
+        let capB = max(insets.bottom, 8) + 8
+        let introBox = pose == nil ? size.height : max(size.height, ReelScene.introBoxHeight(layout: layout))
         let chrome = pose?.chromeOpacity ?? 1
         let clip: CGFloat = {
             if let pose, pose.filmClipLength.isFinite { return pose.filmClipLength > 0.5 ? pose.filmClipLength : 0 }
@@ -108,14 +118,13 @@ struct HallOfFameView: View {
                 pinchAnchor: pinchAnchor,
                 scrollPosition: $scrollPosition,
                 onTapFrame: { openPhoto($0) },
-                onReachStart: { reachedStart() }
+                onReachStart: { reachedStart() },
+                introLeader: max(introBox - size.height, 0)
             )
             // While the film lies on the floor the box is taller than the
             // screen (src HBOX) and only the laid length below the strip top
             // shows (src clip-path inset). Live: plain screen-sized box.
-            .frame(width: size.width,
-                   height: pose == nil ? size.height : max(size.height, ReelScene.introBoxHeight(layout: layout)),
-                   alignment: .top)
+            .frame(width: size.width, height: introBox, alignment: .top)
             .mask(alignment: .top) {
                 if pose == nil {
                     Rectangle()
@@ -153,7 +162,7 @@ struct HallOfFameView: View {
             }
 
             HallOfFameTitle(progress: titleProgress, glide: titleGlide, style: style,
-                            counter: counterText(frames: frames))
+                            counter: counterText(frames: frames), safeTop: safeTop)
                 .frame(width: size.width, height: size.height)
                 .opacity(titleOpacity)
 
@@ -178,7 +187,9 @@ struct HallOfFameView: View {
                 .opacity(chrome)
                 .allowsHitTesting(isLive && !isClosing)
         }
-        .frame(width: size.width, height: size.height)
+        // Top-leading: while the film lies on the floor the stage is taller
+        // than the screen, and centring it pushed the reel and title off the top.
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
     }
 
     private var isClosingPhase: Bool {
@@ -221,15 +232,15 @@ struct HallOfFameView: View {
 
     // MARK: Layout
 
-    private func makeLayout(_ geo: GeometryProxy) -> ReelLayout {
+    private func makeLayout(size: CGSize, insets: EdgeInsets) -> ReelLayout {
         // Same rule as the prototype and ReelScene: min(330, round(W * 0.84)),
         // one point narrower when the side margins would be uneven, so the
         // composited floor layer lands on whole pixels at scroll 0.
-        let w = geo.size.width
+        let w = size.width
         var strip = min(330, (w * 0.84).rounded())
         if Int(w - strip) % 2 != 0 { strip -= 1 }
-        return ReelLayout(size: geo.size, safeTop: geo.safeAreaInsets.top,
-                          stripWidth: strip, stripTop: geo.safeAreaInsets.top + 66)
+        return ReelLayout(size: size, safeTop: insets.top,
+                          stripWidth: strip, stripTop: insets.top + 66)
     }
 
     // MARK: Clock
@@ -446,6 +457,8 @@ struct HallOfFameView: View {
     private func frameID(atFraction f: CGFloat, frames: [HallOfFameFrame],
                          layout: ReelLayout, size: CGSize) -> String? {
         guard !frames.isEmpty else { return nil }
+        // Display order: oldest at the top.
+        let frames = Array(frames.reversed())
         let top = scrollPosition.flatMap { id in frames.firstIndex { $0.id == id } } ?? 0
         let cols = max(level.columns, 1)
         let rowH: CGFloat

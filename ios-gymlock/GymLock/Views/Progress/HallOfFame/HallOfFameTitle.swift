@@ -9,6 +9,9 @@ struct HallOfFameTitle: View {
     let glide: Double
     let style: HeroCardStyle
     let counter: String?
+    /// The screen's real top safe inset. This view ignores the safe area, so
+    /// its own reader reports zero; the screen passes the real value in.
+    var safeTop: CGFloat? = nil
 
     private static let bigScale: CGFloat = 40.0 / 22.0
     /// Reveal span in src milliseconds (src T0 1000 to 1850).
@@ -16,7 +19,7 @@ struct HallOfFameTitle: View {
 
     var body: some View {
         GeometryReader { geo in
-            let safeTop = geo.safeAreaInsets.top
+            let safeTop = self.safeTop ?? geo.safeAreaInsets.top
             let size = geo.size
             let finalCy = safeTop + 19
             let bigCy = max(120, size.height * 0.30)

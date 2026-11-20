@@ -33,6 +33,10 @@ struct FilmStripView: View {
     @Binding var scrollPosition: String?
     let onTapFrame: (HallOfFameFrame) -> Void
     let onReachStart: () -> Void
+    /// Extra blank film under the newest frame while the strip lies on the
+    /// floor (the intro stage is taller than the screen). Keeps the scroll
+    /// offset identical before and after the strip goes live.
+    var introLeader: CGFloat = 0
 
     @State private var viewport = CGSize(width: 393, height: 852)
     @State private var offsetBox = ScrollOffsetBox()
@@ -61,16 +65,19 @@ struct FilmStripView: View {
     var body: some View {
         let lay = layout
         ScrollView(.vertical, showsIndicators: false) {
+            // Oldest at the top (where it started), newest at the bottom.
             VStack(spacing: 0) {
+                endArt
                 strip(lay)
                     .frame(width: stripWidth)
                     .zIndex(1)
-                endArt
             }
             .frame(maxWidth: .infinity)
         }
         .contentMargins(.top, topInset, for: .scrollContent)
         .contentMargins(.bottom, bottomInset, for: .scrollContent)
+        // Opens on the newest photo.
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
         .scrollPosition(id: $scrollPosition, anchor: .top)
         .scrollTargetBehavior(FilmSnapBehavior(isPaging: level == .photo))
         .onChange(of: scrollPosition) { _, new in
@@ -115,29 +122,29 @@ struct FilmStripView: View {
     /// Film base columns and leader. Does not scale with the pinch.
     private func filmLayer(_ lay: StripLayout) -> some View {
         VStack(spacing: 0) {
-            if lay.topPad > 0 {
-                SprocketBlock(style: style, width: stripWidth, height: lay.topPad, offsetY: 0, columnWidth: sprocketWidth)
-            }
-            LazyVStack(spacing: 0) {
-                ForEach(lay.items) { item in
-                    SprocketBlock(style: style, width: stripWidth, height: item.height,
-                                  offsetY: lay.topPad + item.y, columnWidth: sprocketWidth)
-                }
-            }
-            SprocketBlock(style: style, width: stripWidth, height: leaderHeight,
-                          offsetY: lay.topPad + lay.itemsHeight, columnWidth: sprocketWidth)
+            SprocketBlock(style: style, width: stripWidth, height: leaderHeight, offsetY: 0, columnWidth: sprocketWidth)
                 .overlay {
                     if !isDemo {
                         PrintText(text: style == .matrix ? "START" : "WHERE IT STARTED", style: style)
                     }
                 }
+            LazyVStack(spacing: 0) {
+                ForEach(lay.items) { item in
+                    SprocketBlock(style: style, width: stripWidth, height: item.height,
+                                  offsetY: leaderHeight + item.y, columnWidth: sprocketWidth)
+                }
+            }
+            if lay.topPad + introLeader > 0 {
+                SprocketBlock(style: style, width: stripWidth, height: lay.topPad + introLeader,
+                              offsetY: leaderHeight + lay.itemsHeight, columnWidth: sprocketWidth)
+            }
         }
     }
 
     /// Frames, print rows and headers. This is the layer the pinch scales.
     private func framesLayer(_ lay: StripLayout) -> some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: lay.topPad)
+            Color.clear.frame(height: leaderHeight)
             LazyVStack(spacing: 0) {
                 ForEach(lay.items) { item in
                     itemView(item, lay)
@@ -145,10 +152,10 @@ struct FilmStripView: View {
                 }
             }
             .scrollTargetLayout()
-            Color.clear.frame(height: leaderHeight)
+            Color.clear.frame(height: lay.topPad + introLeader)
         }
         .frame(width: stripWidth)
-        .scaleEffect(pinchScale, anchor: scaleAnchor(total: lay.total))
+        .scaleEffect(pinchScale, anchor: scaleAnchor(total: lay.total + introLeader))
     }
 
     private func scaleAnchor(total: CGFloat) -> UnitPoint {
@@ -196,7 +203,7 @@ struct FilmStripView: View {
                 RidgeEndArt()
                     .frame(height: 190)
                     .frame(maxWidth: .infinity)
-                    .padding(.top, -34)
+                    .padding(.bottom, -34)
                     .accessibilityHidden(true)
             } else {
                 Color.clear.frame(height: 150)
