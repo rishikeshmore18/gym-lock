@@ -63,7 +63,7 @@ enum ActivationMissionType: String, Codable, Hashable, CaseIterable, Identifiabl
         case .mirrorBoost: "read one line out loud."
         case .grabWater: "show me the bottle."
         case .gymBag: "show me the bag."
-        case .walkToDoor: "30 more steps, that direction."
+        case .walkToDoor: "30 steps, then show me the open door."
         }
     }
 
@@ -82,7 +82,7 @@ enum ActivationMissionType: String, Codable, Hashable, CaseIterable, Identifiabl
     var estimatedSeconds: Int {
         switch self {
         case .twentySteps: 30
-        case .walkToDoor: 45
+        case .walkToDoor: 60
         case .showGymShoes, .grabWater, .gymBag: 25
         case .shoesOn: 45
         case .mirrorBoost: 40
@@ -105,6 +105,7 @@ enum ActivationMissionType: String, Codable, Hashable, CaseIterable, Identifiabl
         case .shoesOn: .athleticShoesWorn
         case .grabWater: .waterBottle
         case .gymBag: .gymBag
+        case .walkToDoor: .openDoor
         default: nil
         }
     }
@@ -132,6 +133,7 @@ enum VisionSubject: String, Codable, Hashable {
     case athleticShoesWorn
     case waterBottle
     case gymBag
+    case openDoor
 
     /// Classification identifiers that count as a match. These are drawn from
     /// the built-in Vision taxonomy, which is broad enough to be forgiving of a
@@ -144,6 +146,8 @@ enum VisionSubject: String, Codable, Hashable {
             ["water_bottle", "bottle", "drinking_vessel", "thermos", "flask", "cup", "tumbler"]
         case .gymBag:
             ["backpack", "bag", "duffel_bag", "tote_bag", "luggage", "handbag", "suitcase"]
+        case .openDoor:
+            ["door", "porch"]
         }
     }
 
@@ -157,6 +161,7 @@ enum VisionSubject: String, Codable, Hashable {
         case .athleticShoesWorn: "shoes on — show me your feet"
         case .waterBottle: "show me your water bottle"
         case .gymBag: "show me your gym bag"
+        case .openDoor: "show me the open door"
         }
     }
 }

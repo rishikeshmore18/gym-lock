@@ -399,3 +399,4 @@ These apply only to the Home hero card (Ridge and Matrix styles), its full-scree
 3. **Ridge paint.** Ridge's painterly gradients, washes and glow are allowed in the hero card and the Ridge done flow only (overrides §4 and the §12 gradient and glow checks there).
 4. **Long celebrations.** Done-flow and celebration durations may exceed 300 ms (§5.3).
 5. **Week position.** First / middle / last session of the week, and the 5 or 7 taps of the finish, come from real sessions against the weekly goal (3 to 7), never from the weekday.
+6. The mission screens (Missions).
