@@ -112,6 +112,9 @@ struct ProgressPeriodCard: View {
             monthHeader
                 .opacity(isWeekLevel ? 0 : 1)
                 .offset(x: isWeekLevel ? -12 : 0)
+                // Mounted underneath the week header, so its arrows must not
+                // take taps while the week level is showing.
+                .allowsHitTesting(!isWeekLevel)
 
             weekHeader
                 .opacity(isWeekLevel ? 1 : 0)
@@ -127,21 +130,29 @@ struct ProgressPeriodCard: View {
                 Text(month.titleLabel)
                     .font(.system(size: 21, weight: .heavy))
                     .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
-                Text(month.subtitleLabel)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.inkSecondary)
+                // The arrows flank the month, so the swipe that already moves
+                // between months has something to point at. They sit on the
+                // subtitle line because the title block is already full width.
+                HStack(spacing: 2) {
+                    monthArrow(-1, "chevron.left", enabled: model.canGoBack)
+
+                    Text(month.subtitleLabel)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.inkSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    monthArrow(1, "chevron.right", enabled: model.canGoForward)
+                }
             }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .accessibilityElement(children: .combine)
 
             Spacer(minLength: 8)
 
             if month.tally.hasPlan {
                 ringCluster
-            } else {
-                monthStepper
             }
         }
     }
@@ -222,24 +233,25 @@ struct ProgressPeriodCard: View {
         }
     }
 
-    /// Only shown in the empty state, where the ring would say nothing.
-    private var monthStepper: some View {
-        HStack(spacing: 4) {
-            stepButton(-1, "chevron.left", enabled: model.canGoBack)
-            stepButton(1, "chevron.right", enabled: model.canGoForward)
-        }
-    }
-
-    private func stepButton(_ step: Int, _ icon: String, enabled: Bool) -> some View {
+    /// One month back or forward. Draws as a small chevron but takes a 44 pt
+    /// touch, the extra reach hanging out of the layout so the title block
+    /// keeps its width. Dims at either end of the data rather than hiding, so
+    /// the direction still reads as a direction.
+    private func monthArrow(_ step: Int, _ icon: String, enabled: Bool) -> some View {
         Button {
             onStepMonth(step)
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(enabled ? Theme.inkSecondary : Theme.inkTertiary.opacity(0.4))
-                .frame(width: 30, height: 30)
-                .background(Theme.surfaceMuted, in: Circle())
+                .foregroundStyle(enabled ? Theme.ink : Theme.inkTertiary.opacity(0.4))
+                .frame(width: 18, height: 22, alignment: step < 0 ? .leading : .trailing)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
+                .padding(.horizontal, -13)
+                .padding(.vertical, -11)
         }
+        .buttonStyle(MonthArrowStyle(reduceMotion: reduceMotion))
         .disabled(!enabled)
         .accessibilityLabel(step < 0 ? "Previous month" : "Next month")
     }
@@ -374,5 +386,18 @@ struct ProgressPeriodCard: View {
                     onStepMonth(step)
                 }
             }
+    }
+}
+
+/// Press-down feedback for the month arrows: a small shrink and dip on
+/// touch-down, released on touch-up.
+private struct MonthArrowStyle: ButtonStyle {
+    let reduceMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.86 : 1)
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
