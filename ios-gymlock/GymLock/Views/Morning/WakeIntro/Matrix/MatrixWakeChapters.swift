@@ -489,8 +489,10 @@ public enum MatrixWakeChapters {
                 }
             }
         }
-        // the count, on the board's own LED digits, rolling with each print
-        ledFlip(&g, nil, String(lit), STEP_COUNTER.cx, STEP_COUNTER.y, 2, MXW.ez((lt - 0.2) / 0.3), 1, 0.08)
+        // the count, on the board's own LED digits, rolling with each print. The board draws at most
+        // 24 prints, but the count is the mission's real target, so it lands on F.steps.
+        let count = N == F.steps ? lit : Int((Double(lit) * Double(F.steps) / Nd).rounded())
+        ledFlip(&g, nil, String(count), STEP_COUNTER.cx, STEP_COUNTER.y, 2, MXW.ez((lt - 0.2) / 0.3), 1, 0.08)
     }
 
     // a sneaker, side on, toe to the right; the coral is the pull tab at the heel
