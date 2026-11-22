@@ -20,7 +20,8 @@
 //    missionSteps  ActivationMissionType.stepTarget (20 or 30)
 //    weekDone      HeroDayFacts.weekCount   = store.streak.thisWeekSessionDays
 //    weekGoal      HeroDayFacts.weekGoal    = store.streak.weeklyGoal
-//    habitDay      HeroDayFacts.habitDay(_:) (days since the first counted session, the hero card's day)
+//    habitDay      gym visits: distinct days with a counted gym workout (`.showedUp`) before today,
+//                  plus 1 for today's visit. Home workouts and calendar days do not add to it.
 //    streakWeeks   HeroDayFacts.streakWeeks = store.streak.weeks
 //    isFirst       HeroDayFacts.neverCounted (no counted session yet)
 //    isComeback    HeroMomentResolver.comebackLapse(_:cal:) != nil (the hero card's comeback rule)
@@ -64,12 +65,24 @@ enum WakeFactsProvider {
             missionSteps: mission.steps,
             weekDone: day.weekCount,
             weekGoal: day.weekGoal,
-            habitDay: day.habitDay(cal) ?? 1,
+            habitDay: gymVisitDay(store: store, today: day.displayDay, cal: cal),
             streakWeeks: day.streakWeeks,
             isFirst: day.neverCounted,
             isComeback: HeroMomentResolver.comebackLapse(day, cal: cal) != nil,
             snoozed: session.hasSnoozed
         ).normalized()
+    }
+
+    /// Today's place in the 66-day run, counted in gym visits: the distinct days with a counted gym
+    /// workout before today, plus 1 for the visit this morning is heading to.
+    static func gymVisitDay(store: AppStore, today: Date, cal: Calendar) -> Int {
+        let visits = Set(
+            store.log.outcomes
+                .filter { $0.kind == .showedUp && $0.counts }
+                .map { $0.countingDay(calendar: cal) }
+                .filter { $0 < today }
+        )
+        return visits.count + 1
     }
 
     /// The concept for today.

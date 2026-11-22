@@ -1209,7 +1209,7 @@ private struct WakeStageWords: View {
         case .mission:
             if facts.missionKind == .steps, let p = point(.stepCounter, fallback: cell(38, 64 + 15.5)) {
                 let a = E.ez((lt - 0.5) / 0.4) * o
-                caption("OF \(min(24, max(4, facts.missionSteps))) STEPS")
+                caption("OF \(facts.missionSteps) STEPS")
                     .frame(width: 180 * s)
                     .opacity(a)
                     .offset(x: p.x - 90 * s, y: p.y)
