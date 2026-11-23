@@ -228,12 +228,15 @@ public struct MatrixStoryCopy: Sendable {
         public var stats: [Stat]
         /// The session's measured length (Ridge today title rolls up to it). Nil when unknown.
         public var minutes: Int?
-        public init(start: String, end: String? = nil, caption: String? = nil, stats: [Stat] = [], minutes: Int? = nil) {
+        /// The same length in seconds, for the Matrix today clock. Nil when unknown.
+        public var seconds: Double?
+        public init(start: String, end: String? = nil, caption: String? = nil, stats: [Stat] = [], minutes: Int? = nil, seconds: Double? = nil) {
             self.start = start
             self.end = end
             self.caption = caption
             self.stats = stats
             self.minutes = minutes
+            self.seconds = seconds
         }
     }
 
@@ -243,11 +246,14 @@ public struct MatrixStoryCopy: Sendable {
         public var minutes: Int?
         public var done: Bool
         public var isToday: Bool
-        public init(label: String, minutes: Int? = nil, done: Bool, isToday: Bool) {
+        /// A planned day later this week that the weekly goal still needs (Matrix week ghost bars).
+        public var upcoming: Bool
+        public init(label: String, minutes: Int? = nil, done: Bool, isToday: Bool, upcoming: Bool = false) {
             self.label = label
             self.minutes = minutes
             self.done = done
             self.isToday = isToday
+            self.upcoming = upcoming
         }
     }
 
@@ -278,6 +284,9 @@ public struct MatrixStoryCopy: Sendable {
     public var weekStats: [Stat] = []
     /// Ridge far screen: minutes per week (oldest first, at most 8) and the long-run figures.
     public var farWeeks: [Int] = []
+    /// Training minutes per calendar week since the first session (at most 8), this week last. Unlike
+    /// `farWeeks` it is never emptied, so the Matrix far bars always draw the user's own weeks.
+    public var trainingWeeks: [Int] = []
     public var farStats: [Stat] = []
     /// Total sessions after today's (the Ridge count rolls from `sessions - 1`).
     public var sessions: Int = 0
@@ -335,6 +344,18 @@ public struct MatrixStoryContext: Sendable {
     public var pickAt: Double?
     /// the month screen's calendar; without it the month screen draws nothing
     public var cal: MatrixStoryCal? = nil
+    // The user's own figures for the art (DoneFlowBuilder). Nil only in the lab and previews, where the
+    // scenes fall back to the prototype's sample figures.
+    /// today's session length in seconds (today clock, verified dial)
+    public var todaySeconds: Double? = nil
+    /// when today's session started, shown on the today clock when its length is unknown
+    public var todayStart: String? = nil
+    /// this week, Monday first (week bars)
+    public var week: [MatrixStoryCopy.WeekDay]? = nil
+    /// training minutes per calendar week, oldest first, this week last (far bars)
+    public var farWeeks: [Int]? = nil
+    /// the habit week number of this week (far bars' right label)
+    public var habitWeek: Int? = nil
 }
 
 public struct MatrixGlow: Sendable, Equatable {
@@ -416,6 +437,13 @@ extension MX.Story {
         var pick: Bool?
         var picked: Bool?
         var pickAt: Double?
+        var todaySeconds: Double?
+        var todayStart: String?
+        var week: [MatrixStoryCopy.WeekDay]?
+        var farWeeks: [Double]?
+        var habitWeek: Double?
+        /// true in the real done flow: every figure in the art comes from the user's record
+        var isReal: Bool { week != nil }
 
         init(_ s: MatrixStoryContext) {
             t = s.t
@@ -438,6 +466,11 @@ extension MX.Story {
             pick = s.pick
             picked = s.picked
             pickAt = s.pickAt
+            todaySeconds = s.todaySeconds
+            todayStart = s.todayStart
+            week = s.week.flatMap { $0.count == 7 ? $0 : nil }
+            farWeeks = s.farWeeks.map { $0.map(Double.init) }
+            habitWeek = s.habitWeek.map(Double.init)
         }
     }
 
@@ -856,7 +889,11 @@ final class MatrixStoryRuntime {
             t: t, lt: lt, cx: cx, cy: cy, cols: cols, rows: rows, N: model.N, taps: model.tapTimes.count,
             tapTimes: model.tapTimes, tapAt: tapAt, sealT: model.sealT, since: since, D: model.dayData,
             day: model.day, pos: model.pos, weekDone: model.weekDone, weekToday: model.weekToday,
-            pick: model.monthPick, picked: model.picked, pickAt: model.pickAt, cal: model.cal
+            pick: model.monthPick, picked: model.picked, pickAt: model.pickAt, cal: model.cal,
+            todaySeconds: model.copy.today?.seconds, todayStart: model.copy.today?.start,
+            week: model.copy.weekDays.isEmpty ? nil : model.copy.weekDays,
+            farWeeks: model.copy.trainingWeeks.isEmpty ? nil : model.copy.trainingWeeks,
+            habitWeek: model.dayData.week
         )
         board.reset()
         let mx = MatrixStoryScenes.render(&board, id, counted: counted, sc)
