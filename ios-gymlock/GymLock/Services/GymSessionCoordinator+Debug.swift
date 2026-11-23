@@ -893,33 +893,51 @@ extension GymSessionCoordinator {
         // real log.
 
         case .arriveStay20:
+            // No exit ever arrives, so the 21 minutes at the gym count by time.
             let visit = debugFreshVisit(minutesAgo: 21)
             debugReportVisit(visit.id, prefix: "21 min, no exit")
 
         case .arriveLeaveAt12:
-            let visit = debugFreshVisit(minutesAgo: 20)
-            noteGymExit(at: visit.arrivedAt.addingTimeInterval(12 * 60))
+            // Arrived 20 minutes ago and left at 12 minutes: each event is
+            // applied with the app's clock at that moment.
+            let visit = debugFreshVisit(minutesAgo: 20, evaluate: false)
+            let exit = visit.arrivedAt.addingTimeInterval(12 * 60)
+            noteGymExit(at: exit, now: exit)
+            evaluateVisits()
             debugReportVisit(visit.id, prefix: "left at 12 min")
 
         case .stepOutThreeMinutes:
-            let visit = debugFreshVisit(minutesAgo: 25)
-            noteGymExit(at: visit.arrivedAt.addingTimeInterval(10 * 60))
-            noteGymEntry(at: visit.arrivedAt.addingTimeInterval(13 * 60))
+            // Out at 10 minutes, back at 13: inside the 5 minute grace, so the
+            // trip is ignored and the visit counts by time at 20 minutes.
+            let visit = debugFreshVisit(minutesAgo: 25, evaluate: false)
+            let exit = visit.arrivedAt.addingTimeInterval(10 * 60)
+            let back = visit.arrivedAt.addingTimeInterval(13 * 60)
+            noteGymExit(at: exit, now: exit)
+            noteGymEntry(at: back, now: back)
+            evaluateVisits()
             debugReportVisit(visit.id, prefix: "out 10 to 13 min")
 
         case .healthWorkout22:
-            // 8 minutes at the gym, not enough on its own, plus a 22 minute
-            // watch workout that started at the gym.
-            let visit = debugFreshVisit(minutesAgo: 30)
-            noteGymExit(at: visit.arrivedAt.addingTimeInterval(8 * 60))
+            // The basement gym case: poor GPS, so iOS reports a false exit at
+            // 8 minutes while the watch keeps logging a Strength workout that
+            // starts at 2 minutes and runs 22 minutes (ends at 24). It counts
+            // through Health, and the done flow range is arrival to 24 minutes.
+            let visit = debugFreshVisit(minutesAgo: 30, evaluate: false)
+            let exit = visit.arrivedAt.addingTimeInterval(8 * 60)
+            noteGymExit(at: exit, now: exit)
             debugEmitWorkout(start: visit.arrivedAt.addingTimeInterval(2 * 60), minutes: 22, handTyped: false)
-            debugReportVisit(visit.id, prefix: "8 min + 22 min in Health")
+            evaluateVisits()
+            debugReportVisit(visit.id, prefix: "false exit at 8 min + 22 min watch workout")
 
         case .handTypedWorkout:
-            let visit = debugFreshVisit(minutesAgo: 30)
-            noteGymExit(at: visit.arrivedAt.addingTimeInterval(8 * 60))
+            // Same false exit, but the workout was typed by hand, so Health
+            // does not prove it and the visit does not count.
+            let visit = debugFreshVisit(minutesAgo: 30, evaluate: false)
+            let exit = visit.arrivedAt.addingTimeInterval(8 * 60)
+            noteGymExit(at: exit, now: exit)
             debugEmitWorkout(start: visit.arrivedAt.addingTimeInterval(2 * 60), minutes: 45, handTyped: true)
-            debugReportVisit(visit.id, prefix: "8 min + 45 min typed by hand")
+            evaluateVisits()
+            debugReportVisit(visit.id, prefix: "false exit at 8 min + 45 min typed by hand")
 
         case .unplannedVisit:
             // A visit with no alarm running, the way the permanent gym area
@@ -1210,12 +1228,19 @@ extension GymSessionCoordinator {
     static var debugGymResult = "none"
 
     /// A visit that arrived `minutesAgo`, with time at the gym counting.
-    private func debugFreshVisit(minutesAgo: Int) -> GymVisit {
+    /// With `evaluate` false the visit is only evaluated at its own arrival
+    /// time, so a preset can replay later events (exit, entry, workout) in
+    /// real order and settle once at the end.
+    private func debugFreshVisit(minutesAgo: Int, evaluate: Bool = true) -> GymVisit {
         endSession()
         visits.debugClear()
         let arrived = Date().addingTimeInterval(-Double(minutesAgo) * 60)
-        let visit = debugBeginVisit(arrivedAt: arrived, countsOn: Calendar.current.startOfDay(for: arrived))
-        evaluateVisits()
+        let visit = debugBeginVisit(
+            arrivedAt: arrived,
+            countsOn: Calendar.current.startOfDay(for: arrived),
+            evaluateAt: evaluate ? nil : arrived
+        )
+        if evaluate { evaluateVisits() }
         return visit
     }
 
@@ -1227,8 +1252,10 @@ extension GymSessionCoordinator {
             source: handTyped ? "Health" : "Apple Watch",
             wasUserEntered: handTyped
         )
-        visits.add([workout], now: Date())
-        evaluateVisits()
+        // The watch logs the workout when it ends, so the app's clock is
+        // the workout's end time.
+        visits.add([workout], now: workout.endedAt)
+        evaluateVisits(now: workout.endedAt)
     }
 
     /// A photo that only lives in memory, for the proof check.

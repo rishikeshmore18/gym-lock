@@ -314,26 +314,37 @@ enum DoneFlowBuilder {
         }
 
         /// When the session really ran, from start to end, capped at 5 hours. Nil when GymLock can't know.
-        /// 1. The Apple Health workout that proved the visit: its own start and end.
-        /// 2. A gym visit: arrival (or "I'm here") to leaving; still there, arrival to now.
-        ///    A finished visit with no recorded exit has no honest end.
-        /// 3. A home workout: the minutes it logged, ending when it was recorded.
+        /// 1. A gym visit: the start is always the arrival (or "I'm here"), so "IN AT" and the range agree.
+        ///    The end is the later of two things: when the phone says they left (or, still there, now), and
+        ///    when the last qualifying Apple Health workout ended. iOS exit events can be early or false
+        ///    (a basement gym with poor GPS), so if the watch says they were still training, the later time wins.
+        ///    A finished visit with no recorded exit and no workout has no honest end.
+        /// 2. A home workout: the minutes it logged, ending when it was recorded.
         /// Never "arrival to the moment it counted": that is when proof arrived, not when training ended.
         /// The length shown is always end minus start, so the times and the minutes cannot disagree.
         static func window(of o: SessionOutcome, visit: GymVisit?, workouts: [DetectedWorkout], now: Date, cal: Calendar) -> SessionWindow? {
             let cap: TimeInterval = 300 * 60
             if let v = visit, !v.isHome {
-                if let w = workouts
-                    .filter({ WorkoutRules.healthQualifies($0, arrivedAt: v.healthAnchor) })
-                    .max(by: { $0.endedAt.timeIntervalSince($0.startedAt) < $1.endedAt.timeIntervalSince($1.startedAt) }) {
-                    return SessionWindow(start: w.startedAt, end: min(w.endedAt, w.startedAt.addingTimeInterval(cap)), source: .health)
-                }
                 let start = v.manualAt ?? v.arrivedAt
-                let end: Date? = v.leftAt ?? v.pendingExitAt ?? (v.isFinished(now: now, calendar: cal) ? nil : now)
-                if let end, end.timeIntervalSince(start) >= 60 {
-                    return SessionWindow(start: start, end: min(end, start.addingTimeInterval(cap)), source: .gym)
+                let presenceEnd: Date? = v.leftAt ?? v.pendingExitAt ?? (v.isFinished(now: now, calendar: cal) ? nil : now)
+                let healthEnd: Date? = workouts
+                    .filter { WorkoutRules.healthQualifies($0, arrivedAt: v.healthAnchor) }
+                    .map(\.endedAt)
+                    .max()
+                var end: Date?
+                switch (presenceEnd, healthEnd) {
+                case let (presence?, health?): end = max(presence, health)
+                case let (presence?, nil): end = presence
+                case let (nil, health?): end = health
+                case (nil, nil): end = nil
                 }
-                return SessionWindow(start: start, end: nil, source: .gym)
+                if let candidate = end, candidate.timeIntervalSince(start) < 60 { end = nil }
+                if let candidate = end { end = min(candidate, start.addingTimeInterval(cap)) }
+                let source: SessionWindow.Source = {
+                    guard let healthEnd, healthEnd >= (presenceEnd ?? .distantPast) else { return .gym }
+                    return .health
+                }()
+                return SessionWindow(start: start, end: end, source: source)
             }
             if let m = o.minutes, m > 0 {
                 let end = o.date
