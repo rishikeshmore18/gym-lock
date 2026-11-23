@@ -10,8 +10,10 @@
 //                    the countdown underneath.
 //
 //  When it plays (all must hold):
-//    - the session ran in Wake & Go (`resolvedFlowMode == .wakeAndGo`): never on Go Later days
-//    - the user committed less than 5 minutes ago (`committedAt`), and has not left yet
+//    - the user has hit "I'm up" / "I'm going" (`committedAt` is set) and has not left yet
+//    - whatever the flow or time of day: Wake & Go and Go Later both see it (a variation for
+//      other times of day comes later), and however long ago the tap was, the first time the
+//      app shows the next screen
 //    - it is not the "pick a day" skip offer (`isMakeUpOffer`)
 //    - this session has not played it before (`gymlock.morning.wakeIntroPlayedSession`)
 //
@@ -35,10 +37,6 @@ import SwiftUI
 enum WakeIntroLedger {
     /// The id of the last session that played the wake page (gymlock.<area>.<name>).
     static let playedSessionKey = "gymlock.morning.wakeIntroPlayedSession"
-    /// How long after "I'm up" the page may still start. Past this the user is mid-morning and
-    /// a relaunch must land on the screen they were on, not on "Good morning".
-    static let freshness: TimeInterval = 5 * 60
-
     static func hasPlayed(_ sessionID: UUID, defaults: UserDefaults = .standard) -> Bool {
         defaults.string(forKey: playedSessionKey) == sessionID.uuidString
     }
@@ -50,13 +48,9 @@ enum WakeIntroLedger {
     /// Whether the page should play now for this session on this screen.
     static func isEligible(_ session: GymSession, route: MorningRoute, now: Date = Date(), defaults: UserDefaults = .standard) -> Bool {
         guard route == .mission || route == .countdown else { return false }
-        // Go Later's alarm is "time to go"; the morning was a plain wake alarm (FLOW, Flow 2).
-        guard session.resolvedFlowMode == .wakeAndGo else { return false }
         guard session.isMakeUpOffer != true else { return false }
         guard session.departedAt == nil else { return false }
-        guard let committed = session.committedAt else { return false }
-        let age = now.timeIntervalSince(committed)
-        guard age >= -5, age < freshness else { return false }
+        guard session.committedAt != nil else { return false }
         return !hasPlayed(session.id, defaults: defaults)
     }
 }
