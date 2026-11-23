@@ -52,7 +52,8 @@ enum DoneFlowBuilder {
         let weekToday = f.weekday
 
         let record = Record(store: store, coordinator: coordinator, cal: cal, now: now)
-        let secondsToday = record.seconds(of: outcome)
+        let windowToday = record.window(of: outcome)
+        let secondsToday = windowToday.flatMap { $0.seconds >= 60 ? $0.seconds : nil }
         let minutesToday = secondsToday.map { Int($0 / 60) }.flatMap { $0 > 0 ? $0 : nil }
 
         // MARK: Headers and captions
@@ -66,7 +67,7 @@ enum DoneFlowBuilder {
 
         // Today
         let visit = record.visit(for: outcome)
-        let todayCopy = todaySession(outcome: outcome, visit: visit, minutes: minutesToday, seconds: secondsToday, now: now, sessions: f.totalCounted)
+        let todayCopy = todaySession(outcome: outcome, visit: visit, window: windowToday, sessions: f.totalCounted)
         headers[.today] = .init(eyebrow: outcome.kind == .homeWorkout ? "TODAY'S WORKOUT" : "TODAY'S SESSION",
                                 title: minutesToday.map { "\($0) min." } ?? "Counted.")
 
@@ -201,22 +202,25 @@ enum DoneFlowBuilder {
     /// "tomorrow" stays lower-case in "See you tomorrow"; weekday names are already capitalised.
     private static func capitalizedDay(_ s: String) -> String { s }
 
-    private static func todaySession(outcome: SessionOutcome, visit: GymVisit?, minutes: Int?, seconds: Double?, now: Date, sessions: Int) -> MatrixStoryCopy.Today {
-        let start: Date
-        var end: Date?
-        if let visit, !visit.isHome {
-            start = visit.manualAt ?? visit.arrivedAt
-            // still at the gym: no end time yet (the counted moment is not when the session ended)
-            end = visit.leftAt
-        } else if let m = outcome.minutes, m > 0 {
-            end = outcome.date
-            start = outcome.date.addingTimeInterval(-Double(m) * 60)
-        } else {
-            start = outcome.date
-        }
-        if let e = end, e.timeIntervalSince(start) < 60 { end = nil }
+    /// The today screen's words. The in and out times are the measured window, so they always add up to
+    /// the minutes shown above them; the caption names what measured it.
+    private static func todaySession(outcome: SessionOutcome, visit: GymVisit?, window: SessionWindow?, sessions: Int) -> MatrixStoryCopy.Today {
+        let minutes = window.map { Int($0.seconds / 60) }.flatMap { $0 > 0 ? $0 : nil }
+        // when the person walked in (or started a home workout); falls back to the outcome's own time
+        let arrival: Date = {
+            if let visit, !visit.isHome { return visit.manualAt ?? visit.arrivedAt }
+            return window?.start ?? outcome.date
+        }()
+        let rangeStart = window?.start ?? arrival
 
         let caption: String? = {
+            if let window {
+                switch window.source {
+                case .health: return "Confirmed by **Apple Health.**"
+                case .gym: return minutes.map { "**\($0) minutes** at the gym. **Counted.**" }
+                case .home: break
+                }
+            }
             switch visit?.proof ?? outcome.proof {
             case .health: return "Confirmed by **Apple Health.**"
             case .timeAtGym: return "**\(WorkoutRules.minimumMinutes) minutes** at the gym. **Counted.**"
@@ -226,16 +230,16 @@ enum DoneFlowBuilder {
         }()
 
         var stats: [MatrixStoryCopy.Stat] = []
-        if let minutes, minutes > 0 { stats.append(.count(minutes, unit: "min", label: "TODAY")) }
-        stats.append(.init(value: Date.formattedClock(start), label: outcome.kind == .homeWorkout ? "STARTED" : "IN AT"))
+        if let minutes { stats.append(.count(minutes, unit: "min", label: "TODAY")) }
+        stats.append(.init(value: Date.formattedClock(arrival), label: outcome.kind == .homeWorkout ? "STARTED" : "IN AT"))
         stats.append(.count(sessions, label: sessions == 1 ? "SESSION" : "SESSIONS", coral: true))
         return .init(
-            start: Date.formattedClock(start),
-            end: end.map(Date.formattedClock),
+            start: Date.formattedClock(rangeStart),
+            end: window?.end.map(Date.formattedClock),
             caption: caption,
             stats: stats,
             minutes: minutes,
-            seconds: seconds
+            seconds: window.flatMap { $0.seconds >= 60 ? $0.seconds : nil }
         )
     }
 
@@ -272,6 +276,17 @@ enum DoneFlowBuilder {
 
     // MARK: The record
 
+    /// One session's measured time on the clock.
+    struct SessionWindow {
+        enum Source { case health, gym, home }
+        let start: Date
+        /// nil while the end is unknown (a finished visit with no recorded exit)
+        let end: Date?
+        let source: Source
+        /// end minus start, 0 when the end is unknown
+        var seconds: Double { end.map { max(0, $0.timeIntervalSince(start)) } ?? 0 }
+    }
+
     /// Counted sessions and their minutes, read once per build.
     private struct Record {
         let cal: Calendar
@@ -294,32 +309,37 @@ enum DoneFlowBuilder {
 
         func visit(for o: SessionOutcome) -> GymVisit? { visitsByOutcome[o.id] }
 
-        func seconds(of o: SessionOutcome) -> Double? {
-            Self.seconds(of: o, visit: visitsByOutcome[o.id], workouts: workouts, now: now, cal: cal)
+        func window(of o: SessionOutcome) -> SessionWindow? {
+            Self.window(of: o, visit: visitsByOutcome[o.id], workouts: workouts, now: now, cal: cal)
         }
 
-        /// How long the session really ran, capped at 5 hours. Nil when GymLock can't know.
-        /// 1. The Apple Health workout that proved the visit: its own length.
+        /// When the session really ran, from start to end, capped at 5 hours. Nil when GymLock can't know.
+        /// 1. The Apple Health workout that proved the visit: its own start and end.
         /// 2. A gym visit: arrival (or "I'm here") to leaving; still there, arrival to now.
-        ///    A finished visit with no recorded exit has no honest length.
-        /// 3. A home workout: the minutes it logged.
+        ///    A finished visit with no recorded exit has no honest end.
+        /// 3. A home workout: the minutes it logged, ending when it was recorded.
         /// Never "arrival to the moment it counted": that is when proof arrived, not when training ended.
-        static func seconds(of o: SessionOutcome, visit: GymVisit?, workouts: [DetectedWorkout], now: Date, cal: Calendar) -> Double? {
-            let cap: Double = 300 * 60
+        /// The length shown is always end minus start, so the times and the minutes cannot disagree.
+        static func window(of o: SessionOutcome, visit: GymVisit?, workouts: [DetectedWorkout], now: Date, cal: Calendar) -> SessionWindow? {
+            let cap: TimeInterval = 300 * 60
             if let v = visit, !v.isHome {
                 if let w = workouts
                     .filter({ WorkoutRules.healthQualifies($0, arrivedAt: v.healthAnchor) })
                     .max(by: { $0.endedAt.timeIntervalSince($0.startedAt) < $1.endedAt.timeIntervalSince($1.startedAt) }) {
-                    return min(cap, w.endedAt.timeIntervalSince(w.startedAt))
+                    return SessionWindow(start: w.startedAt, end: min(w.endedAt, w.startedAt.addingTimeInterval(cap)), source: .health)
                 }
                 let start = v.manualAt ?? v.arrivedAt
                 let end: Date? = v.leftAt ?? v.pendingExitAt ?? (v.isFinished(now: now, calendar: cal) ? nil : now)
-                if let end {
-                    let s = end.timeIntervalSince(start)
-                    if s >= 60 { return min(cap, s) }
+                if let end, end.timeIntervalSince(start) >= 60 {
+                    return SessionWindow(start: start, end: min(end, start.addingTimeInterval(cap)), source: .gym)
                 }
+                return SessionWindow(start: start, end: nil, source: .gym)
             }
-            if let m = o.minutes, m > 0 { return min(cap, Double(m) * 60) }
+            if let m = o.minutes, m > 0 {
+                let end = o.date
+                let len = min(cap, Double(m) * 60)
+                return SessionWindow(start: end.addingTimeInterval(-len), end: end, source: .home)
+            }
             return nil
         }
 
@@ -327,7 +347,7 @@ enum DoneFlowBuilder {
             var out: [Date: Int] = [:]
             for o in outcomes {
                 let d = cal.startOfDay(for: o.countingDay(calendar: cal))
-                let m = seconds(of: o, visit: visits[o.id], workouts: workouts, now: now, cal: cal).map { Int($0 / 60) } ?? 0
+                let m = window(of: o, visit: visits[o.id], workouts: workouts, now: now, cal: cal).map { Int($0.seconds / 60) } ?? 0
                 out[d] = max(out[d] ?? 0, m)
             }
             return out
