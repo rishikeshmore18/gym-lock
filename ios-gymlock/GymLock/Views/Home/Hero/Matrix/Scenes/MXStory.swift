@@ -767,7 +767,6 @@ extension MX {
             let cy: Double = _d27.cy
             let T: Double = _d27.lt
             let t: Double = _d27.t
-            let day: Double = _d27.day
             let pos: String = _d27.pos
             let PW: MXStoryWeek = _d27.PW
             let yb: Double = JS.floor(cy) + 7.0
