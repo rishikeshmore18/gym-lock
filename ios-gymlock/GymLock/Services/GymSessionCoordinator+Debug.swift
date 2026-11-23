@@ -86,6 +86,7 @@ extension GymSessionCoordinator {
         case wakeAndGoGymDay
         case goLaterGymDay
         case plainWakeAlarmRings
+        case alarmRingsNow
         case ignoreAlarmUntilDeadline
         case runningLate30
         case runningLateNearBedtime
@@ -167,7 +168,7 @@ extension GymSessionCoordinator {
             case .legacyEveningUser, .changeBedtimeTonight,
                  .bedtimeAfterMidnightGymMonday, .oldPlanNightLockOff:
                 "sleep and night lock"
-            case .wakeAndGoGymDay, .goLaterGymDay, .plainWakeAlarmRings,
+            case .wakeAndGoGymDay, .goLaterGymDay, .plainWakeAlarmRings, .alarmRingsNow,
                  .ignoreAlarmUntilDeadline, .runningLate30, .runningLateNearBedtime,
                  .runningLateTwice, .phoneWasOffOnGymDay:
                 "alarm rules"
@@ -244,6 +245,7 @@ extension GymSessionCoordinator {
             case .wakeAndGoGymDay: "wake & go gym day"
             case .goLaterGymDay: "go later gym day (time to go 17:30)"
             case .plainWakeAlarmRings: "plain wake alarm rings (no lock)"
+            case .alarmRingsNow: "alarm rings now (wake page test)"
             case .ignoreAlarmUntilDeadline: "ignore alarm until deadline"
             case .runningLate30: "running late +30"
             case .runningLateNearBedtime: "running late near bedtime"
@@ -770,6 +772,17 @@ extension GymSessionCoordinator {
             let snooze = session.map { SessionVoice(session: $0).allowsSnooze } ?? false
             Self.debugAlarmRulesResult =
                 "\(debugStore?.plan.rhythm.flowMode.label ?? "none") · \(summary) · snooze \(snooze ? "yes" : "NO") · running late \(runningLateOptions.isEmpty ? "no" : "SHOWN")"
+            Task { await syncAlarms() }
+
+        case .alarmRingsNow:
+            // For testing the wake page at any hour: the wake alarm is this minute and the gym is
+            // 35 minutes later, so the window is alive whatever the real clock says. The fixed
+            // 06:30 presets are already over by the afternoon and land on "plans changed".
+            let wake = TimeOfDay(from: Date())
+            debugSetAlarmRhythm(wake: wake, gym: wake.offset(byMinutes: 35), timeToGym: 35)
+            endSession()
+            debugStore?.debugSeedGym()
+            beginSession(for: debugStore?.plan.enabledSlots.first)
             Task { await syncAlarms() }
 
         case .goLaterGymDay:

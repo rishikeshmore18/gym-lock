@@ -41,7 +41,7 @@ enum SimStage: String, CaseIterable, Identifiable {
     var presets: [SimStep] {
         switch self {
         case .sleep: [.windDownLockStart, .windDownLockEnd, .changeBedtimeTonight, .bedtimeAfterMidnightGymMonday]
-        case .alarm: [.wakeAndGoGymDay, .snoozedMorning, .goLaterGymDay, .ignoreAlarmUntilDeadline, .plainWakeAlarmRings]
+        case .alarm: [.alarmRingsNow, .wakeAndGoGymDay, .snoozedMorning, .goLaterGymDay, .ignoreAlarmUntilDeadline, .plainWakeAlarmRings]
         case .journey: [.missionComplete, .departed, .countdownAt75, .runningLate30]
         case .arrival: [.gymRegionEntered, .driveBy, .gymDwellConfirmed, .arrivalTrouble]
         case .workout: [.arriveStay20, .healthWorkout22, .quickWorkoutComplete, .imHereCameraPhoto]
@@ -587,6 +587,12 @@ enum SimCatalog {
             return SimScenario(step: step, summary: "Wake 06:30, gym 07:05, 35 min gap.",
                                expected: "Wake & Go; the wake alarm is the gym alarm; snooze yes.", stage: .alarm,
                                time: .fixed(TimeOfDay(hour: 6, minute: 30), note: "fixed by scenario"),
+                               journey: notDeparted, conditions: st, fixedNotes: ["Flow: Wake & Go"],
+                               writesRealData: true)
+        case .alarmRingsNow:
+            return SimScenario(step: step, summary: "Rings a Wake & Go alarm right now, gym 35 min later.",
+                               expected: "Alarm screen opens; tap I'm up to see the wake page.", stage: .alarm,
+                               time: .now(note: "rings this minute"),
                                journey: notDeparted, conditions: st, fixedNotes: ["Flow: Wake & Go"],
                                writesRealData: true)
         case .goLaterGymDay:
