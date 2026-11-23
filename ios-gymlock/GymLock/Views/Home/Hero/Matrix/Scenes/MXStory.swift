@@ -582,8 +582,10 @@ extension MX {
                     g.fr(X + JS.sin(th) * k, Y - JS.cos(th) * k, (k == 9.0 ? 1.0 : 0.92), (k == 9.0 ? 1 : 0))
                 }
             }
-            if T > BEAT_V {
-                led(&g, "20", "20", X, Y + 3.0, 1.0, cl((T - BEAT_V) / 0.15), 0.0, 1.0)
+            // the user's own minutes; the prototype's "20" only in the lab, nothing when the time is unknown
+            let dial: String? = s.isReal ? s.todaySeconds.map { JS.str(JS.max(1.0, JS.floor($0 / 60.0))) } : "20"
+            if T > BEAT_V, let dial {
+                led(&g, dial, dial, X, Y + 3.0, 1.0, cl((T - BEAT_V) / 0.15), 0.0, 1.0)
             }
             ripple(&g, X, Y, 14.0, 21.0, a, 0.5, 60.0, 0.45)
             return MXStoryRes(o: MatrixDealOptions(stagger: 0.25), glow: ([MatrixGlow(x: X, y: Y - 16.0, r: 9.0, a: 0.25 * hit(a, 0.25))] as [MatrixGlow]))
@@ -693,10 +695,26 @@ extension MX {
             let cy: Double = _d26.cy
             let T: Double = _d26.lt
             let t: Double = _d26.t
-            let m: Double = eo5(seg(T, 0.3, 1.8)) * SES
+            // the user's session length (the prototype's 52:14 only in the lab)
+            let total: Double? = s.isReal ? s.todaySeconds.map { JS.max(60.0, $0) / 60.0 } : SES
             let a: Double = T - 2.12
-            let sec: Double = JS.floor(m * 60.0)
-            let str: String = "\(JS.padStart(JS.str(JS.floor(sec / 60.0)), 2.0, "0")):\(JS.padStart(JS.str(JSMath.rem(sec, 60.0)), 2.0, "0"))"
+            let str: String
+            if let total {
+                let m: Double = eo5(seg(T, 0.3, 1.8)) * total
+                let sec: Double = JS.floor(m * 60.0)
+                if total < 100.0 {
+                    str = "\(JS.padStart(JS.str(JS.floor(sec / 60.0)), 2.0, "0")):\(JS.padStart(JS.str(JSMath.rem(sec, 60.0)), 2.0, "0"))"
+                } else {
+                    // past 99 minutes the clock reads hours:minutes
+                    let mins: Double = JS.floor(sec / 60.0)
+                    str = "\(JS.padStart(JS.str(JS.floor(mins / 60.0)), 2.0, "0")):\(JS.padStart(JS.str(JSMath.rem(mins, 60.0)), 2.0, "0"))"
+                }
+            } else {
+                // length unknown (a home workout with no time): the clock shows when it started
+                // the LED font has digits and ":" only (a 12-hour "2:03 PM" reads " 2:03")
+                let clock: String = String((s.todayStart ?? "").filter { $0.isNumber || $0 == ":" }.prefix(5))
+                str = clock.isEmpty ? "00:00" : clock
+            }
             led(&g, str, "00:00", cx, JS.floor(cy) - 13.0, 2.0, 0.95 + 0.05 * hit(a, 0.3), 0.045, 1.0)
             let yb: Double = JS.floor(cy) + 13.0
             let nb: Double = 26.0
@@ -749,23 +767,41 @@ extension MX {
             let cy: Double = _d27.cy
             let T: Double = _d27.lt
             let t: Double = _d27.t
-            let day: Double = _d27.day
             let pos: String = _d27.pos
             let PW: MXStoryWeek = _d27.PW
             let yb: Double = JS.floor(cy) + 7.0
-            let ago: Double = JS.max(0.0, PW.done - 1.0)
             let earlier: [Double] = (EARLIER[pos] ?? ([] as [Double]))
-            let first: Double = day - ago
+            // Real week (done flow): Monday-first days from the user's record. Lab: the prototype's sample.
+            let wk: [MatrixStoryCopy.WeekDay]? = _d27.week
+            let day: Double = wk.flatMap { w in w.firstIndex(where: { $0.isToday }).map(Double.init) } ?? _d27.day
+            let first: Double
+            if let wk {
+                first = wk.firstIndex(where: { $0.done && !$0.isToday }).map(Double.init) ?? day
+            } else {
+                first = day - JS.max(0.0, PW.done - 1.0)
+            }
             func done(_ i: Double) -> Bool {
+                if let wk { return Int(i) != Int(day) && wk[Int(i)].done }
                 return (i >= first && i < day)
             }
             var ghosts: [Double] = ([] as [Double])
-            do {
+            if let wk {
+                for (i, d) in wk.enumerated() where d.upcoming { ghosts.append(Double(i)) }
+            } else {
                 var i: Double = day + 1.0
                 while (i < 7.0 && Double(ghosts.count) < 5.0 - PW.done) {
                     defer { i += 1 }
                     ghosts.append(i)
                 }
+            }
+            // bar heights: real minutes on a scale that fits the week's longest session (60 min at least),
+            // a done day with no measured time stands at the week's typical length
+            let known: [Double] = (wk ?? []).compactMap { $0.minutes.map(Double.init) }.sorted()
+            let typical: Double = known.isEmpty ? 45.0 : known[known.count / 2]
+            let todayMins: Double = wk.map { w in Double(w[Int(day)].minutes ?? 0) > 0 ? Double(w[Int(day)].minutes!) : (_d27.todaySeconds.map { $0 / 60.0 } ?? typical) } ?? 52.0
+            let scale: Double = JS.max(60.0, JS.max([todayMins] + known))
+            func barH(_ mins: Double) -> Double {
+                return wk == nil ? JS.round(mins / 3.0) : JS.max(2.0, JS.round(mins * 20.0 / scale))
             }
             let a1: Double = T - 1.9
             let a2: Double = T - 2.15
@@ -779,11 +815,16 @@ extension MX {
                     let isT: Bool = i == day
                     let isD: Bool = done(i)
                     let st: Double = (isT ? 1.76 : 0.2 + k * 0.18)
-                    let mins: Double = (isT ? 52.0 : (isD ? (earlier[Int(JS.max(0.0, Double(earlier.count) - (day - i)))] ?? 50.0) : 0.0))
+                    let mins: Double
+                    if let wk {
+                        mins = (isT ? todayMins : (isD ? (wk[Int(i)].minutes.map(Double.init) ?? typical) : 0.0))
+                    } else {
+                        mins = (isT ? 52.0 : (isD ? (earlier[Int(JS.max(0.0, Double(earlier.count) - (day - i)))] ?? 50.0) : 0.0))
+                    }
                     if isD {
                         k += 1
                     }
-                    let h: Double = JS.round(mins / 3.0)
+                    let h: Double = (isT || isD) ? barH(mins) : 0.0
                     txt3(&g, JS.at(("MTWTFSS"), i), xc + 0.5, yb + 3.0, (isT ? 0.95 : (isD ? 0.6 : 0.3)))
                     if ghosts.contains(i) {
                         do {
@@ -824,7 +865,7 @@ extension MX {
                 }
             }
             let tx: Double = JS.floor(cx) + (day - 3.0) * 7.0 + 0.5
-            let ty: Double = yb + 0.5 - JS.round(52.0 / 3.0) + 1.0
+            let ty: Double = yb + 0.5 - barH(todayMins) + 1.0
             ripple(&g, tx, ty, 1.0, 7.0, a2, 0.45, 24.0, 0.55)
             return MXStoryRes(o: MatrixDealOptions(stagger: 0.3), glow: ([MatrixGlow(x: tx, y: yb - 8.0, r: 9.0, a: 0.16 * hit(a1, 0.3)), MatrixGlow(x: tx, y: ty, r: 6.0, a: 0.25 * hit(a2, 0.35))] as [MatrixGlow]))
         }
@@ -1062,10 +1103,19 @@ extension MX {
             let X0: Double = JS.floor(cx) - 23.0
             let yb: Double = JS.floor(cy) + 9.0
             let a: Double = T - BEAT_F
-            let W: [Double] = (Array(WEEKMIN) + ([(CURMIN[pos] ?? 154.0)] as [Double]))
+            // Real flow: the last 7 calendar weeks since the first session, this week last; weeks before
+            // the first session draw nothing (-1). Lab: the prototype's sample weeks.
+            let W: [Double]
+            if let fw = s.farWeeks {
+                let last: [Double] = Array(fw.suffix(7))
+                W = Array(repeating: -1.0, count: 7 - last.count) + last
+            } else {
+                W = (Array(WEEKMIN) + ([(CURMIN[pos] ?? 154.0)] as [Double]))
+            }
+            let firstBar: Double = Double(W.firstIndex(where: { $0 >= 0.0 }) ?? 6)
             let top: Double = JS.max([160.0] + Array(W))
             let hs: [Double] = W.map { (m: Double) -> Double in
-                return JS.max(2.0, JS.round((20.0 * m) / top))
+                return m < 0.0 ? 0.0 : JS.max(2.0, JS.round((20.0 * m) / top))
             }
             do {
                 var i: Double = 0.0
@@ -1090,6 +1140,9 @@ extension MX {
                                 }
                             }
                         }
+                        continue
+                    }
+                    if W[Int(i)] < 0.0 {
                         continue
                     }
                     let st: Double = (cur ? 0.56 : 0.12 + i * 0.07)
@@ -1117,8 +1170,17 @@ extension MX {
                     }
                 }
             }
-            txt3(&g, "1", X0 + 1.5, yb + 3.0, 0.35)
-            txt3(&g, "7", X0 + 31.5, yb + 3.0, 0.8)
+            if let hw = s.habitWeek, s.farWeeks != nil {
+                // week numbers of the habit: the first bar shown and this week
+                let firstWeek: Double = JS.max(1.0, hw - (6.0 - firstBar))
+                if firstBar < 6.0 {
+                    txt3(&g, JS.str(firstWeek), X0 + firstBar * 5.0 + 1.5, yb + 3.0, 0.35)
+                }
+                txt3(&g, JS.str(hw), X0 + 31.5, yb + 3.0, 0.8)
+            } else {
+                txt3(&g, "1", X0 + 1.5, yb + 3.0, 0.35)
+                txt3(&g, "7", X0 + 31.5, yb + 3.0, 0.8)
+            }
             let tx: Double = X0 + 31.5
             let ty: Double = yb + 0.5 - hs[6] + 1.0
             ripple(&g, tx, ty, 1.0, 7.0, a, 0.45, 24.0, 0.6)

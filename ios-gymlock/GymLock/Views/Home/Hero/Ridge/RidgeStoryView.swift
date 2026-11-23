@@ -41,7 +41,7 @@ struct RidgeClimaxCopy {
         RidgeClimaxCopy(eyebrow: "THE PINE", lastEyebrow: "THE WEEK'S LAST GROWTH", title: "Grow it.", sub: { "Tap **\($0) times.** Today goes into the pine." }, idle: "Tap to grow the pine", mid: "Taller", end: "Taller than this morning. That's what a session does."),
         RidgeClimaxCopy(eyebrow: "THE SUMMIT", lastEyebrow: "THE WEEK'S LAST CLIMB", title: "Light it.", sub: { "Climb with **\($0) taps,** then the beacon at the top is yours." }, idle: "Tap to climb", mid: "Keep climbing", end: "Lit from the top. Everyone below can see it."),
         RidgeClimaxCopy(eyebrow: "THE SHORE", lastEyebrow: "THE WEEK'S LAST LIGHTS", title: "Let them go.", sub: { "One lantern for every tap. **\($0)** to send up." }, idle: "Tap to light a lantern", mid: "Another", end: "Up and away. Today is done and drifting."),
-        RidgeClimaxCopy(eyebrow: "TONIGHT'S SKY", lastEyebrow: "THE WEEK, IN STARS", title: "Connect it.", sub: { "**\($0) stars,** one for every session. Light them all." }, idle: "Tap to light a star", mid: "Next star", end: "One shape for the whole week. It's written in the sky."),
+        RidgeClimaxCopy(eyebrow: "TONIGHT'S SKY", lastEyebrow: "THE WEEK, IN STARS", title: "Connect it.", sub: { "Tap **\($0) times** to light tonight's stars." }, idle: "Tap to light a star", mid: "Next star", end: "One shape for the whole week. It's written in the sky."),
     ]
 
     /// screens12.ts TALLY: what each world counts.

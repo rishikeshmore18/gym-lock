@@ -110,9 +110,23 @@ struct HeroDayFacts: Equatable {
     var neverCounted: Bool { countedDays.isEmpty }
     var totalCounted: Int { countedDays.count }
 
+    /// Distinct days with a counted gym visit (`.showedUp`) before the display day. Home workouts and
+    /// calendar days do not add to it, the same rule as the wake page (`WakeFactsProvider.gymVisitDay`).
+    var gymVisitDaysBefore = 0
+
+    /// Day N of the habit: today is gym visit number N (visits before today, plus today's).
+    /// Nil before the first counted session.
     func habitDay(_ cal: Calendar) -> Int? {
-        guard let first = countedDays.first else { return nil }
-        return (cal.dateComponents([.day], from: first, to: displayDay).day ?? 0) + 1
+        guard !countedDays.isEmpty else { return nil }
+        return gymVisitDaysBefore + 1
+    }
+
+    /// Week N of the habit: calendar weeks since the week of the first counted session, this one included.
+    func habitWeek(_ cal: Calendar) -> Int? {
+        guard let first = countedDays.first,
+              let a = StreakEngine.weekStart(containing: first, weekCalendar: cal),
+              let b = StreakEngine.weekStart(containing: displayDay, weekCalendar: cal) else { return nil }
+        return max(1, (cal.dateComponents([.day], from: a, to: b).day ?? 0) / 7 + 1)
     }
 
     /// Days since the last counted session before today (nil when never counted).
@@ -367,7 +381,7 @@ enum HeroMomentResolver {
             theme: theme,
             pos: pos,
             monthPos: cardMonthPos,
-            dayData: MatrixDayData(day: max(1, habit ?? 1), week: max(1, ((habit ?? 1) - 1) / 7 + 1), sessions: f.totalCounted),
+            dayData: MatrixDayData(day: max(1, habit ?? 1), week: f.habitWeek(cal) ?? 1, sessions: f.totalCounted),
             clock: clock,
             copy: copy,
             dayKey: f.dayKey,
@@ -448,6 +462,12 @@ enum HeroMomentResolver {
         // History
         let counted = Set(store.log.outcomes.filter(\.counts).map { cal.startOfDay(for: $0.countingDay(calendar: cal)) })
         f.countedDays = counted.sorted()
+        f.gymVisitDaysBefore = Set(
+            store.log.outcomes
+                .filter { $0.kind == .showedUp && $0.counts }
+                .map { cal.startOfDay(for: $0.countingDay(calendar: cal)) }
+                .filter { $0 < displayDay }
+        ).count
         f.weekGoal = max(1, store.streak.weeklyGoal)
         f.weekCount = store.streak.thisWeekSessionDays
         f.isThisWeekKept = store.streak.isThisWeekKept

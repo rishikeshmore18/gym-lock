@@ -47,10 +47,13 @@ enum DoneFlowBuilder {
             plannedDaysLeftAfterToday: f.plannedDaysLeftInMonth,
             recapShownThisMonth: f.recapShownThisMonth && !replay
         )
-        let weekDone = max(1, min(k, day + 1))
+        // The art's week count is the real one. `day` only picks the art's world; it is not a weekday.
+        let weekDone = max(1, min(7, k))
+        let weekToday = f.weekday
 
-        let record = Record(store: store, coordinator: coordinator, cal: cal)
-        let minutesToday = record.minutes(of: outcome)
+        let record = Record(store: store, coordinator: coordinator, cal: cal, now: now)
+        let secondsToday = record.seconds(of: outcome)
+        let minutesToday = secondsToday.map { Int($0 / 60) }.flatMap { $0 > 0 ? $0 : nil }
 
         // MARK: Headers and captions
 
@@ -63,7 +66,7 @@ enum DoneFlowBuilder {
 
         // Today
         let visit = record.visit(for: outcome)
-        let todayCopy = todaySession(outcome: outcome, visit: visit, minutes: minutesToday, sessions: f.totalCounted)
+        let todayCopy = todaySession(outcome: outcome, visit: visit, minutes: minutesToday, seconds: secondsToday, now: now, sessions: f.totalCounted)
         headers[.today] = .init(eyebrow: outcome.kind == .homeWorkout ? "TODAY'S WORKOUT" : "TODAY'S SESSION",
                                 title: minutesToday.map { "\($0) min." } ?? "Counted.")
 
@@ -86,7 +89,7 @@ enum DoneFlowBuilder {
             captions[.week] = "The week was already kept. **This one is extra.**"
             research[.week] = "Going past the goal is how a habit stops needing one."
         }
-        let week = record.week(containing: f.displayDay, today: f.displayDay)
+        let week = record.week(containing: f.displayDay, today: f.displayDay, sessionsLeft: left)
         var weekStats: [MatrixStoryCopy.Stat] = [.count(k, label: k == 1 ? "SESSION" : "SESSIONS")]
         if week.minutes > 0 { weekStats.append(duration(week.minutes, label: "THIS WEEK")) }
         if f.streakWeeks > 0 { weekStats.append(.count(f.streakWeeks, label: "WEEK STREAK", coral: pos == .last)) }
@@ -168,6 +171,7 @@ enum DoneFlowBuilder {
         copy.weekDays = week.days
         copy.weekStats = weekStats
         copy.farWeeks = far.contains { $0 > 0 } && far.count >= 2 ? far : []
+        copy.trainingWeeks = far
         copy.farStats = farStats
         copy.sessions = f.totalCounted
 
@@ -177,7 +181,7 @@ enum DoneFlowBuilder {
             monthPos: monthPos,
             dayData: st.dayData,
             weekDone: weekDone,
-            weekToday: weekDone - 1,
+            weekToday: weekToday,
             monthPick: monthPick,
             cal: monthPos == .middle ? nil : storyCal,
             copy: copy,
@@ -197,12 +201,13 @@ enum DoneFlowBuilder {
     /// "tomorrow" stays lower-case in "See you tomorrow"; weekday names are already capitalised.
     private static func capitalizedDay(_ s: String) -> String { s }
 
-    private static func todaySession(outcome: SessionOutcome, visit: GymVisit?, minutes: Int?, sessions: Int) -> MatrixStoryCopy.Today {
+    private static func todaySession(outcome: SessionOutcome, visit: GymVisit?, minutes: Int?, seconds: Double?, now: Date, sessions: Int) -> MatrixStoryCopy.Today {
         let start: Date
         var end: Date?
         if let visit, !visit.isHome {
             start = visit.manualAt ?? visit.arrivedAt
-            end = visit.leftAt ?? visit.countedAt
+            // still at the gym: no end time yet (the counted moment is not when the session ended)
+            end = visit.leftAt
         } else if let m = outcome.minutes, m > 0 {
             end = outcome.date
             start = outcome.date.addingTimeInterval(-Double(m) * 60)
@@ -214,7 +219,7 @@ enum DoneFlowBuilder {
         let caption: String? = {
             switch visit?.proof ?? outcome.proof {
             case .health: return "Confirmed by **Apple Health.**"
-            case .timeAtGym: return "**20 minutes** at the gym. **Counted.**"
+            case .timeAtGym: return "**\(WorkoutRules.minimumMinutes) minutes** at the gym. **Counted.**"
             case .photo: return "Counted with a **progress photo.**"
             default: return nil
             }
@@ -229,7 +234,8 @@ enum DoneFlowBuilder {
             end: end.map(Date.formattedClock),
             caption: caption,
             stats: stats,
-            minutes: minutes
+            minutes: minutes,
+            seconds: seconds
         )
     }
 
@@ -273,35 +279,56 @@ enum DoneFlowBuilder {
         let visitsByOutcome: [UUID: GymVisit]
         let plannedWeekdays: Set<Weekday>
         let countedDays: [Date: Int]
+        let now: Date
+        let workouts: [DetectedWorkout]
 
-        init(store: AppStore, coordinator: GymSessionCoordinator, cal: Calendar) {
+        init(store: AppStore, coordinator: GymSessionCoordinator, cal: Calendar, now: Date) {
             self.cal = cal
+            self.now = now
             counted = store.log.outcomes.filter(\.counts)
             visitsByOutcome = Dictionary(coordinator.visits.visits.map { ($0.outcomeID, $0) }, uniquingKeysWith: { a, b in a.countedAt != nil ? a : b })
             plannedWeekdays = store.plan.effectiveTrainingDays(fallback: store.schedule)
-            countedDays = Self.minutesByDay(counted, visits: visitsByOutcome, cal: cal)
+            workouts = coordinator.visits.workouts
+            countedDays = Self.minutesByDay(counted, visits: visitsByOutcome, workouts: workouts, now: now, cal: cal)
         }
 
         func visit(for o: SessionOutcome) -> GymVisit? { visitsByOutcome[o.id] }
 
-        func minutes(of o: SessionOutcome) -> Int? {
-            Self.minutes(of: o, visit: visitsByOutcome[o.id])
+        func seconds(of o: SessionOutcome) -> Double? {
+            Self.seconds(of: o, visit: visitsByOutcome[o.id], workouts: workouts, now: now, cal: cal)
         }
 
-        static func minutes(of o: SessionOutcome, visit: GymVisit?) -> Int? {
-            if let v = visit, !v.isHome, let end = v.leftAt ?? v.countedAt {
-                let m = Int(end.timeIntervalSince(v.manualAt ?? v.arrivedAt) / 60)
-                if m > 0 { return min(m, 300) }
+        /// How long the session really ran, capped at 5 hours. Nil when GymLock can't know.
+        /// 1. The Apple Health workout that proved the visit: its own length.
+        /// 2. A gym visit: arrival (or "I'm here") to leaving; still there, arrival to now.
+        ///    A finished visit with no recorded exit has no honest length.
+        /// 3. A home workout: the minutes it logged.
+        /// Never "arrival to the moment it counted": that is when proof arrived, not when training ended.
+        static func seconds(of o: SessionOutcome, visit: GymVisit?, workouts: [DetectedWorkout], now: Date, cal: Calendar) -> Double? {
+            let cap: Double = 300 * 60
+            if let v = visit, !v.isHome {
+                if let w = workouts
+                    .filter({ WorkoutRules.healthQualifies($0, arrivedAt: v.healthAnchor) })
+                    .max(by: { $0.endedAt.timeIntervalSince($0.startedAt) < $1.endedAt.timeIntervalSince($1.startedAt) }) {
+                    return min(cap, w.endedAt.timeIntervalSince(w.startedAt))
+                }
+                let start = v.manualAt ?? v.arrivedAt
+                let end: Date? = v.leftAt ?? v.pendingExitAt ?? (v.isFinished(now: now, calendar: cal) ? nil : now)
+                if let end {
+                    let s = end.timeIntervalSince(start)
+                    if s >= 60 { return min(cap, s) }
+                }
             }
-            if let m = o.minutes, m > 0 { return min(m, 300) }
+            if let m = o.minutes, m > 0 { return min(cap, Double(m) * 60) }
             return nil
         }
 
-        static func minutesByDay(_ outcomes: [SessionOutcome], visits: [UUID: GymVisit], cal: Calendar) -> [Date: Int] {
+        static func minutesByDay(_ outcomes: [SessionOutcome], visits: [UUID: GymVisit], workouts: [DetectedWorkout], now: Date, cal: Calendar) -> [Date: Int] {
             var out: [Date: Int] = [:]
             for o in outcomes {
                 let d = cal.startOfDay(for: o.countingDay(calendar: cal))
-                out[d] = max(out[d] ?? 0, minutes(of: o, visit: visits[o.id]) ?? 0)
+                let m = seconds(of: o, visit: visits[o.id], workouts: workouts, now: now, cal: cal).map { Int($0 / 60) } ?? 0
+                out[d] = max(out[d] ?? 0, m)
             }
             return out
         }
@@ -316,15 +343,26 @@ enum DoneFlowBuilder {
             StreakEngine.weekStart(containing: day, weekCalendar: cal) ?? cal.startOfDay(for: day)
         }
 
-        func week(containing day: Date, today: Date) -> (days: [MatrixStoryCopy.WeekDay], minutes: Int) {
+        /// This week, labelled by the real weekday of each date (the week calendar may start on any day).
+        /// `upcoming` marks the next planned days after today, as many as the weekly goal still needs.
+        func week(containing day: Date, today: Date, sessionsLeft: Int) -> (days: [MatrixStoryCopy.WeekDay], minutes: Int) {
             let start = weekStart(day)
-            let labels = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+            let names = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
             var total = 0
+            var left = sessionsLeft
+            let todayStart = cal.startOfDay(for: today)
             let days: [MatrixStoryCopy.WeekDay] = (0..<7).map { i in
                 let d = cal.date(byAdding: .day, value: i, to: start)!
                 let m = countedDays[d]
                 total += m ?? 0
-                return .init(label: labels[i], minutes: (m ?? 0) > 0 ? m : nil, done: m != nil, isToday: cal.isDate(d, inSameDayAs: today))
+                let isToday = cal.isDate(d, inSameDayAs: today)
+                var upcoming = false
+                if d > todayStart, m == nil, left > 0, isPlanned(d) {
+                    upcoming = true
+                    left -= 1
+                }
+                let label = names[(cal.component(.weekday, from: d) - 1 + 7) % 7]
+                return .init(label: label, minutes: (m ?? 0) > 0 ? m : nil, done: m != nil, isToday: isToday, upcoming: upcoming)
             }
             return (days, total)
         }
