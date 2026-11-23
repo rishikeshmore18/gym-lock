@@ -274,7 +274,8 @@ final class GymSessionCoordinator {
         countsOn: Date,
         arrivedAt: Date,
         timeCounts: Bool,
-        manualAt: Date? = nil
+        manualAt: Date? = nil,
+        evaluateAt: Date? = nil
     ) -> GymVisit {
         // Inside tonight's sleep window: the night lock stays on, and the
         // done line says what it cost (FLOW, the night lock).
@@ -292,7 +293,7 @@ final class GymSessionCoordinator {
 
         Task { [notifier] in await notifier.sendArrival() }
         fetchWorkouts(around: manualAt ?? arrivedAt)
-        evaluateVisits()
+        evaluateVisits(now: evaluateAt ?? Date())
         return visit
     }
 
@@ -2401,7 +2402,8 @@ final class GymSessionCoordinator {
         arrivedAt: Date,
         countsOn: Date,
         timeCounts: Bool = true,
-        manualAt: Date? = nil
+        manualAt: Date? = nil,
+        evaluateAt: Date? = nil
     ) -> GymVisit {
         let outcome = SessionOutcome(date: arrivedAt, kind: .showedUp, countsOn: countsOn, proof: .unproven)
         store?.log.record(outcome)
@@ -2411,7 +2413,8 @@ final class GymSessionCoordinator {
             countsOn: countsOn,
             arrivedAt: arrivedAt,
             timeCounts: timeCounts,
-            manualAt: manualAt
+            manualAt: manualAt,
+            evaluateAt: evaluateAt
         )
     }
 
