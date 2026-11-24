@@ -307,8 +307,8 @@ struct ProgressMonthSummary: Hashable, ProgressPeriodPresentation {
             isLive: isCurrentMonth,
             weeks: [],
             tally: ProgressTally(),
-            titleLabel: isCurrentMonth ? "This Month" : "",
-            subtitleLabel: monthStart.formatted(.dateTime.month(.abbreviated).year())
+            titleLabel: monthStart.formatted(.dateTime.month(.abbreviated)),
+            subtitleLabel: monthStart.formatted(.dateTime.year())
         )
     }
 }
@@ -414,8 +414,8 @@ struct ProgressAnalytics {
             isLive: weeks.contains(where: \.isLive),
             weeks: weeks,
             tally: total,
-            titleLabel: isCurrentMonth ? "This Month" : "",
-            subtitleLabel: month.start.formatted(.dateTime.month(.abbreviated).year())
+            titleLabel: month.start.formatted(.dateTime.month(.abbreviated)),
+            subtitleLabel: month.start.formatted(.dateTime.year())
         )
     }
 
