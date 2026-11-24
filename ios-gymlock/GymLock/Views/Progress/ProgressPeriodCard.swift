@@ -23,6 +23,8 @@ enum ProgressCardMetrics {
     /// Title, subtitle and the ring cluster. Must clear the ring itself
     /// (66pt) or the header would overlap the chart below it.
     static let headerHeight: CGFloat = 74
+    /// Diameter of the glass arrows in both headers.
+    static let arrowDiameter: CGFloat = 32
 
     static var totalChartHeight: CGFloat {
         topLabelHeight + 4 + chartHeight + footerHeight
@@ -127,16 +129,20 @@ struct ProgressPeriodCard: View {
     private var monthHeader: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(month.titleLabel)
-                    .font(.system(size: 21, weight: .heavy))
-                    .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                // Only the live month has a title. Looking back, the month
+                // name lives in the subtitle alone so it never reads twice.
+                if !month.titleLabel.isEmpty {
+                    Text(month.titleLabel)
+                        .font(.system(size: 21, weight: .heavy))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
 
                 // The arrows flank the month, so the swipe that already moves
                 // between months has something to point at. They sit on the
                 // subtitle line because the title block is already full width.
-                HStack(spacing: 2) {
+                HStack(spacing: 6) {
                     monthArrow(-1, "chevron.left", enabled: model.canGoBack)
 
                     Text(month.subtitleLabel)
@@ -144,10 +150,14 @@ struct ProgressPeriodCard: View {
                         .foregroundStyle(Theme.inkSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
+                        // Month and year win over the arrows for width.
+                        .layoutPriority(1)
 
                     monthArrow(1, "chevron.right", enabled: model.canGoForward)
                 }
             }
+            // With no title the arrows row would hug the top; centre it on the ring.
+            .frame(maxHeight: .infinity, alignment: month.titleLabel.isEmpty ? .center : .top)
 
             Spacer(minLength: 8)
 
@@ -161,15 +171,14 @@ struct ProgressPeriodCard: View {
     private var weekHeader: some View {
         if let focusWeek {
             HStack(alignment: .top, spacing: 10) {
-                Button(action: onCollapseWeek) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Theme.ink)
-                        .frame(width: 32, height: 32)
-                        .background(Theme.surfaceMuted, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back to month")
+                // Same glass arrow as the month arrows, so the two levels
+                // read as one control.
+                GlassCircleButton(
+                    symbol: "chevron.left",
+                    label: "Back to month",
+                    diameter: ProgressCardMetrics.arrowDiameter,
+                    action: onCollapseWeek
+                )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(focusWeek.rangeLabel)
@@ -233,27 +242,19 @@ struct ProgressPeriodCard: View {
         }
     }
 
-    /// One month back or forward. Draws as a small chevron but takes a 44 pt
-    /// touch, the extra reach hanging out of the layout so the title block
-    /// keeps its width. Dims at either end of the data rather than hiding, so
-    /// the direction still reads as a direction.
+    /// One month back or forward, as a small glass circle matching the week
+    /// level's back arrow. Dims at either end of the data rather than hiding,
+    /// so the direction still reads as a direction.
     private func monthArrow(_ step: Int, _ icon: String, enabled: Bool) -> some View {
-        Button {
+        GlassCircleButton(
+            symbol: icon,
+            label: step < 0 ? "Previous month" : "Next month",
+            diameter: ProgressCardMetrics.arrowDiameter
+        ) {
             onStepMonth(step)
-        } label: {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(enabled ? Theme.ink : Theme.inkTertiary.opacity(0.4))
-                .frame(width: 18, height: 22, alignment: step < 0 ? .leading : .trailing)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-                .padding(.horizontal, -13)
-                .padding(.vertical, -11)
         }
-        .buttonStyle(MonthArrowStyle(reduceMotion: reduceMotion))
+        .opacity(enabled ? 1 : 0.4)
         .disabled(!enabled)
-        .accessibilityLabel(step < 0 ? "Previous month" : "Next month")
     }
 
     // MARK: Chart
@@ -386,18 +387,5 @@ struct ProgressPeriodCard: View {
                     onStepMonth(step)
                 }
             }
-    }
-}
-
-/// Press-down feedback for the month arrows: a small shrink and dip on
-/// touch-down, released on touch-up.
-private struct MonthArrowStyle: ButtonStyle {
-    let reduceMotion: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.86 : 1)
-            .opacity(configuration.isPressed ? 0.6 : 1)
-            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }

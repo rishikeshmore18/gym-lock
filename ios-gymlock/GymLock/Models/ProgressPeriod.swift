@@ -273,9 +273,9 @@ struct ProgressMonthSummary: Hashable, ProgressPeriodPresentation {
     let isLive: Bool
     let weeks: [ProgressWeekSummary]
     let tally: ProgressTally
-    /// "This Month", or the month's own name when looking back.
+    /// "This Month", or the short month name ("Nov") when looking back.
     let titleLabel: String
-    /// "November 2026".
+    /// Short month and year, "Nov 2026", so both always fit beside the arrows.
     let subtitleLabel: String
 
     var goalNoun: String { "month goal" }
@@ -307,8 +307,8 @@ struct ProgressMonthSummary: Hashable, ProgressPeriodPresentation {
             isLive: isCurrentMonth,
             weeks: [],
             tally: ProgressTally(),
-            titleLabel: isCurrentMonth ? "This Month" : monthStart.formatted(.dateTime.month(.wide)),
-            subtitleLabel: monthStart.formatted(.dateTime.month(.wide).year())
+            titleLabel: isCurrentMonth ? "This Month" : "",
+            subtitleLabel: monthStart.formatted(.dateTime.month(.abbreviated).year())
         )
     }
 }
@@ -414,8 +414,8 @@ struct ProgressAnalytics {
             isLive: weeks.contains(where: \.isLive),
             weeks: weeks,
             tally: total,
-            titleLabel: isCurrentMonth ? "This Month" : month.start.formatted(.dateTime.month(.wide)),
-            subtitleLabel: month.start.formatted(.dateTime.month(.wide).year())
+            titleLabel: isCurrentMonth ? "This Month" : "",
+            subtitleLabel: month.start.formatted(.dateTime.month(.abbreviated).year())
         )
     }
 
