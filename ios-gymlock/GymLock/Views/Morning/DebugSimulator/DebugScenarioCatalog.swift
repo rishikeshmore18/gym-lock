@@ -42,7 +42,7 @@ enum SimStage: String, CaseIterable, Identifiable {
         switch self {
         case .sleep: [.windDownLockStart, .windDownLockEnd, .changeBedtimeTonight, .bedtimeAfterMidnightGymMonday]
         case .alarm: [.alarmRingsNow, .wakeAndGoGymDay, .snoozedMorning, .goLaterGymDay, .ignoreAlarmUntilDeadline, .plainWakeAlarmRings]
-        case .journey: [.missionComplete, .departed, .countdownAt75, .runningLate30]
+        case .journey: [.tripDemo, .tripRealWalk, .departed, .countdownAt75, .runningLate30]
         case .arrival: [.gymRegionEntered, .driveBy, .gymDwellConfirmed, .arrivalTrouble]
         case .workout: [.arriveStay20, .healthWorkout22, .quickWorkoutComplete, .imHereCameraPhoto]
         case .progress: [.exampleA, .cancelAReschedule, .atRiskThursday, .jumpTwoMonthsAfterJoining]
@@ -378,6 +378,18 @@ enum SimCatalog {
             return SimScenario(step: step, summary: "Moves the preparation countdown to 75 percent used.",
                                expected: "The preparation nudge appears once.", stage: .journey,
                                time: .now(note: "relative to now"), journey: notDeparted, conditions: st)
+        case .tripDemo:
+            return SimScenario(step: step, summary: "Plays the whole trip page by itself: Let's go, leaving home, the walk on the live map, arriving, the shortened check, verified.",
+                               expected: "Trip page in your card style; departure and arrival change it in place; arrival screen after verified.", stage: .journey,
+                               time: .now(note: "gym time is now plus your time to gym"),
+                               journey: SimJourneyReading(state: .confirmed, verified: true, note: "Simulated walk on a real route to your gym."),
+                               conditions: st, fixedNotes: ["Location: simulated", "Gym check: shortened to 8 seconds"], writesRealData: true)
+        case .tripRealWalk:
+            return SimScenario(step: step, summary: "Starts a real trip now. Walk out of the door and go to your gym with the phone.",
+                               expected: "Leaving home and arriving are detected by real GPS; apps stay locked until the 2 minute check passes.", stage: .journey,
+                               time: .now(note: "gym time is now plus your time to gym"),
+                               journey: SimJourneyReading(state: .notDeparted, verified: false, note: "You do the moving."),
+                               conditions: st, fixedNotes: ["Location: real GPS", "Needs your gym set"], writesRealData: true)
         case .countdownExpired:
             return SimScenario(step: step, summary: "Moves the preparation deadline into the past.",
                                expected: "Window expires and the expiry path runs.", stage: .journey,
