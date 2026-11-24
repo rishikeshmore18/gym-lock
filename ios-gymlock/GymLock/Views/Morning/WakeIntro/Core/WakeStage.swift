@@ -114,6 +114,8 @@ struct WakeFacts: Equatable {
     var isFirst: Bool
     var isComeback: Bool
     var snoozed: Bool
+    /// False when persistent mode is off: there is no mission, and the capsule just says "Let's go".
+    var hasMission: Bool = true
 
     /// The gym time as the prototype writes it: "7:05" (12-hour locales drop the AM/PM, 24-hour
     /// locales give "18:00").
