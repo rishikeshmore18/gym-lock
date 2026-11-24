@@ -52,6 +52,9 @@ public enum MatrixWakeGeo {
 /// The facts the dots need (model.ts `facts()` subset), clamped like the web.
 public struct MatrixWakeFacts: Equatable, Sendable {
     public enum Mission: Equatable, Sendable { case steps, bag, water, shoe }
+    /// Which drawing the shoe mission uses. `.webPrototype` is the original sneaker, kept only so
+    /// the web parity check still matches; the app passes `.profile` or `.laceUp` (MatrixWakeShoe).
+    public enum ShoeArt: Equatable, Sendable { case webPrototype, profile, laceUp }
     /// LED gym time, "h:mm".
     public var time: String
     /// LED leave-by time, or nil (the web's empty string).
@@ -63,8 +66,10 @@ public struct MatrixWakeFacts: Equatable, Sendable {
     public var done: Int
     public var day: Int
     public var streak: Int
+    public var shoeArt: ShoeArt
 
-    public init(time: String, leave: String?, mission: Mission, steps: Int, goal: Int, done: Int, day: Int, streak: Int, isFirst: Bool = false) {
+    public init(time: String, leave: String?, mission: Mission, steps: Int, goal: Int, done: Int, day: Int, streak: Int, isFirst: Bool = false, shoeArt: ShoeArt = .webPrototype) {
+        self.shoeArt = shoeArt
         self.time = MatrixWakeFacts.ledClock(time) ?? time
         if let l = leave, let c = MatrixWakeFacts.ledClock(l) { self.leave = c } else { self.leave = nil }
         self.mission = mission
@@ -510,6 +515,13 @@ public enum MatrixWakeChapters {
     ])
 
     static func missionIcon(_ g: inout MatrixWakeBoard, _ lt: Double, _ F: MatrixWakeFacts) {
+        if F.mission == .shoe {
+            switch F.shoeArt {
+            case .profile: MatrixWakeShoe.profile(&g, lt); return
+            case .laceUp: MatrixWakeShoe.laceUp(&g, lt); return
+            case .webPrototype: break
+            }
+        }
         let isShoe = F.mission != .bag
         let R = isShoe ? SNEAKER : MXW.bag
         let s: Double = isShoe ? 2 : 4
@@ -613,5 +625,177 @@ public enum MatrixWakeChapters {
                 if k < F.done { g.disc(x + 0.5, 24.5, 2.1, sh(x, 24)) } else if k == F.done { ringCells(&g, x + 0.5, 24.5, 2.2, 0.95) } else { ringCells(&g, x + 0.5, 24.5, 2.2, 0.38, true) }
             }
         }
+    }
+}
+
+// MARK: - The shoe, redrawn
+
+/// The two drawings for the "Shoes on." chapter, which take turns morning to morning
+/// (WakeShoeRotation): A, the runner in profile, and C, lacing up from above. Drawn dot for dot on
+/// the full board (not a doubled bitmap), with the same rules as every chapter: lit, dim, off, one
+/// coral dot. Pure functions of `lt` (seconds into the chapter, 2.2 s long); Reduce Motion passes a
+/// large `lt`, so both land on their finished frame.
+enum MatrixWakeShoe {
+    typealias Pt = (x: Double, y: Double)
+
+    // MARK: A · the runner in profile (heel left, toe right, 40 × 17.4 units)
+
+    static let outline: [Pt] = [
+        (1, 16.6), (0.4, 11), (0.7, 5), (1.4, 0.9), (4.6, 0.5), (5.6, 2.8), (8.4, 5.2), (10.8, 3.2),
+        (12.8, 0.9), (15.8, 0.4), (17.4, 1.8), (21.4, 3.8), (25.8, 5.6), (30.2, 6.9), (34.2, 7.8),
+        (37.4, 9.2), (39.4, 11.4), (39.9, 14), (39.4, 16.4), (37.6, 17.4), (2.6, 17.4),
+    ]
+    /// The lace line, from the top of the tongue down to the toe box.
+    static let laceFrom: Pt = (13.8, 2.9)
+    static let laceTo: Pt = (30.4, 8.3)
+
+    /// Lights heel to toe over a ghost of the shoe, then the five laces tick in one by one, then the
+    /// coral pull tab. A faint floor line grounds it.
+    static func profile(_ g: inout MatrixWakeBoard, _ lt: Double) {
+        let grow = MXW.ez((lt - 0.3) / 1.0)
+        let sweep = grow * 42
+        let laces = lt < 1.3 ? 0 : min(5, Int(((lt - 1.3) / 0.14).rounded(.down)) + 1)
+        let coral = lt > 1.9
+        for i in 4..<48 {
+            g.on(Double(i), 80, Double(i - 4) < grow * 44 ? 0.14 : 0)
+        }
+        for j in 58...82 {
+            for i in 0..<MatrixWakeGeo.COLS {
+                let lx = Double(i) - 5.5, ly = Double(j) - 61.5
+                guard let cell = profileCell(lx, ly, sweep: sweep, laces: laces, coral: coral), cell.b > 0 else { continue }
+                g.on(Double(i), Double(j), cell.b, cell.c)
+            }
+        }
+    }
+
+    /// One cell of the runner in its own units; nil outside the shoe, b = 0 for a gap.
+    static func profileCell(_ lx: Double, _ ly: Double, sweep: Double, laces: Int, coral: Bool) -> (b: Double, c: Int)? {
+        guard inside(lx, ly, outline) else { return nil }
+        if lx > sweep { return (0.16, 0) }
+        // the seam between the upper and the sole
+        if ly > 13.1 && ly < 13.9 { return (0, 0) }
+        // the midsole, a step dimmer, with a tread along the bottom
+        if ly >= 13.9 {
+            if ly > 16.1 && Int((lx + 100).rounded(.down)) % 3 == 0 { return (0, 0) }
+            return (0.7, 0)
+        }
+        if coral && abs(lx - 3.5) < 0.5 && abs(ly - 2.5) < 0.5 { return (1, 1) }
+        var b = 1.0
+        // toe cap and heel counter, as dim stitch lines
+        if abs(hypot(lx - 37, ly - 15.6) - 6.2) < 0.5 && lx > 30.5 { b = 0.34 }
+        if abs(hypot(lx - 1, ly - 12.4) - 7.6) < 0.5 && lx > 1.4 && ly < 13.1 { b = 0.34 }
+        // the throat, dim, with the laces across it
+        if dist(lx, ly, laceFrom.x, laceFrom.y, laceTo.x, laceTo.y) < 0.95 {
+            b = 0.4
+            for q in 0..<laces {
+                let t = 0.1 + Double(q) * 0.2
+                let cx = laceFrom.x + t * (laceTo.x - laceFrom.x)
+                let cy = laceFrom.y + t * (laceTo.y - laceFrom.y)
+                if hypot(lx - cx, ly - cy) < 1.05 { b = 1 }
+            }
+        }
+        return (b, 0)
+    }
+
+    // MARK: C · lacing up, seen from above (toe up, local y 0 at the toe to 41.6 at the heel)
+
+    static let eyelets: [Double] = [11.6, 15, 18.4, 21.8]
+    static let eyeletX = 4.6
+
+    /// The outline draws toe to heel, the lace criss-crosses itself eyelet by eyelet, then the bow
+    /// pops with a coral knot.
+    static func laceUp(_ g: inout MatrixWakeBoard, _ lt: Double) {
+        let sweep = MXW.ez((lt - 0.15) / 0.6) * 44
+        let lace = MXW.cl((lt - 0.7) / 1.05) * 7
+        let bow = lt < 1.75 ? 0 : backOut((lt - 1.75) / 0.4)
+        for j in 44...90 {
+            for i in 14...39 {
+                let lx = Double(i) - 26, ly = Double(j) - 45.5
+                guard let cell = topCell(lx, ly, sweep: sweep, lace: lace, bow: bow), cell.b > 0 else { continue }
+                g.on(Double(i), Double(j), cell.b, cell.c)
+            }
+        }
+    }
+
+    static func inTop(_ x: Double, _ y: Double) -> Bool {
+        let fy = (y - 14.5) / 14.5, hy = (y - 30) / 11.8
+        let fore = (x / 8.8) * (x / 8.8) + fy * fy
+        let heel = (x / 7) * (x / 7) + hy * hy
+        return fore <= 1 || heel <= 1
+    }
+
+    static func topCell(_ lx: Double, _ ly: Double, sweep: Double, lace: Double, bow: Double) -> (b: Double, c: Int)? {
+        guard inTop(lx, ly) else { return nil }
+        if ly > sweep { return (0.14, 0) }
+        let edge = !inTop(lx + 1, ly) || !inTop(lx - 1, ly) || !inTop(lx, ly + 1) || !inTop(lx, ly - 1)
+        var b = edge ? 1.0 : 0.4
+        var c = 0
+        if !edge && ly < 6.2 { b = 0.62 }
+        // the opening at the heel, with its padded rim
+        let oy = (ly - 31.6) / 5.2, ry = (ly - 31.6) / 6.3
+        let opening = (lx / 3.9) * (lx / 3.9) + oy * oy
+        let rim = (lx / 5) * (lx / 5) + ry * ry
+        if opening <= 1 { b = 0 } else if rim <= 1 { b = 0.62 }
+        // the tongue
+        if abs(lx) < 3.2 && ly > 9.6 && ly < 26.2 && opening > 1 { b = 0.16 }
+        for y in eyelets {
+            for x in [-eyeletX, eyeletX] where hypot(lx - x, ly - y) < 0.7 { b = 0.95 }
+        }
+        // the lace: a bar across the first pair, then a cross between each pair
+        let e = eyelets, w = eyeletX
+        let strokes: [(Double, Double, Double, Double)] = [
+            (-w, e[0], w, e[0]),
+            (-w, e[0], w, e[1]), (w, e[0], -w, e[1]),
+            (-w, e[1], w, e[2]), (w, e[1], -w, e[2]),
+            (-w, e[2], w, e[3]), (w, e[2], -w, e[3]),
+        ]
+        for (n, s) in strokes.enumerated() {
+            let p = MXW.cl(lace - Double(n))
+            guard p > 0 else { continue }
+            let ex = s.0 + (s.2 - s.0) * p, ey = s.1 + (s.3 - s.1) * p
+            if dist(lx, ly, s.0, s.1, ex, ey) < 0.56 { b = 1 }
+        }
+        // the bow: two loops, two tails, the coral knot
+        if bow > 0 {
+            let ky = 24.2
+            for sx in [-1.0, 1.0] where abs(hypot(lx - sx * 4.1 * bow, ly - ky) - 2.8 * bow) < 0.6 { b = 1 }
+            if dist(lx, ly, 0, ky, -2.4 * bow, ky + 6.4 * bow) < 0.55 { b = 1 }
+            if dist(lx, ly, 0, ky, 2.9 * bow, ky + 5.6 * bow) < 0.55 { b = 1 }
+            if hypot(lx, ly - ky) < 0.8 {
+                b = 1
+                c = bow > 0.6 ? 1 : 0
+            }
+        }
+        return (b, c)
+    }
+
+    // MARK: Geometry
+
+    static func inside(_ x: Double, _ y: Double, _ p: [Pt]) -> Bool {
+        var hit = false
+        var j = p.count - 1
+        for i in 0..<p.count {
+            let a = p[i], b = p[j]
+            if (a.y > y) != (b.y > y) {
+                let xc = (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x
+                if x < xc { hit.toggle() }
+            }
+            j = i
+        }
+        return hit
+    }
+
+    /// Distance from (px, py) to the segment (ax, ay)–(bx, by).
+    static func dist(_ px: Double, _ py: Double, _ ax: Double, _ ay: Double, _ bx: Double, _ by: Double) -> Double {
+        let dx = bx - ax, dy = by - ay
+        let len = dx * dx + dy * dy
+        let t = len > 0 ? MXW.cl(((px - ax) * dx + (py - ay) * dy) / len) : 0
+        return hypot(ax + t * dx - px, ay + t * dy - py)
+    }
+
+    /// Ease out with a small overshoot, for the bow's pop.
+    static func backOut(_ x: Double) -> Double {
+        let t = MXW.cl(x), c1 = 1.9, c3 = c1 + 1
+        return 1 + c3 * pow(t - 1, 3) + c1 * pow(t - 1, 2)
     }
 }

@@ -43,6 +43,9 @@ enum WakeBeatID { case greet, commit, leave, mission, day, week }
 /// A chapter on the intro clock, in seconds since the page started.
 struct WakeBeat: Equatable { let id: WakeBeatID; let start: Double; let end: Double; let index: Int }   // seconds
 
+/// The two "Shoes on." drawings on the Matrix page: the runner in profile, or lacing up from above.
+enum WakeShoeArt: String { case profile, laceUp }
+
 /// What the mission's visual shows (plan.ts `missionKind`).
 enum WakeMissionKind { case steps, bag, water, shoe }
 
@@ -116,6 +119,8 @@ struct WakeFacts: Equatable {
     var snoozed: Bool
     /// False when persistent mode is off: there is no mission, and the capsule just says "Let's go".
     var hasMission: Bool = true
+    /// Which shoe the Matrix "Shoes on." chapter draws. The two take turns (WakeShoeRotation).
+    var shoeArt: WakeShoeArt = .profile
 
     /// The gym time as the prototype writes it: "7:05" (12-hour locales drop the AM/PM, 24-hour
     /// locales give "18:00").

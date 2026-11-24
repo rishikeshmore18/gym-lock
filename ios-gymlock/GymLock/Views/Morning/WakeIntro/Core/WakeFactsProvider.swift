@@ -69,7 +69,8 @@ enum WakeFactsProvider {
             isFirst: day.neverCounted,
             isComeback: HeroMomentResolver.comebackLapse(day, cal: cal) != nil,
             snoozed: session.hasSnoozed,
-            hasMission: activeMission != nil
+            hasMission: activeMission != nil,
+            shoeArt: WakeShoeRotation.next()
         ).normalized()
     }
 
@@ -134,5 +135,23 @@ enum WakeFactsProvider {
     private static func sentenceCase(_ s: String) -> String {
         guard let first = s.first else { return s }
         return first.uppercased() + s.dropFirst()
+    }
+}
+
+// MARK: - The shoe takes turns
+
+/// The Matrix "Shoes on." chapter alternates its drawing, so the same shoe never shows two mornings
+/// running: the runner in profile, then lacing up, then the runner again. It moves on only when the
+/// chapter was really on screen (WakeIntroPresenter marks it), not on mornings it was skipped.
+enum WakeShoeRotation {
+    /// The drawing the user saw last (gymlock.<area>.<name>).
+    static let lastShownKey = "gymlock.morning.shoeArtLastShown"
+
+    static func next(defaults: UserDefaults = .standard) -> WakeShoeArt {
+        defaults.string(forKey: lastShownKey) == WakeShoeArt.profile.rawValue ? .laceUp : .profile
+    }
+
+    static func markShown(_ art: WakeShoeArt, defaults: UserDefaults = .standard) {
+        defaults.set(art.rawValue, forKey: lastShownKey)
     }
 }
