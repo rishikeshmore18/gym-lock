@@ -237,7 +237,8 @@ final class MatrixWakeStage: WakeStageRenderer {
         case .water: mission = .water
         case .shoe: mission = .shoe
         }
-        return MatrixWakeFacts(time: time, leave: leave, mission: mission, steps: f.missionSteps, goal: f.weekGoal, done: f.weekDone, day: f.habitDay, streak: f.streakWeeks, isFirst: f.isFirst)
+        return MatrixWakeFacts(time: time, leave: leave, mission: mission, steps: f.missionSteps, goal: f.weekGoal, done: f.weekDone, day: f.habitDay, streak: f.streakWeeks, isFirst: f.isFirst,
+                                shoeArt: f.shoeArt == .laceUp ? .laceUp : .profile)
     }
 
     static func timeline(_ p: WakePlan) -> MatrixWakeTimeline {

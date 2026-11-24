@@ -166,6 +166,12 @@ struct WakeIntroPresenter: View {
         guard claimed?.sessionID != snapshot.sessionID else { return }
         claimed = snapshot
         WakeIntroLedger.markPlayed(snapshot.sessionID)
+        // The shoe chapter plays only on the Matrix plan page, not after a snooze, not under Reduce
+        // Motion. Only then does the next morning switch to the other drawing.
+        let f = snapshot.facts
+        if snapshot.concept == .matrixA && f.missionKind == .shoe && !f.snoozed && !reduceMotion {
+            WakeShoeRotation.markShown(f.shoeArt)
+        }
     }
 
     /// Fades the page away onto the screen underneath, then runs that screen's action.
