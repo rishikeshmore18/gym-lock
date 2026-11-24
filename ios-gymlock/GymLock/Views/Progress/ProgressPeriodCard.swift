@@ -129,11 +129,15 @@ struct ProgressPeriodCard: View {
     private var monthHeader: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(month.titleLabel)
-                    .font(.system(size: 21, weight: .heavy))
-                    .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                // Only the live month has a title. Looking back, the month
+                // name lives in the subtitle alone so it never reads twice.
+                if !month.titleLabel.isEmpty {
+                    Text(month.titleLabel)
+                        .font(.system(size: 21, weight: .heavy))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
 
                 // The arrows flank the month, so the swipe that already moves
                 // between months has something to point at. They sit on the
@@ -152,6 +156,8 @@ struct ProgressPeriodCard: View {
                     monthArrow(1, "chevron.right", enabled: model.canGoForward)
                 }
             }
+            // With no title the arrows row would hug the top; centre it on the ring.
+            .frame(maxHeight: .infinity, alignment: month.titleLabel.isEmpty ? .center : .top)
 
             Spacer(minLength: 8)
 
