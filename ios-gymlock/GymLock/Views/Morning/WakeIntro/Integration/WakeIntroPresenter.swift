@@ -6,7 +6,7 @@
 //
 //    - missions on:  over ActivationMissionView (route .mission). The mission capsule starts the
 //                    mission exactly as the mission card's "start" does (its `isRunning = true`).
-//    - missions off: over GymWindowView (route .countdown). The capsule ("Shoes on") hands over to
+//    - missions off: over GymWindowView (route .countdown). The capsule ("Let's go") hands over to
 //                    the countdown underneath.
 //
 //  When it plays (all must hold):

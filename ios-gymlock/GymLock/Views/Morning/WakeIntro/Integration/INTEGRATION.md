@@ -91,7 +91,7 @@ After:
             }
         }
         // The "I'm up" wake page when missions are off: once per session, over the countdown's
-        // first frame. Its capsule ("Shoes on") closes it onto the countdown.
+        // first frame. Its capsule ("Let's go") closes it onto the countdown.
         .overlay {
             WakeIntroPresenter(session: session, route: .countdown)
         }
@@ -244,7 +244,7 @@ All of these are read through `HeroMomentResolver.gather`, which only reads (`re
 - Tap during the intro: moves to the next chapter, like a story. A tap on the last chapter starts the page-into-card condense early, which then plays in full (taps during it are ignored). Jumped-over haptics do not fire.
 - The app is light today, so every run exercises the wipe: the card goes from night to day once, with no flicker on the renderer's second pass.
 - Background the app mid-intro and return: the page is settled.
-- Missions off: the page plays over the countdown, and the capsule reads "Shoes on".
+- Missions off: the page plays over the countdown, and the capsule reads "Let's go".
 - Relaunch after it played: it does not replay.
 - Go Later day: it never appears.
 - iPhone SE (375x667), iPhone 15 (393x852), iPhone 16 Pro Max (440x956) and iPad (820x1180), plus the largest capped Dynamic Type: the settled page scrolls only if it must. On each, check that the words, the card slot, the mission capsule and "Plans changed" are inside the screen; that the page looks identical (SE and iPad letterbox the same 390 x 844 page in a centred column, iPad at 1.25x, background and stage full-bleed); that the Matrix dots and labels line up with the words; and that the Ridge tags sit on their objects.

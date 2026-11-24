@@ -51,9 +51,8 @@ enum WakeFactsProvider {
             ?? session.arrivalTarget
             ?? store.plan.rhythm(at: now, calendar: .current).gymByTime.asDateToday
 
-        let mission = missionParts(
-            session.mission ?? (store.plan.missionsEnabled ? ActivationMissionType.universalFallback : nil)
-        )
+        let activeMission = session.mission ?? (store.plan.missionsEnabled ? ActivationMissionType.universalFallback : nil)
+        let mission = missionParts(activeMission)
 
         return WakeFacts(
             name: name,
@@ -69,7 +68,8 @@ enum WakeFactsProvider {
             streakWeeks: day.streakWeeks,
             isFirst: day.neverCounted,
             isComeback: HeroMomentResolver.comebackLapse(day, cal: cal) != nil,
-            snoozed: session.hasSnoozed
+            snoozed: session.hasSnoozed,
+            hasMission: activeMission != nil
         ).normalized()
     }
 

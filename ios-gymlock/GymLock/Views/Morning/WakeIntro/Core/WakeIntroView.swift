@@ -1741,7 +1741,9 @@ private struct WakeSettledPage: View {
     }
 
     private var missionLabel: String {
-        facts.missionTitle.hasSuffix(".") ? String(facts.missionTitle.dropLast()) : facts.missionTitle
+        // Persistent mode off: no mission to name, the capsule just sends them on.
+        guard facts.hasMission else { return "Let's go" }
+        return facts.missionTitle.hasSuffix(".") ? String(facts.missionTitle.dropLast()) : facts.missionTitle
     }
 
     @ViewBuilder
@@ -1841,7 +1843,7 @@ private struct WakeSettledPage: View {
         }
         .buttonStyle(WakePrimaryCapsuleStyle(fill: look.button))
         .accessibilityLabel(missionLabel)
-        .accessibilityHint("Starts your mission")
+        .accessibilityHint(facts.hasMission ? "Starts your mission" : "Opens your countdown")
     }
 
     private var plansLink: some View {
