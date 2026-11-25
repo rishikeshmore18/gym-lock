@@ -246,17 +246,24 @@ GymLock/Views/Morning/Missions/Screens/MissionLightStages.swift [281] MissionBac
 GymLock/Views/Morning/Missions/Screens/MissionSwapSheet.swift [117] MissionSwapSheet — GymLock · mission screens
 GymLock/Views/Morning/MomentumSavedView.swift [266] MomentumSavedView,MomentumSparkline — The result screen after a home fallback.
 GymLock/Views/Morning/MorningAlarmPlanView.swift [388] MorningAlarmPlanView — One overview of the next morning: when the alarm rings, what happens after
-GymLock/Views/Morning/MorningFlowView.swift [241] MorningFlowView — The router for a live morning.
+GymLock/Views/Morning/MorningFlowView.swift [242] MorningFlowView — The router for a live morning.
 GymLock/Views/Morning/MorningKit.swift [397] MorningHeader,HaloedGlyph,SparkMark,StatusPill,MorningPrimaryButton,MorningPrimaryStyle… — The small wordmark that sits at the top of every morning screen, with an
 GymLock/Views/Morning/MorningSetupFlowView.swift [123] MorningSetupFlowView,Step — The one-time setup that runs after activation.
-GymLock/Views/Morning/PlansChangedView.swift [87] PlansChangedView — Shown when the window has closed without the user reaching the gym.
+GymLock/Views/Morning/PlansChanged/Day0PauseStage.swift [1217] Day0PauseStage,Day0PauseBeat,Kind,+PauseFacts,Day0PauseCaption,Day0PauseHLine… — Day0PauseStage.swift
+GymLock/Views/Morning/PlansChanged/MatrixPrinterPauseStage.swift [1514] MatrixPrinterPauseStage,Day,Row,Door,Part,MPPCache… — GymLock · the "plans changed" pause · Matrix printer look
+GymLock/Views/Morning/PlansChanged/PauseFacts.swift [174] PauseWeekDay,State,PauseFacts,Context,PauseFactsProvider — GymLock · the "plans changed" pause
+GymLock/Views/Morning/PlansChanged/PauseHaptics.swift [85] PauseHaptics,Kind — GymLock · the "plans changed" pause
+GymLock/Views/Morning/PlansChanged/PauseScript.swift [247] PauseLine,Kind,PauseChoice,Key,PauseReceiptRow,PauseScript… — GymLock · the "plans changed" pause
+GymLock/Views/Morning/PlansChanged/PrinterDotFont.swift [176]  — GymLock · the "plans changed" pause · Matrix printer look
+GymLock/Views/Morning/PlansChanged/RidgePauseStage.swift [749] RidgePauseMath,RidgeCamState,RidgePauseGeo,RidgePausePath,RidgePauseShapes,RidgePauseFrame… — GymLock · the "plans changed" pause · Ridge look
+GymLock/Views/Morning/PlansChangedView.swift [420] PlansChangedView,PauseLook,PauseModel,PausePhase,PauseLayout,PauseStageInput… — "Plans changed": a 30-second pause before the three doors, then the doors one at a time.
 GymLock/Views/Morning/QuickWorkoutView.swift [321] QuickWorkoutView,QuickWorkoutActiveView — The home fallback picker.
 GymLock/Views/Morning/RhythmDial.swift [505] RhythmDial,Handle,MinuteDial,CountdownRing — The 24-hour sleep dial: a moon at bedtime, a sun at wake time, and a coral
 GymLock/Views/Morning/SleepWakeRhythmView.swift [412] SleepWakeRhythmView,TimeField,PresetChips,TimePickerSheet — Sets the window that gets the user from bed to moving.
 GymLock/Views/Morning/SongTrimmerView.swift [1118] SongTrimmerView,Presentation,PreviewSweep,TrimmerGlass,+View,TrimmerPressStyle… — Picks a track and chooses the 28 seconds of it that will wake the user.
 GymLock/Views/Morning/StillGettingReadyView.swift [147] StillGettingReadyView — The one nudge, shown at roughly three-quarters of the preparation window.
-GymLock/Views/Morning/Trip/MatrixTripView.swift [1686] MatrixTripView,MatrixTripStyle,MatrixTripReveal,MatrixTripMeter,MatrixTripVerifyPanel,MatrixStreetField… — The Matrix style of the trip screen: a tilted 3D board of dots built from the
-GymLock/Views/Morning/Trip/RidgeTripView.swift [1578] RidgeTripMath,RidgeTripLayout,RidgeTripSample,RidgeTripEffort,RidgeTripPose,RidgeTripTrail… — A live black and white map on top, an ink-wash Ridge band straddling the
+GymLock/Views/Morning/Trip/MatrixTripView.swift [1748] MatrixTripView,MatrixTripStyle,MatrixTripReveal,MatrixTripMeter,MatrixTripVerifyPanel,MatrixStreetField… — The Matrix style of the trip screen: a tilted 3D board of dots built from the
+GymLock/Views/Morning/Trip/RidgeTripView.swift [1589] RidgeTripMath,RidgeTripLayout,RidgeTripSample,RidgeTripEffort,RidgeTripPose,RidgeTripTrail… — A live black and white map on top, an ink-wash Ridge band straddling the
 GymLock/Views/Morning/Trip/TripConfetti.swift [142] TripConfetti,Look,Burst,Piece — The arrival confetti, shared by both trip styles.
 GymLock/Views/Morning/Trip/TripModel.swift [291] TripModel,+TripModel — The live geometry of one trip to the gym: where the user is, the route Apple
 GymLock/Views/Morning/Trip/TripSimulation.swift [148] TripSimulation — Drives the trip screen without anyone moving, for the Day Flow Simulator's
@@ -266,7 +273,7 @@ GymLock/Views/Morning/WakeIntro/Core/WakeFactsProvider.swift [158] WakeFactsProv
 GymLock/Views/Morning/WakeIntro/Core/WakeHaptics.swift [139] WakeHaptics — GymLock · the "I'm up" wake page
 GymLock/Views/Morning/WakeIntro/Core/WakeIntroView.swift [2270] WakeIntroView,WakeNow,WakeIntroEngine,WakeClock,WakeClocks,WakeMoment… — GymLock · the "I'm up" wake page (native port of web/morning2 stage.tsx, ui.tsx, settled.t
 GymLock/Views/Morning/WakeIntro/Core/WakeStage.swift [513] WakeConcept,WakeBeatID,WakeBeat,WakeShoeArt,WakeMissionKind,WakeHapticKind… — GymLock · the "I'm up" wake page (native port of web/morning2)
-GymLock/Views/Morning/WakeIntro/Integration/WakeIntroPresenter.swift [185] WakeIntroLedger,WakeIntroPresenter,Snapshot — GymLock · the "I'm up" wake page
+GymLock/Views/Morning/WakeIntro/Integration/WakeIntroPresenter.swift [184] WakeIntroLedger,WakeIntroPresenter,Snapshot — GymLock · the "I'm up" wake page
 GymLock/Views/Morning/WakeIntro/Matrix/MatrixWakeBoard.swift [280] MatrixWakePixels,MatrixWakeBoard,MXW,Icon,MatrixWakeLED,Pixel — GymLock · Wake intro, Matrix concepts (native port)
 GymLock/Views/Morning/WakeIntro/Matrix/MatrixWakeChapters.swift [802] MatrixWakeGeo,MatrixWakeFacts,Mission,ShoeArt,MatrixWakeBeat,MatrixWakeTimeline… — GymLock · Wake intro, Matrix concepts (native port)
 GymLock/Views/Morning/WakeIntro/Matrix/MatrixWakeEngine.swift [373] MatrixWakeJS,MatrixWakeHash,MatrixWakeTarget,MatrixWakeDealOptions,MatrixWakeParticle,MatrixWakeEngine… — GymLock · Wake intro, Matrix concepts (native port)
@@ -385,6 +392,7 @@ GymLockTests/MatrixParityTests.swift [32] MatrixParityTests — The Matrix port 
 GymLockTests/MatrixWakeParityTests.swift [12] MatrixWakeParityTests — The wake page's Matrix renderer against the web prototype's golden values
 GymLockTests/MomentumFieldTests.swift [188] MomentumFieldTests — The Momentum card counts what the streak counts (FLOW, item 19a): distinct
 GymLockTests/NotificationRouteTests.swift [235] NotificationRouteTests — `docs/FLOW.md`, item 12: only alarm notifications may start a session.
+GymLockTests/PauseScriptTests.swift [95] PauseScriptTests — The "plans changed" pause: the copy, its timing, the doors, and when the day 0 page plays.
 GymLockTests/ProgressPhotoSelectionTests.swift [212] ProgressPhotoSelectionTests — Tests for the two pieces of the Progress Photos card that are pure logic and
 GymLockTests/ProgressSpotlightTests.swift [233] ProgressSpotlightTests — `docs/FLOW.md`, Flow 3, "The Progress spotlight": only the workout-done
 GymLockTests/ReelSceneTests.swift [61] ReelSceneTests

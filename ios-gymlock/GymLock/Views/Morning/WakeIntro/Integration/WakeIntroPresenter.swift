@@ -21,9 +21,9 @@
 //  here calls `commitToGoing()`. It is marked as played the moment it appears, so a kill or a
 //  relaunch mid-intro never replays it; the mission or countdown screen is simply there.
 //
-//  "Plans changed" opens the existing PlansChangedView in a sheet with the same doors the router
+//  "Plans changed" opens PlansChangedView (the 30-second pause) full screen with the same doors the router
 //  wires for it: a quick workout (`offerQuickWorkout()`) or can't today (`beginCantToday()`).
-//  "still going" closes the sheet: the window is not over, so no grace period is spent.
+//  "still going" closes the cover: the window is not over, so no grace period is spent.
 //
 //  Depends on: Core/ (WakeIntroView, WakeFactsProvider), AppStore, GymSessionCoordinator,
 //  GymSession, MorningRoute, PlansChangedView, SessionVoice, Theme, `blocksHeroHaptics`.
@@ -120,9 +120,11 @@ struct WakeIntroPresenter: View {
             // The Home hero card under the morning cover stays silent while this plays.
             .blocksHeroHaptics("wake")
             .onAppear { claim(snapshot) }
-            .sheet(isPresented: $isShowingPlansChanged) {
+            // Full screen: the pause is a moment of its own, not a form over the page.
+            .fullScreenCover(isPresented: $isShowingPlansChanged) {
                 PlansChangedView(
-                    voice: SessionVoice(session: session),
+                    session: session,
+                    context: .windowOpen,
                     onStillGoing: { isShowingPlansChanged = false },
                     onQuickWorkout: {
                         isShowingPlansChanged = false
@@ -131,11 +133,8 @@ struct WakeIntroPresenter: View {
                     onCantToday: {
                         isShowingPlansChanged = false
                         coordinator.beginCantToday()
-                    },
-                    showsGraceNote: false
+                    }
                 )
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
             }
         }
     }
