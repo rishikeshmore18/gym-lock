@@ -42,7 +42,7 @@ struct MatrixTripView: View {
         ZStack {
             Theme.canvas.ignoresSafeArea()
             VStack(spacing: 0) {
-                MorningHeader(trailingTitle: "End", trailingAction: actions.end)
+                topBar
                 boardSection
                 infoSection
             }
@@ -61,6 +61,24 @@ struct MatrixTripView: View {
         }
     }
 
+    // MARK: Top bar
+
+    /// The title in the middle and the same glass cross as Ridge in the top
+    /// left corner. It ends the trip the way "End" did.
+    private var topBar: some View {
+        ZStack {
+            MorningHeader()
+            HStack {
+                GlassCircleButton(symbol: "xmark", label: "End", diameter: 44) {
+                    actions.end()
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.top, 2)
+    }
+
     // MARK: Board
 
     private var boardSection: some View {
@@ -70,7 +88,7 @@ struct MatrixTripView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
-        .frame(maxHeight: .infinity)
+        .frame(minHeight: 180, maxHeight: .infinity)
     }
 
     private var renderInput: MatrixTripEngine.Input {
@@ -1065,7 +1083,13 @@ private final class MatrixTripEngine {
         lastSignature = signature
 
         let gym = model.gym
-        let metres: [(x: Double, y: Double)] = route.map { TripModel.local($0, around: gym) }
+        // Only the last stretch of the route is drawn. A user who is far from
+        // the gym (a different city, say) would otherwise stretch the dot grid
+        // over hundreds of kilometres and leave every cell around them empty.
+        let metres: [(x: Double, y: Double)] = MatrixTripEngine.clipTail(
+            route.map { TripModel.local($0, around: gym) },
+            limit: MatrixTripEngine.farLimit
+        )
         var minX = 0.0
         var maxX = 0.0
         var minY = 0.0
@@ -1079,6 +1103,7 @@ private final class MatrixTripEngine {
         for candidate in [model.origin, model.user] {
             guard let coordinate = candidate else { continue }
             let point = TripModel.local(coordinate, around: gym)
+            if hypot(point.x, point.y) > MatrixTripEngine.farLimit { continue }
             minX = min(minX, point.x)
             maxX = max(maxX, point.x)
             minY = min(minY, point.y)
@@ -1090,6 +1115,39 @@ private final class MatrixTripEngine {
         }
         buildRoute(metres: metres, model: model)
         return true
+    }
+
+    /// How far from the gym the dot world reaches, in metres.
+    static let farLimit: Double = 6_000.0
+
+    /// The part of a route (gym at the origin, last point at the gym) that lies
+    /// within `limit` metres of the gym, starting exactly on that circle.
+    nonisolated static func clipTail(_ points: [(x: Double, y: Double)], limit: Double) -> [(x: Double, y: Double)] {
+        guard points.count >= 2 else { return points }
+        var kept: [(x: Double, y: Double)] = []
+        var index = points.count - 1
+        while index >= 0 {
+            let point = points[index]
+            if hypot(point.x, point.y) <= limit {
+                kept.append(point)
+                index -= 1
+                continue
+            }
+            if let inside = kept.last {
+                var lo = 0.0
+                var hi = 1.0
+                for _ in 0..<24 {
+                    let mid = (lo + hi) / 2.0
+                    let x = point.x + (inside.x - point.x) * mid
+                    let y = point.y + (inside.y - point.y) * mid
+                    if hypot(x, y) > limit { lo = mid } else { hi = mid }
+                }
+                kept.append((x: point.x + (inside.x - point.x) * hi, y: point.y + (inside.y - point.y) * hi))
+            }
+            break
+        }
+        kept.reverse()
+        return kept.count >= 2 ? kept : points
     }
 
     private func gridCovers(minX: Double, maxX: Double, minY: Double, maxY: Double) -> Bool {
@@ -1229,7 +1287,7 @@ private final class MatrixTripEngine {
         var startX = xs.first ?? 0.0
         var startY = ys.first ?? 0.0
         var newExtras: [Extra] = []
-        if let origin = model.origin {
+        if let origin = model.origin, hypot(TripModel.local(origin, around: model.gym).x, TripModel.local(origin, around: model.gym).y) <= MatrixTripEngine.farLimit {
             let o = TripModel.local(origin, around: model.gym)
             let ox = o.x * inverse
             let oy = o.y * inverse
@@ -1294,6 +1352,10 @@ private final class MatrixTripEngine {
     private func userTarget(model: TripModel) -> (x: Double, y: Double) {
         if let coordinate = model.snapped ?? model.user {
             let p = TripModel.local(coordinate, around: model.gym)
+            // Far away: wait at the start of the drawn stretch.
+            if hypot(p.x, p.y) > MatrixTripEngine.farLimit, let x = routeX.first, let y = routeY.first {
+                return (x, y)
+            }
             return (p.x / pitch, p.y / pitch)
         }
         if let x = routeX.first, let y = routeY.first { return (x, y) }
