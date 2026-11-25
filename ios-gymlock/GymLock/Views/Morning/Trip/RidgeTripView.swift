@@ -1054,17 +1054,25 @@ struct RidgeTripView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            let layout = RidgeTripLayout(
-                width: geo.size.width,
-                height: geo.size.height,
-                topInset: max(0, geo.safeAreaInsets.top),
-                bottomInset: max(0, geo.safeAreaInsets.bottom)
-            )
-            screen(layout)
+        // The outer reader still sees the real safe area, so it is read here.
+        // The inner one fills the whole screen, so the page and its map reach
+        // the edges while the controls and the sheet keep clear of the notch
+        // and the home indicator, on any iPhone.
+        GeometryReader { outer in
+            let top = max(0, outer.safeAreaInsets.top)
+            let bottom = max(0, outer.safeAreaInsets.bottom)
+            GeometryReader { geo in
+                let layout = RidgeTripLayout(
+                    width: geo.size.width,
+                    height: geo.size.height,
+                    topInset: top,
+                    bottomInset: bottom
+                )
+                screen(layout)
+            }
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea()
-        .background(Theme.canvas)
+        .background(Theme.canvas.ignoresSafeArea())
         .task(id: frame.entryStarted) { await playEntry() }
         .task(id: frame.phase == .verified) { await runFinale() }
         .onChange(of: followKey) { _, _ in updateFollow() }
@@ -1085,6 +1093,9 @@ struct RidgeTripView: View {
             TripConfetti(look: .paper, burst: burst)
         }
         .frame(width: layout.width, height: layout.height, alignment: .topLeading)
+        // Nothing the page draws (the wide mountain layers, the zoom, the
+        // confetti's travel) may spill past the device edges.
+        .clipped()
         .onChange(of: frame.phase) { old, new in
             handlePhaseChange(from: old, to: new, layout: layout)
         }
