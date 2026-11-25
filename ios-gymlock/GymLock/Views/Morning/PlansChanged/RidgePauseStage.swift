@@ -440,7 +440,7 @@ private enum RidgePauseDraw {
 
 /// Flows per-word views into centred lines. The whole line is laid out up front (unrevealed words
 /// are just transparent), so wrapping never changes while the words appear.
-private struct RidgeWordFlow: Layout {
+private struct RidgeWordFlow: SwiftUI.Layout {
     var space: CGFloat
     var lineGap: CGFloat
 
@@ -451,7 +451,7 @@ private struct RidgeWordFlow: Layout {
         var height: CGFloat = 0
     }
 
-    private func rows(_ subviews: Subviews, maxWidth: CGFloat) -> [Row] {
+    private func rows(_ subviews: SwiftUI.LayoutSubviews, maxWidth: CGFloat) -> [Row] {
         var result: [Row] = []
         var cur = Row()
         for i in subviews.indices {
@@ -471,7 +471,7 @@ private struct RidgeWordFlow: Layout {
         return result
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: SwiftUI.LayoutSubviews, cache: inout Void) -> CGSize {
         let maxWidth = proposal.width ?? 10_000
         let r = rows(subviews, maxWidth: maxWidth)
         let height = r.reduce(CGFloat(0)) { $0 + $1.height } + lineGap * CGFloat(max(0, r.count - 1))
@@ -479,7 +479,7 @@ private struct RidgeWordFlow: Layout {
         return CGSize(width: width, height: height)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: SwiftUI.LayoutSubviews, cache: inout Void) {
         let r = rows(subviews, maxWidth: bounds.width)
         var y = bounds.minY
         for row in r {
@@ -494,15 +494,15 @@ private struct RidgeWordFlow: Layout {
 }
 
 /// Places its one child centred vertically between `top` and `bottom` (never above `top`).
-private struct RidgeBand: Layout {
+private struct RidgeBand: SwiftUI.Layout {
     var top: CGFloat
     var bottom: CGFloat
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: SwiftUI.LayoutSubviews, cache: inout Void) -> CGSize {
         CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: SwiftUI.LayoutSubviews, cache: inout Void) {
         guard let v = subviews.first else { return }
         let size = v.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
         let y = max(top, top + (bottom - top - size.height) / 2)
