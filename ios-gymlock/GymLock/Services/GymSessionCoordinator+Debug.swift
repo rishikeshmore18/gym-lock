@@ -21,6 +21,9 @@ extension GymSessionCoordinator {
         case departed
         case countdownAt75
         case countdownExpired
+        // The trip page, end to end.
+        case tripDemo
+        case tripRealWalk
 
         // Screen Time
         case familyControlsAuthorized
@@ -137,7 +140,7 @@ extension GymSessionCoordinator {
             switch self {
             case .alarmFired, .snoozedMorning, .snoozeElapsed, .alarmFiredEvening,
                  .imGoing, .missionComplete, .departed,
-                 .countdownAt75, .countdownExpired:
+                 .countdownAt75, .countdownExpired, .tripDemo, .tripRealWalk:
                 "flow"
             case .familyControlsAuthorized, .familyControlsDenied,
                  .shieldApplied, .shieldRemoved, .technicalRelease:
@@ -200,6 +203,8 @@ extension GymSessionCoordinator {
             case .departed: "departed"
             case .countdownAt75: "countdown at 75%"
             case .countdownExpired: "countdown expired"
+            case .tripDemo: "trip demo (automatic)"
+            case .tripRealWalk: "trip test (walk to your gym)"
             case .familyControlsAuthorized: "FamilyControls authorized"
             case .familyControlsDenied: "FamilyControls denied"
             case .shieldApplied: "shield applied"
@@ -289,6 +294,41 @@ extension GymSessionCoordinator {
         }
     }
 
+    /// Starts a real session that opens straight onto the trip page, as if the
+    /// alarm had just rung for now and the user tapped "I'm going".
+    ///
+    /// - `simulated`: the demo. A made-up start point about 1.2 km from the gym
+    ///   walks itself along Apple's real route, then the real leave, arrive
+    ///   and confirm calls run, with the two-minute check shortened.
+    /// - otherwise the real test: real GPS, the real departure monitor, the
+    ///   real gym geofence and the full two-minute check. Walk out of the door
+    ///   and go to the gym. The apps on the lock list stay locked until you
+    ///   arrive, like any gym session, and the visit is recorded.
+    ///
+    /// The gym time is set to now plus the plan's time to gym, so the countdown
+    /// has the user's own window. The wake page plays first if it has not yet
+    /// played for this session, and its "Let's go" starts the trip.
+    func debugStartTrip(simulated: Bool) {
+        TripSimulation.shared.stop()
+        endSession()
+        if simulated { debugStore?.debugSeedGym() }
+        guard let store = debugStore, let gym = store.primaryGym else { return }
+
+        beginSession(for: store.plan.enabledSlots.first, startsRinger: false)
+        guard var current = session else { return }
+        let now = Date()
+        current.alarmTime = TimeOfDay(from: now)
+        current.arrivalTarget = now.addingTimeInterval(Double(current.windowMinutes) * 60)
+        debugReplace(current)
+
+        if simulated {
+            TripSimulation.shared.begin(gym: gym.coordinate, coordinator: self)
+        }
+        commitToGoing()
+        // The trip is the point here, so the activation mission is skipped.
+        if session?.state == .activationMission { beginPreparation() }
+    }
+
     func simulate(_ step: DebugStep) {
         switch step {
         // MARK: Flow
@@ -358,6 +398,12 @@ extension GymSessionCoordinator {
             current.state = .preparing
             debugReplace(current)
             handleExpiry()
+
+        case .tripDemo:
+            debugStartTrip(simulated: true)
+
+        case .tripRealWalk:
+            debugStartTrip(simulated: false)
 
         // MARK: Screen Time
 

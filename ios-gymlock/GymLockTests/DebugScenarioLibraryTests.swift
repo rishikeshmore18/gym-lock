@@ -68,7 +68,7 @@ struct DebugScenarioLibraryTests {
         let listed = SimStep.sections.flatMap { SimCatalog.steps(inSection: $0) }
         #expect(listed.count == SimStep.allCases.count)
         #expect(Set(listed) == Set(SimStep.allCases))
-        #expect(SimStep.allCases.count == 89)
+        #expect(SimStep.allCases.count == 91)
     }
 
     @Test func fifteenOriginalSectionsAllNonEmpty() {

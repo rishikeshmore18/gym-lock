@@ -1,7 +1,7 @@
 #if DEBUG
 import SwiftUI
 
-/// All 89 scenarios in their 15 original sections, each exactly once. One tap
+/// All 91 scenarios in their 15 original sections, each exactly once. One tap
 /// selects a scenario and returns; nothing runs from here.
 struct DaySimulatorLibraryView: View {
     let selected: SimStep?
@@ -76,7 +76,7 @@ struct DaySimulatorLibraryView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas.ignoresSafeArea())
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search 89 scenarios")
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search 91 scenarios")
         .navigationTitle("All Scenarios")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

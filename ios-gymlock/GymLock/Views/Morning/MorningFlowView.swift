@@ -18,6 +18,13 @@ struct MorningFlowView: View {
     /// from the tab shell underneath it, which is not on screen.
     @State private var shareOrigin: ShareOrigin?
 
+    /// The session whose trip page is on screen right now. Arrival only plays
+    /// the trip's "verified" finale when the user was looking at the trip.
+    @State private var tripShownFor: UUID?
+    /// The session whose verified finale has finished, so the arrival screen
+    /// takes over and stays.
+    @State private var finaleDoneFor: UUID?
+
     private var session: GymSession? { coordinator.session }
 
     var body: some View {
@@ -27,7 +34,9 @@ struct MorningFlowView: View {
             if let session, let route = coordinator.route {
                 screen(for: route, session: session)
                     .transition(.opacity)
-                    .id(route)
+                    // The trip is one page across its routes, so it keeps one
+                    // identity and changes in place instead of being rebuilt.
+                    .id(screenKey(for: route, session: session))
             }
         }
         .animation(Theme.settle, value: coordinator.route)
@@ -64,8 +73,51 @@ struct MorningFlowView: View {
 
     // MARK: - Routing
 
+    /// Countdown, departure and the arrival check are one trip page when the
+    /// user has a gym to draw a route to. Without one, the older screens stay.
+    private func usesTrip(_ route: MorningRoute, session: GymSession) -> Bool {
+        guard store.primaryGym != nil else { return false }
+        switch route {
+        case .countdown, .departed, .confirmingArrival:
+            return true
+        case .gymSuccess:
+            return tripShownFor == session.id && finaleDoneFor != session.id
+        default:
+            return false
+        }
+    }
+
+    private func screenKey(for route: MorningRoute, session: GymSession) -> String {
+        usesTrip(route, session: session) ? "trip" : String(describing: route)
+    }
+
     @ViewBuilder
     private func screen(for route: MorningRoute, session: GymSession) -> some View {
+        if usesTrip(route, session: session), let gym = store.primaryGym {
+            tripScreen(route: route, session: session, gym: gym)
+        } else {
+            routedScreen(for: route, session: session)
+        }
+    }
+
+    private func tripScreen(route: MorningRoute, session: GymSession, gym: GymLocation) -> some View {
+        let sessionID = session.id
+        return TripView(
+            session: session,
+            route: route,
+            gym: gym,
+            onLeft: { coordinator.markDeparted(detected: false) },
+            onEnd: { coordinator.beginCantToday() },
+            onTrouble: { coordinator.reportArrivalTroubleManually() },
+            onAcknowledgeDeparture: { coordinator.acknowledgeDeparture() },
+            onShown: { tripShownFor = sessionID },
+            onHidden: { if tripShownFor == sessionID { tripShownFor = nil } },
+            onFinaleDone: { finaleDoneFor = sessionID }
+        )
+    }
+
+    @ViewBuilder
+    private func routedScreen(for route: MorningRoute, session: GymSession) -> some View {
         switch route {
         case .decision:
             AlarmFiredView(

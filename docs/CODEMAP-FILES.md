@@ -1,6 +1,3 @@
-# GymLock file index. One line per Swift file: path [lines] TypesDeclared — first comment.
-# NEVER read this whole file. Search it: grep -i "keyword" docs/CODEMAP-FILES.md
-# Paths are relative to ios-gymlock/. Regenerate: cd ios-gymlock && python3 -I ../docs/gen_codemap.py . > ../docs/CODEMAP-FILES.md
 GymLock/Config.swift [15] Config — Virtual read-only view of public environment variables available to Swift code.
 GymLock/ContentView.swift [110] ContentView — Routes between the onboarding journey, the morning setup, and home.
 GymLock/GymLockApp.swift [86] GymLockApp — GymLock
@@ -17,7 +14,7 @@ GymLock/Models/GymSession.swift [435] GymSessionState,SessionAnchor,CantTodayRes
 GymLock/Models/GymVisit.swift [312] CodingKeys — Why a gym visit counts (FLOW, Flow 3). `unproven` is a gym visit that has
 GymLock/Models/HeroCopy.swift [535] HeroCopy,Row,HeroCopyFacts — The words on the Dynamic hero card, from the prototype's copy tables (copy12.ts STATE12 an
 GymLock/Models/HeroMoment.swift [301] HeroRotationStore — Which Dynamic hero card draws Home. Only Dynamic ships; there is no Classic.
-GymLock/Models/HeroMomentResolver.swift [510] HeroMomentRules,HeroMomentState,HeroDayFacts,HeroMomentResolver — Moments a user meets once in their life (spec §2.2).
+GymLock/Models/HeroMomentResolver.swift [530] HeroMomentRules,HeroMomentState,HeroDayFacts,HeroMomentResolver — Moments a user meets once in their life (spec §2.2).
 GymLock/Models/HomeStage.swift [697] HomeCardModel,HeroStage,ChecklistItem,ProtectionCard,Mood,NextCard… — One rendered frame of home's card section, derived entirely from real state.
 GymLock/Models/Illustration.swift [158] Illustration,LoopState — The user-supplied illustration library.
 GymLock/Models/MomentumField.swift [208] MomentumMark,MomentumDay,MomentumField — What one day contributed to the week.
@@ -65,8 +62,8 @@ GymLock/Services/DemoShieldService.swift [122] DemoShieldService — Shielding t
 GymLock/Services/FamilyControlsShieldService.swift [390] FamilyControlsShieldService — Real OS-level app blocking through Apple's Screen Time stack.
 GymLock/Services/GymArrivalMonitor.swift [427] GymArrivalMonitor,Availability,Phase,+GymArrivalMonitor — Watches for the user actually arriving at their gym.
 GymLock/Services/GymSearchService.swift [151] GymSearchService,GymSearchResult — Finds the user's gym on the map so they never type a coordinate.
-GymLock/Services/GymSessionCoordinator+Debug.swift [1584] +GymSessionCoordinator,DebugStep — Jumps the morning to any state without waiting for a real 6:30 AM, a real
-GymLock/Services/GymSessionCoordinator.swift [2425] MorningRoute,GymSessionCoordinator,Key — Which screen the morning flow should be showing.
+GymLock/Services/GymSessionCoordinator+Debug.swift [1670] +GymSessionCoordinator,DebugStep — Jumps the morning to any state without waiting for a real 6:30 AM, a real
+GymLock/Services/GymSessionCoordinator.swift [2428] MorningRoute,GymSessionCoordinator,Key — Which screen the morning flow should be showing.
 GymLock/Services/GymVisitTracker.swift [242] GymVisitTracker,Key — Follows every gym visit from arrival until it is settled (FLOW, Flow 3).
 GymLock/Services/HealthWorkoutObserver.swift [320] HealthWorkoutObserver,Availability,+HKWorkoutActivityType — Notices workouts that Apple Health already recorded.
 GymLock/Services/MissionCameraModel.swift [172] MissionCameraModel,Availability,+MissionCameraModel — The camera behind the photo missions.
@@ -132,7 +129,7 @@ GymLock/Views/Home/CommunityView.swift [108] CommunityView — The Community tab
 GymLock/Views/Home/FlameAnimationView.swift [172] FlameAnimationView,FlameArtwork,FlameFigure,FlameGlow,FlameAsset — The supplied dotLottie flame.
 GymLock/Views/Home/GlassSurface.swift [40] GlassCapsuleBackground,+View — Liquid Glass where the OS supports it, an honest fallback where it doesn't.
 GymLock/Views/Home/GymLockLaunchIntroView.swift [80] GymLockLaunchIntroView — What a cold launch opens on: the canvas and the real logo, nothing else.
-GymLock/Views/Home/Hero/DoneFlow/DoneFlowBuilder.swift [382] DoneFlowBuilder,Resume,Built,Record — Builds the done flow from the user's own record (02-experience-spec §4). Every figure on e
+GymLock/Views/Home/Hero/DoneFlow/DoneFlowBuilder.swift [451] DoneFlowBuilder,Resume,Built,SessionWindow,Record — Builds the done flow from the user's own record (02-experience-spec §4). Every figure on e
 GymLock/Views/Home/Hero/DoneFlow/DoneFlowHost.swift [140] DoneFlowHost,DoneFlowStage,DoneFlowGlassCircle — The done flow on screen (02-experience-spec §4.2–4.3).
 GymLock/Views/Home/Hero/DynamicHeroCard.swift [160] DynamicHeroCard,DynamicHeroFace — The Dynamic hero card on Home (02-experience-spec §2, §5, §6).
 GymLock/Views/Home/Hero/HeroCardLabView.swift [270] HeroCardLabView,Mode,Scheme,ParityState — Debug-only lab for the Dynamic hero card.
@@ -145,7 +142,7 @@ GymLock/Views/Home/Hero/Matrix/MatrixEngine.swift [433] MatrixHash,MatrixTarget,
 GymLock/Views/Home/Hero/Matrix/MatrixParityAll.swift [558] +MatrixParity — GymLock · Matrix hero
 GymLock/Views/Home/Hero/Matrix/MatrixParityStory.swift [164] +MatrixParity — GymLock · Matrix hero
 GymLock/Views/Home/Hero/Matrix/MatrixScene.swift [387] MatrixWeekPos,MatrixDayData,MatrixContext,SceneOut,MatrixScene,MatrixMoment… — GymLock · Matrix hero (native port)
-GymLock/Views/Home/Hero/Matrix/MatrixStoryView.swift [1449] MatrixStoryScreen,MatrixMonthPos,MatrixStoryConfig,Screen,MatrixClimaxCopy,EndFacts… — GymLock · Matrix done flow (native port)
+GymLock/Views/Home/Hero/Matrix/MatrixStoryView.swift [1486] MatrixStoryScreen,MatrixMonthPos,MatrixStoryConfig,Screen,MatrixClimaxCopy,EndFacts… — GymLock · Matrix done flow (native port)
 GymLock/Views/Home/Hero/Matrix/Scenes/MXAtgym.swift [513] +MX,Atgym — GymLock · Matrix hero
 GymLock/Views/Home/Hero/Matrix/Scenes/MXAutomatic.swift [379] +MX,Automatic — GymLock · Matrix hero
 GymLock/Views/Home/Hero/Matrix/Scenes/MXBedtime.swift [449] +MX,Bedtime — GymLock · Matrix hero
@@ -162,7 +159,7 @@ GymLock/Views/Home/Hero/Matrix/Scenes/MXReady.swift [456] +MX,Ready — GymLock 
 GymLock/Views/Home/Hero/Matrix/Scenes/MXRest.swift [355] +MX,Rest — GymLock · Matrix hero
 GymLock/Views/Home/Hero/Matrix/Scenes/MXSetup.swift [676] +MX,Setup — GymLock · Matrix hero
 GymLock/Views/Home/Hero/Matrix/Scenes/MXStilltime.swift [465] +MX,Stilltime — GymLock · Matrix hero
-GymLock/Views/Home/Hero/Matrix/Scenes/MXStory.swift [2200] +MX,Story — GymLock · Matrix hero
+GymLock/Views/Home/Hero/Matrix/Scenes/MXStory.swift [2262] +MX,Story — GymLock · Matrix hero
 GymLock/Views/Home/Hero/Matrix/Scenes/MXVerified.swift [820] +MX,Verified — GymLock · Matrix hero
 GymLock/Views/Home/Hero/Matrix/Scenes/MXWake.swift [546] +MX,Wake — GymLock · Matrix hero
 GymLock/Views/Home/Hero/Matrix/Scenes/MXWeekkept.swift [363] +MX,Weekkept — GymLock · Matrix hero
@@ -219,10 +216,10 @@ GymLock/Views/Morning/DayDial.swift [1740] DayDialModel,Grab,Zone,Bar,DragTracke
 GymLock/Views/Morning/DebugMorningPanel.swift [686] DebugMorningPanel,SimRoute — The Day Flow Simulator: pick a scenario, see what it sets, run it once.
 GymLock/Views/Morning/DebugSimulator/DaySimulatorDiagnosticsView.swift [364] SimReadingSource,SimReadingRow,DaySimulatorDiagnosticsView,SimTool — Live readings shared by Diagnostics and the Test Result view. Everything
 GymLock/Views/Morning/DebugSimulator/DaySimulatorDials.swift [169] SimDialShell,SimTimeDial,SimDistanceRing,SimGymDialView — The shared shell of the three dials: a ring, a value in the middle and a
-GymLock/Views/Morning/DebugSimulator/DaySimulatorLibraryView.swift [133] DaySimulatorLibraryView — All 89 scenarios in their 15 original sections, each exactly once. One tap
+GymLock/Views/Morning/DebugSimulator/DaySimulatorLibraryView.swift [133] DaySimulatorLibraryView — All 91 scenarios in their 15 original sections, each exactly once. One tap
 GymLock/Views/Morning/DebugSimulator/DaySimulatorModel.swift [167] SimRunner,SimRunDisposition,DaySimulatorModel — What the simulator needs from the app to run a scenario. Real runs pass
 GymLock/Views/Morning/DebugSimulator/DaySimulatorResultView.swift [135] DaySimulatorResultView — What one run did, read-only. There is no automatic verdict: the scenarios
-GymLock/Views/Morning/DebugSimulator/DebugScenarioCatalog.swift [824] SimStage,SimDayRule,SimTimeReading,SimJourney,SimJourneyReading,SimGymTime… — Every simulator scenario is still one `GymSessionCoordinator.DebugStep`.
+GymLock/Views/Morning/DebugSimulator/DebugScenarioCatalog.swift [842] SimStage,SimDayRule,SimTimeReading,SimJourney,SimJourneyReading,SimGymTime… — Every simulator scenario is still one `GymSessionCoordinator.DebugStep`.
 GymLock/Views/Morning/DepartedView.swift [151] DepartedView — The moment the user actually leaves.
 GymLock/Views/Morning/GymPickerView.swift [261] GymPickerView — Choosing the gym — the one extra thing the user ever configures.
 GymLock/Views/Morning/GymWindowView.swift [203] GymWindowView — The live window: how long is left to be standing in the gym.
@@ -249,7 +246,7 @@ GymLock/Views/Morning/Missions/Screens/MissionLightStages.swift [281] MissionBac
 GymLock/Views/Morning/Missions/Screens/MissionSwapSheet.swift [117] MissionSwapSheet — GymLock · mission screens
 GymLock/Views/Morning/MomentumSavedView.swift [266] MomentumSavedView,MomentumSparkline — The result screen after a home fallback.
 GymLock/Views/Morning/MorningAlarmPlanView.swift [388] MorningAlarmPlanView — One overview of the next morning: when the alarm rings, what happens after
-GymLock/Views/Morning/MorningFlowView.swift [189] MorningFlowView — The router for a live morning.
+GymLock/Views/Morning/MorningFlowView.swift [241] MorningFlowView — The router for a live morning.
 GymLock/Views/Morning/MorningKit.swift [397] MorningHeader,HaloedGlyph,SparkMark,StatusPill,MorningPrimaryButton,MorningPrimaryStyle… — The small wordmark that sits at the top of every morning screen, with an
 GymLock/Views/Morning/MorningSetupFlowView.swift [123] MorningSetupFlowView,Step — The one-time setup that runs after activation.
 GymLock/Views/Morning/PlansChangedView.swift [87] PlansChangedView — Shown when the window has closed without the user reaching the gym.
@@ -258,15 +255,22 @@ GymLock/Views/Morning/RhythmDial.swift [505] RhythmDial,Handle,MinuteDial,Countd
 GymLock/Views/Morning/SleepWakeRhythmView.swift [412] SleepWakeRhythmView,TimeField,PresetChips,TimePickerSheet — Sets the window that gets the user from bed to moving.
 GymLock/Views/Morning/SongTrimmerView.swift [1118] SongTrimmerView,Presentation,PreviewSweep,TrimmerGlass,+View,TrimmerPressStyle… — Picks a track and chooses the 28 seconds of it that will wake the user.
 GymLock/Views/Morning/StillGettingReadyView.swift [147] StillGettingReadyView — The one nudge, shown at roughly three-quarters of the preparation window.
-GymLock/Views/Morning/WakeIntro/Core/WakeFactsProvider.swift [126] WakeFactsProvider — GymLock · the "I'm up" wake page
+GymLock/Views/Morning/Trip/MatrixTripView.swift [1686] MatrixTripView,MatrixTripStyle,MatrixTripReveal,MatrixTripMeter,MatrixTripVerifyPanel,MatrixStreetField… — The Matrix style of the trip screen: a tilted 3D board of dots built from the
+GymLock/Views/Morning/Trip/RidgeTripView.swift [1578] RidgeTripMath,RidgeTripLayout,RidgeTripSample,RidgeTripEffort,RidgeTripPose,RidgeTripTrail… — A live black and white map on top, an ink-wash Ridge band straddling the
+GymLock/Views/Morning/Trip/TripConfetti.swift [142] TripConfetti,Look,Burst,Piece — The arrival confetti, shared by both trip styles.
+GymLock/Views/Morning/Trip/TripModel.swift [291] TripModel,+TripModel — The live geometry of one trip to the gym: where the user is, the route Apple
+GymLock/Views/Morning/Trip/TripSimulation.swift [148] TripSimulation — Drives the trip screen without anyone moving, for the Day Flow Simulator's
+GymLock/Views/Morning/Trip/TripTypes.swift [167] TripPhase,TripFrame,TripActions,TripCopy,TripFormat,TripPrimaryButton… — Where the trip stands. Derived by `TripView` from the session's route, never stored.
+GymLock/Views/Morning/Trip/TripView.swift [164] TripView — The trip to the gym, as one page.
+GymLock/Views/Morning/WakeIntro/Core/WakeFactsProvider.swift [158] WakeFactsProvider,WakeShoeRotation — GymLock · the "I'm up" wake page
 GymLock/Views/Morning/WakeIntro/Core/WakeHaptics.swift [139] WakeHaptics — GymLock · the "I'm up" wake page
-GymLock/Views/Morning/WakeIntro/Core/WakeIntroView.swift [2268] WakeIntroView,WakeNow,WakeIntroEngine,WakeClock,WakeClocks,WakeMoment… — GymLock · the "I'm up" wake page (native port of web/morning2 stage.tsx, ui.tsx, settled.t
-GymLock/Views/Morning/WakeIntro/Core/WakeStage.swift [506] WakeConcept,WakeBeatID,WakeBeat,WakeMissionKind,WakeHapticKind,WakeHaptic… — GymLock · the "I'm up" wake page (native port of web/morning2)
+GymLock/Views/Morning/WakeIntro/Core/WakeIntroView.swift [2270] WakeIntroView,WakeNow,WakeIntroEngine,WakeClock,WakeClocks,WakeMoment… — GymLock · the "I'm up" wake page (native port of web/morning2 stage.tsx, ui.tsx, settled.t
+GymLock/Views/Morning/WakeIntro/Core/WakeStage.swift [513] WakeConcept,WakeBeatID,WakeBeat,WakeShoeArt,WakeMissionKind,WakeHapticKind… — GymLock · the "I'm up" wake page (native port of web/morning2)
 GymLock/Views/Morning/WakeIntro/Integration/WakeIntroPresenter.swift [185] WakeIntroLedger,WakeIntroPresenter,Snapshot — GymLock · the "I'm up" wake page
 GymLock/Views/Morning/WakeIntro/Matrix/MatrixWakeBoard.swift [280] MatrixWakePixels,MatrixWakeBoard,MXW,Icon,MatrixWakeLED,Pixel — GymLock · Wake intro, Matrix concepts (native port)
-GymLock/Views/Morning/WakeIntro/Matrix/MatrixWakeChapters.swift [616] MatrixWakeGeo,MatrixWakeFacts,Mission,MatrixWakeBeat,MatrixWakeTimeline,Beat… — GymLock · Wake intro, Matrix concepts (native port)
+GymLock/Views/Morning/WakeIntro/Matrix/MatrixWakeChapters.swift [802] MatrixWakeGeo,MatrixWakeFacts,Mission,ShoeArt,MatrixWakeBeat,MatrixWakeTimeline… — GymLock · Wake intro, Matrix concepts (native port)
 GymLock/Views/Morning/WakeIntro/Matrix/MatrixWakeEngine.swift [373] MatrixWakeJS,MatrixWakeHash,MatrixWakeTarget,MatrixWakeDealOptions,MatrixWakeParticle,MatrixWakeEngine… — GymLock · Wake intro, Matrix concepts (native port)
-GymLock/Views/Morning/WakeIntro/Matrix/MatrixWakeStage.swift [823] MatrixWakeSim,MatrixWakeInk,MatrixWakeGrid,RGB,MatrixWakeStage,GridKey… — GymLock · Wake intro, Matrix concepts (native port)
+GymLock/Views/Morning/WakeIntro/Matrix/MatrixWakeStage.swift [824] MatrixWakeSim,MatrixWakeInk,MatrixWakeGrid,RGB,MatrixWakeStage,GridKey… — GymLock · Wake intro, Matrix concepts (native port)
 GymLock/Views/Morning/WakeIntro/Ridge/RidgeWakeStage.swift [790] RidgeWakeStage,Metrics,RouteGeometry,StageGeometry,CardGeometry,Footsteps… — GymLock
 GymLock/Views/Morning/WakeIntro/Ridge/RidgeWorld.swift [506] RidgeWorld — GymLock
 GymLock/Views/Onboarding/CautionPage.swift [168] CautionPage,Force,SignImpact — Scene 8 — the gate. A quiet, honest filter before the commitment, and the one
@@ -326,7 +330,7 @@ GymLock/Views/Progress/HallOfFame/ReelScene.swift [282]  — Intro timeline in s
 GymLock/Views/Progress/ProgressChartColumns.swift [195] ProgressMonthWeekColumn,ProgressWeekDayColumn — One week of the month, drawn as a stack of physical cards.
 GymLock/Views/Progress/ProgressChartKit.swift [434] ProgressPalette,ProgressLayerKind,ProgressLayer,+ProgressTally,ProgressLayeredBar,BackCard… — The four marks the progress charts are allowed to draw.
 GymLock/Views/Progress/ProgressCompletionRing.swift [97] ProgressCompletionRing — The completion dial: one continuous orange arc for what was completed, one
-GymLock/Views/Progress/ProgressPeriodCard.swift [379] ProgressCardMetrics,ProgressPeriodCard — Shared geometry for the period card.
+GymLock/Views/Progress/ProgressPeriodCard.swift [431] ProgressCardMetrics,ProgressPeriodCard,CardArrow,CardArrowStyle — Shared geometry for the period card.
 GymLock/Views/Progress/ProgressPeriodPreviews.swift [321] ProgressPreviewData,ProgressPreviewStage — Fixtures for the period card.
 GymLock/Views/Progress/ProgressPhotoAddButton.swift [178] ProgressPhotoSourceChoice,ProgressPhotoAddButton,RootTabBarMinYKey,+EnvironmentValues,+View,BubbleButtonStyle — Which source the user picked from the Add Photo menu.
 GymLock/Views/Progress/ProgressPhotoCaptureSheet.swift [366] ProgressPhotoCaptureSheet,Phase — Full-screen viewfinder for a progress photo, with the system camera's own
