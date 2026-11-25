@@ -154,7 +154,8 @@ struct MorningFlowView: View {
 
         case .plansChanged:
             PlansChangedView(
-                voice: SessionVoice(session: session),
+                session: session,
+                context: .windowClosed,
                 onStillGoing: { coordinator.grantGrace() },
                 onQuickWorkout: { coordinator.offerQuickWorkout() },
                 onCantToday: { coordinator.beginCantToday() }

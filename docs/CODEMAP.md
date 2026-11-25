@@ -1,7 +1,7 @@
 # GymLock Codemap (read this first, ~1.5k tokens)
 Repo: rishikeshmore18/gym-lock. All Swift is under `ios-gymlock/GymLock/` (408 files, ~119k lines). Paths below are relative to that folder unless they start with `docs/` or a target name.
 Docs: `docs/FLOW.md` (behaviour rules), `docs/UI-RULES.md` (design rules), `CLAUDE.md`, `rork.json`, `docs/hero-pack/` (Matrix/Ridge hero reference), `docs/intro-reference/` (intro images).
-Last mapped commit: f62b153 + trip-screen branch (2026-11-24).
+Last mapped commit: 80b5949 + plans-changed-pause branch (2026-11-24).
 
 ## How to find anything (cheapest order)
 1. Find the feature in the table below, then open only the named file(s).
@@ -33,6 +33,7 @@ Last mapped commit: f62b153 + trip-screen branch (2026-11-24).
 | Trip page (countdown, leaving home, live map, arrival check) | Views/Morning/Trip/* (TripView host, TripModel route+GPS, RidgeTripView, MatrixTripView, TripConfetti, TripSimulation debug); routed from Views/Morning/MorningFlowView |
 | Gym location, arrival, departure | Models/GymLocation; Services/GymArrivalMonitor, SessionLocationMonitor, GymVisitTracker, GymSearchService; Views/Morning/GymPickerView, GymWindowView, ArrivalViews, DepartedView (fallbacks when no gym is set); Models/GymVisit |
 | Screen Time lock (Family Controls) | Services/FamilyControlsShieldService, AppShielding, DemoShieldService; Views/Morning/BlockedAppsSetupView; targets GymLockShieldAction, GymLockShieldConfig, GymLockNightMonitor; shared code `ScreenTimeShared/` |
+| "Plans changed" pause (30 s wait, then one door at a time; Ridge / Matrix printer by card style, Day 0 at the worst moment) | Views/Morning/PlansChangedView (host: clock, chrome, buttons); Views/Morning/PlansChanged/* (PauseFacts real data, PauseScript copy and timing, PauseHaptics, RidgePauseStage, MatrixPrinterPauseStage, Day0PauseStage); prototype docs/prototypes/plans-changed-pause.html |
 | Workout proof, "can't today" | Services/HealthWorkoutObserver, WorkoutVerification; Views/Morning/QuickWorkoutView, HomeWorkoutProofView, CantTodayView, StillGettingReadyView |
 | Momentum and freezes | Models/MomentumLog, MomentumField, FreezeCalendar; Views/Morning/MomentumSavedView; Views/Home/Visuals/Momentum* |
 | App-wide state, subscription | ViewModels/AppStore, LaunchCover; Services/SubscriptionStore, CrashSentinel; Models/NotificationRoute |
