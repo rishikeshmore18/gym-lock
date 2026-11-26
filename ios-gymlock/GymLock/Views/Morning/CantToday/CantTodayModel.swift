@@ -145,6 +145,7 @@ enum CantTodayDataProvider {
         defaultTimeFor: (Date) -> TimeOfDay,
         isTimeAvailable: @escaping (Date, TimeOfDay) -> Bool,
         comebackMode: Bool,
+        sleepFor: ((Date) -> (bed: TimeOfDay, wake: TimeOfDay))? = nil,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> CantTodayData {
@@ -177,6 +178,13 @@ enum CantTodayDataProvider {
                 return .blocked("earliest today \(CantTodayClock.text(earliest))")
             }
             if isTimeAvailable(target.day, CantTodayClock.timeOfDay(m)) { return .ok }
+            // Name the sleep schedule from the alarm settings, so the note says when it ends.
+            if let sleepFor {
+                let s = sleepFor(target.day)
+                let wake = CantTodayClock.minutes(s.wake)
+                if m < wake { return .blocked("asleep till \(CantTodayClock.text(wake))") }
+                return .blocked("bedtime \(CantTodayClock.text(CantTodayClock.minutes(s.bed)))")
+            }
             return .blocked("sleep hours")
         }
 
