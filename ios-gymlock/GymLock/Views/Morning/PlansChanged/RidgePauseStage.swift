@@ -177,20 +177,57 @@ private enum RidgePauseShapes {
         [CGPoint(x: 610, y: 1378), CGPoint(x: 620, y: 1351), CGPoint(x: 618, y: 1352), CGPoint(x: 620, y: 1338)]
     ])
 
-    /// the sky above the ridge line (the prototype's clip-path, percent of the image)
+    /// skyline of the painted range, one sample per 10 world px (x 0...900, y in world px)
+    static let ridge: [Double] = [
+        1266, 1262, 1259, 1259, 1259, 1257, 1246, 1239, 1239, 1239, 1232, 1232, 1232, 1251, 1253, 1253,
+        1259, 1261, 1270, 1289, 1310, 1292, 1292, 1292, 1299, 1299, 1279, 1278, 1278, 1278, 1291, 1291,
+        1263, 1247, 1230, 1230, 1230, 1239, 1232, 1232, 1232, 1193, 1163, 1104, 1104, 1096, 1096, 1096,
+        1091, 1071, 1071, 1071, 1077, 1089, 1102, 1142, 1136, 1136, 1136, 1179, 1219, 1230, 1226, 1226,
+        1226, 1227, 1250, 1262, 1285, 1286, 1286, 1283, 1283, 1283, 1286, 1240, 1240, 1240, 1243, 1257,
+        1275, 1257, 1257, 1257, 1272, 1293, 1295, 1286, 1262, 1262, 1262
+    ]
+
+    /// the skyline's y at world x (linear between samples)
+    static func ridgeY(_ x: Double) -> Double {
+        let f = min(90, max(0, x / 10))
+        let i = Int(f.rounded(.down))
+        let j = min(90, i + 1)
+        return ridge[i] + (ridge[j] - ridge[i]) * (f - Double(i))
+    }
+
+    /// the sky above the painted skyline (the prototype's ridgePoly clip, in world px)
     static let skyClip: Path = {
-        let pct: [(Double, Double)] = [
-            (0, 0), (100, 0), (100, 59.6), (62.2, 59.6), (60.6, 58), (57.8, 55.7),
-            (55.6, 54.9), (54.2, 55.7), (52.8, 56), (50.6, 57), (48.9, 59.6), (0, 59.6)
-        ]
         var p = Path()
-        for (i, v) in pct.enumerated() {
-            let pt = CGPoint(x: v.0 / 100 * 900, y: v.1 / 100 * 1948)
-            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+        p.move(to: CGPoint(x: 0, y: 0))
+        p.addLine(to: CGPoint(x: 900, y: 0))
+        var i = 90
+        while i >= 0 {
+            p.addLine(to: CGPoint(x: CGFloat(i * 10), y: CGFloat(RidgePauseShapes.ridge[i])))
+            i -= 1
         }
         p.closeSubpath()
         return p
     }()
+
+    /// the faint fan: repeating conic, 0.50 to 0.12 to 0 over 8 deg, clear to 15 deg (24 repeats)
+    static let fanGradient: Gradient = {
+        func c(_ a: Double) -> Color { Color(red: 255 / 255, green: 226 / 255, blue: 192 / 255).opacity(a) }
+        var stops: [Gradient.Stop] = []
+        for n in 0..<24 {
+            let base = Double(n) * 15 / 360
+            stops.append(Gradient.Stop(color: c(0.5), location: base))
+            stops.append(Gradient.Stop(color: c(0.12), location: base + 4 / 360))
+            stops.append(Gradient.Stop(color: c(0), location: base + 8 / 360))
+            stops.append(Gradient.Stop(color: c(0), location: base + 15 / 360))
+        }
+        return Gradient(stops: stops)
+    }()
+
+    static let fanMask = Gradient(stops: [
+        Gradient.Stop(color: Color.black.opacity(0.9), location: 0),
+        Gradient.Stop(color: Color.black.opacity(0.35), location: 0.35),
+        Gradient.Stop(color: Color.black.opacity(0), location: 1)
+    ])
 
     static let warm = Gradient(stops: [
         Gradient.Stop(color: Color(red: 150 / 255, green: 140 / 255, blue: 130 / 255).opacity(0), location: 0.36),
@@ -212,6 +249,8 @@ private let ridgePauseInk = Color(red: 11 / 255, green: 11 / 255, blue: 12 / 255
 
 private struct RidgePauseFrame {
     var cam: RidgeCamState
+    var time: Double
+    var reduceMotion: Bool
     /// screen points of the sun's centre below the tip (negative = above)
     var sunOffset: CGFloat
     var warmOpacity: Double
@@ -232,7 +271,10 @@ private struct RidgePauseFrame {
         let rm = input.reduceMotion
         let p = M.cl(t / PauseScript.wait)
 
-        sunOffset = CGFloat(21 + (-35 - 21) * p)
+        time = t
+        reduceMotion = rm
+
+        sunOffset = CGFloat(36 + (-52 - 36) * p)
         warmOpacity = 0.32 * p
 
         var camera = geo.waitingCam(t: t, reduceMotion: rm)
@@ -339,14 +381,20 @@ private enum RidgePauseDraw {
                 }
             }
 
-            // the sun: 14 pt on screen at any camera scale, clipped by the ridge line
+            // the sun and its light: 26 pt on screen at any camera scale, rising from behind the ridge
             if f.sunOpacity > 0.001 {
                 let unit = geo.k * f.cam.s
-                let r = 7 / unit
+                let r = RidgePauseDraw.sunDiameter / 2 / unit
+                let sx = RidgePauseGeo.apex.x
                 let cy = RidgePauseGeo.apex.y + f.sunOffset / unit
+
+                // sky light, clipped to the sky above the skyline
+                skyGlow(&c, x: Double(sx), y: Double(cy), fade: f.sunOpacity, t: f.time, k: geo.k, reduceMotion: f.reduceMotion)
+
+                // the disc, clipped by the skyline so it is always behind the mountain
                 c.drawLayer { cc in
                     cc.clip(to: RidgePauseShapes.skyClip)
-                    let dot = CGRect(x: RidgePauseGeo.apex.x - r, y: cy - r, width: 2 * r, height: 2 * r)
+                    let dot = CGRect(x: sx - r, y: cy - r, width: 2 * r, height: 2 * r)
                     cc.fill(Path(ellipseIn: dot), with: .color(Theme.accent.opacity(f.sunOpacity)))
                 }
             }
@@ -392,6 +440,107 @@ private enum RidgePauseDraw {
                        with: .linearGradient(Gradient(colors: [ridgePauseInk.opacity(0), ridgePauseInk.opacity(0.7)]),
                                              startPoint: CGPoint(x: 0, y: top),
                                              endPoint: CGPoint(x: 0, y: size.height)))
+            }
+        }
+    }
+
+    /// the sun's diameter on screen, in points
+    static let sunDiameter: CGFloat = 26
+
+    /// Soft, minimal dawn light (the prototype's skyGlow). Drawn in world space, clipped to the sky above
+    /// the skyline: horizon warmth that peaks just before the sun clears, a halo around the sun, a faint
+    /// blurred fan that is gone once the sun is up, and a whole-sky lift by altitude.
+    private static func skyGlow(_ c: inout GraphicsContext, x: Double, y: Double, fade: Double, t: Double, k: CGFloat, reduceMotion: Bool) {
+        typealias M = RidgePauseMath
+        let worldW = Double(RidgePauseGeo.worldW)
+        let worldH = Double(RidgePauseGeo.worldH)
+        let world = CGRect(x: 0, y: 0, width: worldW, height: worldH)
+
+        let rY = RidgePauseShapes.ridgeY(x)
+        let d = rY - y
+        let alt = M.cl(d / 280)
+        let dawn = exp(-pow((d + 30) / 140, 2))
+        let halo = M.cl((d + 20) / 120)
+        let lift = alt
+        let dayOpacity = M.cl(dawn * 0.9 + halo * 0.9) * fade
+        let fan = M.cl(exp(-pow((d + 25) / 75, 2))) * fade
+
+        c.drawLayer { cc in
+            cc.clip(to: RidgePauseShapes.skyClip)
+
+            // the faint blurred fan, only while the sun is behind or just clearing the edge
+            if fan > 0.01 {
+                cc.drawLayer { rc in
+                    rc.opacity = fan * 0.32
+                    rc.addFilter(.blur(radius: 5 / k))
+                    let angle = reduceMotion ? 0 : t * 0.8
+                    let center = CGPoint(x: x, y: y)
+                    rc.clipToLayer { mc in
+                        mc.fill(Path(world),
+                                with: .radialGradient(RidgePauseShapes.fanMask,
+                                                      center: center,
+                                                      startRadius: 0,
+                                                      endRadius: 430))
+                    }
+                    rc.fill(Path(world),
+                            with: .conicGradient(RidgePauseShapes.fanGradient,
+                                                 center: center,
+                                                 angle: Angle.degrees(angle - 90)))
+                }
+            }
+
+            if dayOpacity > 0.001 {
+                cc.drawLayer { dc in
+                    dc.opacity = dayOpacity
+
+                    // whole-sky lift by altitude (bottom layer)
+                    if lift > 0.001 {
+                        let liftGradient = Gradient(stops: [
+                            Gradient.Stop(color: Color(red: 160 / 255, green: 190 / 255, blue: 230 / 255).opacity(0.46 * lift), location: 0),
+                            Gradient.Stop(color: Color(red: 232 / 255, green: 214 / 255, blue: 194 / 255).opacity(0.28 * lift), location: 0.66),
+                            Gradient.Stop(color: Color(red: 232 / 255, green: 214 / 255, blue: 194 / 255).opacity(0.28 * lift), location: 1)
+                        ])
+                        dc.fill(Path(world),
+                                with: .linearGradient(liftGradient,
+                                                      startPoint: CGPoint(x: 0, y: 0),
+                                                      endPoint: CGPoint(x: 0, y: worldH)))
+                    }
+
+                    // dawn warmth along the horizon under the sun (ellipse 46% x 9% of the image)
+                    if dawn > 0.001 {
+                        let rx = 0.46 * worldW
+                        let ry = 0.09 * worldH
+                        var ec = dc
+                        ec.translateBy(x: x, y: rY)
+                        ec.scaleBy(x: 1, y: ry / rx)
+                        let dawnGradient = Gradient(stops: [
+                            Gradient.Stop(color: Color(red: 255 / 255, green: 196 / 255, blue: 150 / 255).opacity(0.5 * dawn), location: 0),
+                            Gradient.Stop(color: Color(red: 255 / 255, green: 196 / 255, blue: 150 / 255).opacity(0), location: 1)
+                        ])
+                        ec.fill(Path(CGRect(x: -rx, y: -rx, width: 2 * rx, height: 2 * rx)),
+                                with: .radialGradient(dawnGradient,
+                                                      center: CGPoint.zero,
+                                                      startRadius: 0,
+                                                      endRadius: rx))
+                    }
+
+                    // halo around the sun (top layer); CSS "circle" sizes to the farthest corner
+                    if halo > 0.001 {
+                        let far = max(max(hypot(x, y), hypot(worldW - x, y)),
+                                      max(hypot(x, worldH - y), hypot(worldW - x, worldH - y)))
+                        let haloGradient = Gradient(stops: [
+                            Gradient.Stop(color: Color(red: 255 / 255, green: 236 / 255, blue: 210 / 255).opacity(0.7 * halo), location: 0),
+                            Gradient.Stop(color: Color(red: 255 / 255, green: 214 / 255, blue: 176 / 255).opacity(0.32 * halo), location: 0.06),
+                            Gradient.Stop(color: Color(red: 255 / 255, green: 204 / 255, blue: 166 / 255).opacity(0.1 * halo), location: 0.18),
+                            Gradient.Stop(color: Color(red: 255 / 255, green: 204 / 255, blue: 166 / 255).opacity(0), location: 0.34)
+                        ])
+                        dc.fill(Path(world),
+                                with: .radialGradient(haloGradient,
+                                                      center: CGPoint(x: x, y: y),
+                                                      startRadius: 0,
+                                                      endRadius: far))
+                    }
+                }
             }
         }
     }

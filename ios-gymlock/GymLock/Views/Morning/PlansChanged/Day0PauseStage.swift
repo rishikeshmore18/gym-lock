@@ -45,7 +45,10 @@ struct Day0PauseStage: View {
         let doorAge = input.choice?.age ?? 0
         let handover = input.choice == nil ? 0.0 : day0Prog(doorAge, 0, 0.4)
         let k = min(1, max(0.8, layout.contentHeight / 540))
-        let _ = fireHaptics(beats, cur)
+        // With their own video or photo behind, the words sit low as a lower-third (the prototype's #lt)
+        // instead of the five full-screen beats. Without media the beats play exactly as before.
+        let hasMedia = input.facts.day0 != nil
+        let _ = fireHaptics(beats, cur, hasMedia: hasMedia)
 
         ZStack(alignment: .topLeading) {
             Self.surface
@@ -56,8 +59,13 @@ struct Day0PauseStage: View {
 
             topChrome(handover: handover)
 
-            if cur >= 0, handover < 1 {
+            if !hasMedia, cur >= 0, handover < 1 {
                 beatsLayer(beats: beats, cur: cur, k: k)
+                    .opacity(1 - handover)
+            }
+
+            if hasMedia, handover < 1 {
+                lowerThirdLayer()
                     .opacity(1 - handover)
             }
 
@@ -77,9 +85,10 @@ struct Day0PauseStage: View {
 
     // MARK: Media
 
-    /// Media dims to 45% behind the beats, and to 35% once the 30 seconds are up (over 400 ms).
+    /// The media plays at full strength (the face stays clear, the words sit low), and dims to 50%
+    /// once the 30 seconds are up (over 400 ms), like the prototype's `#app.vid #media` and `.dark`.
     private var mediaOpacity: Double {
-        0.45 - 0.10 * day0Prog(input.t, PauseScript.wait, 0.4)
+        1 - 0.5 * day0Prog(input.t, PauseScript.wait, 0.4)
     }
 
     @ViewBuilder
@@ -106,22 +115,19 @@ struct Day0PauseStage: View {
                     }
                 }
             }
-            // Vignette and a shade at the bottom, like the prototype's, so words always read.
-            RadialGradient(
-                colors: [Color.black.opacity(0), Color.black.opacity(0.7)],
-                center: UnitPoint(x: 0.5, y: 0.46),
-                startRadius: hypot(size.width, size.height) * 0.5 * 0.38,
-                endRadius: hypot(size.width, size.height) * 0.5
+            // The prototype's #vig: a shade at the top for the progress bar and label, clear over the
+            // face, then a deep shade low where the lower-third sits.
+            LinearGradient(
+                gradient: Gradient(stops: [
+                    Gradient.Stop(color: Color.black.opacity(0.55), location: 0),
+                    Gradient.Stop(color: Color.black.opacity(0), location: 0.22),
+                    Gradient.Stop(color: Color.black.opacity(0), location: 0.48),
+                    Gradient.Stop(color: Color.black.opacity(0.25), location: 0.62),
+                    Gradient.Stop(color: Color.black.opacity(0.82), location: 1),
+                ]),
+                startPoint: .top,
+                endPoint: .bottom
             )
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                LinearGradient(
-                    colors: [Color.black.opacity(0), Color.black.opacity(0.55)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: size.height * 0.55)
-            }
         }
         .frame(width: size.width, height: size.height)
         .opacity(mediaOpacity)
@@ -166,13 +172,19 @@ struct Day0PauseStage: View {
             .accessibilityHidden(true)
 
             if let day0 = input.facts.day0 {
-                Text("you, on day 0 · " + day0.capturedAt.formatted(.dateTime.month(.abbreviated).day()).lowercased())
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.8))
-                    .lineLimit(1)
-                    .offset(x: 16, y: top + 2 + 2 + 12)
-                    .opacity(visible)
-                    .accessibilityHidden(true)
+                HStack(spacing: 8) {
+                    Text("you, on day 0 · " + day0.capturedAt.formatted(.dateTime.month(.abbreviated).day()).lowercased())
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.8))
+                        .lineLimit(1)
+                    // The wave belongs to the video's sound; a photo has none, so it shows no wave.
+                    if day0.kind == .video {
+                        Day0PauseWave(t: input.t, live: !isMuted && !input.isReady, reduceMotion: input.reduceMotion)
+                    }
+                }
+                .offset(x: 16, y: top + 2 + 2 + 12)
+                .opacity(visible)
+                .accessibilityHidden(true)
 
                 if day0.kind == .video {
                     muteButton
@@ -217,7 +229,14 @@ struct Day0PauseStage: View {
     }
 
     /// Soft at each beat start, light at each tick of the first beat. `cue` plays once per id.
-    private func fireHaptics(_ beats: [Day0PauseBeat], _ cur: Int) {
+    private func fireHaptics(_ beats: [Day0PauseBeat], _ cur: Int, hasMedia: Bool) {
+        if hasMedia {
+            // Lower-third: soft each time the line changes (the prototype's ltFrame), no ground ticks.
+            var line = -1
+            for (i, l) in input.script.lines.enumerated() where input.t >= l.start { line = i }
+            if line >= 0 { input.haptics.cue("d0.lt.\(line)", .soft) }
+            return
+        }
         guard cur >= 0 else { return }
         input.haptics.cue("d0.beat.\(cur)", .soft)
         let beat = beats[cur]
@@ -226,6 +245,26 @@ struct Day0PauseStage: View {
             if lt >= 0.45 { input.haptics.cue("d0.tick.0", .light) }
             if lt >= 1.3 { input.haptics.cue("d0.tick.1", .light) }
         }
+    }
+
+    /// The over-the-video layer: one short line low on the screen plus chips, inside the safe zones
+    /// (above the host's buttons, `Theme.pageMargin` from the sides).
+    private func lowerThirdLayer() -> some View {
+        let layout = input.layout
+        return VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Day0PauseLowerThird(
+                facts: input.facts,
+                lines: input.script.lines,
+                t: input.t,
+                width: layout.contentWidth,
+                compact: layout.size.height <= 700,
+                reduceMotion: input.reduceMotion
+            )
+            .padding(.bottom, max(0, layout.size.height - layout.contentBottom))
+        }
+        .frame(width: layout.size.width, height: layout.size.height, alignment: .bottom)
+        .allowsHitTesting(false)
     }
 
     private func beatsLayer(beats: [Day0PauseBeat], cur: Int, k: CGFloat) -> some View {
@@ -336,6 +375,294 @@ struct Day0PauseStage: View {
         .frame(width: layout.contentWidth, height: layout.contentHeight)
         .position(x: layout.size.width / 2, y: layout.contentTop + layout.contentHeight / 2)
         .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Over the video: the lower-third caption, chips and sound wave
+
+/// The small audio wave after the "you, on day 0" label. Lit and moving while sound is on, dim and flat
+/// while muted (the prototype's #wave). A photo has no sound, so the stage does not draw it there.
+private struct Day0PauseWave: View {
+    let t: Double
+    let live: Bool
+    let reduceMotion: Bool
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(0..<4, id: \.self) { i in
+                let phase = Double(i)
+                let moving = live && !reduceMotion
+                let h: Double = moving ? 3 + 8 * abs(sin(t * (5 + phase * 1.7) + phase)) : 3
+                Capsule()
+                    .fill(Color.white.opacity(0.85))
+                    .frame(width: 2, height: CGFloat(h))
+            }
+        }
+        .frame(height: 11, alignment: .bottom)
+        .opacity(live ? 1 : 0.35)
+    }
+}
+
+/// One chip's real values. `bar` is the share of the 66 done, only on the visits chip.
+private struct Day0PauseChipSpec: Identifiable {
+    let key: String
+    let value: String
+    let unit: String
+    var flame: Bool = false
+    var bar: Double? = nil
+    var id: String { key }
+}
+
+/// "6:58 AM" or "18:58" to minutes since midnight; nil when the label cannot be read (the chip then hides).
+private func day0ClockMinutes(_ label: String) -> Int? {
+    let lower = label.lowercased()
+    let tokens = lower.split(whereSeparator: { !($0.isNumber || $0 == ":") })
+    guard let token = tokens.first(where: { $0.contains(":") }) else { return nil }
+    let parts = token.split(separator: ":")
+    guard parts.count >= 2, let hour = Int(parts[0]), let minute = Int(parts[1]) else { return nil }
+    var h = hour
+    let pm = lower.contains("pm") || lower.contains("p.m")
+    let am = lower.contains("am") || lower.contains("a.m")
+    if pm && h < 12 { h += 12 }
+    if am && h == 12 { h = 0 }
+    guard h >= 0, h < 24, minute >= 0, minute < 60 else { return nil }
+    return h * 60 + minute
+}
+
+/// Port of the prototype's #lt: the current line as a lower-third caption (their own words in serif
+/// italic with a "you, on day 0" kicker), and under it chips for the streak, the minutes to the gym
+/// and the visit out of 66. The chip that matches the line on screen lifts.
+private struct Day0PauseLowerThird: View {
+    let facts: PauseFacts
+    let lines: [PauseLine]
+    let t: Double
+    let width: CGFloat
+    let compact: Bool
+    let reduceMotion: Bool
+
+    private static let flameGradient = LinearGradient(
+        colors: [
+            Color(red: 0.847, green: 0.153, blue: 0.075),
+            Color(red: 1, green: 0.451, blue: 0),
+            Color(red: 1, green: 0.769, blue: 0.180),
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+
+    var body: some View {
+        let cur = currentIndex
+        let spec = chipSpecs
+        VStack(alignment: .leading, spacing: compact ? 10 : 14) {
+            captionArea(cur: cur)
+            if !spec.isEmpty {
+                chipsFitting(spec)
+            }
+        }
+        .frame(width: width, alignment: .leading)
+    }
+
+    // MARK: Caption
+
+    private var currentIndex: Int {
+        var cur = -1
+        for (i, line) in lines.enumerated() where t >= line.start { cur = i }
+        return cur
+    }
+
+    private func captionArea(cur: Int) -> some View {
+        var shown: [Int] = []
+        if cur >= 1, t - lines[cur].start < 0.22 { shown.append(cur - 1) }
+        if cur >= 0 { shown.append(cur) }
+        return Color.clear
+            .frame(width: width, height: 62)
+            .overlay(alignment: .bottomLeading) {
+                ZStack(alignment: .bottomLeading) {
+                    ForEach(shown, id: \.self) { i in
+                        captionLine(index: i, cur: cur)
+                    }
+                }
+            }
+    }
+
+    /// Incoming: words fade in one after another. Outgoing: fades and lifts 8 pt over 220 ms.
+    private func captionLine(index i: Int, cur: Int) -> some View {
+        let line = lines[i]
+        let isQuote = line.kind == .quote
+        let raw = isQuote ? line.text.trimmingCharacters(in: CharacterSet(charactersIn: "\"\u{201C}\u{201D}")) : line.text
+        let words = raw.trimmingCharacters(in: .whitespaces).split(separator: " ").map(String.init)
+        let incoming = i == cur
+        let po = incoming ? 0.0 : day0Prog(t, lines[min(cur, lines.count - 1)].start, 0.22)
+        let size: CGFloat = compact ? (isQuote ? 22 : 20) : (isQuote ? 25 : 23)
+        let n = words.count
+        let stag: Double = n > 1 ? min(0.12, max(0, 0.35 * line.duration - 0.2) / Double(n - 1)) : 0
+        let lt = t - line.start
+
+        var out = AttributedString()
+        for (j, word) in words.enumerated() {
+            var piece = AttributedString(word)
+            let a = incoming ? day0Prog(lt, Double(j) * stag, 0.22) : 1.0
+            piece.foregroundColor = Color.white.opacity(a)
+            out += piece
+            if j < n - 1 { out += AttributedString(" ") }
+        }
+
+        let text: Text = isQuote
+            ? Text(out).font(.system(size: size, weight: .medium, design: .serif).italic()).tracking(-0.01 * size)
+            : Text(out).font(.system(size: size, weight: .bold)).tracking(-0.01 * size)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            if isQuote {
+                Text("you, on day 0")
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(0.24)
+                    .foregroundStyle(Color.white.opacity(0.6))
+                    .lineLimit(1)
+                    .opacity(incoming ? day0Prog(lt, 0, 0.3) : 1)
+                    .padding(.bottom, 6)
+            }
+            text
+                .lineSpacing(1)
+                .multilineTextAlignment(.leading)
+                .lineLimit(4)
+                .minimumScaleFactor(0.7)
+                .shadow(color: Color.black.opacity(0.55), radius: 7, y: 1)
+        }
+        .frame(width: min(330, width), alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .opacity(1 - po)
+        .offset(y: reduceMotion ? 0 : CGFloat(-8 * po))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(line.text)
+        .accessibilityHidden(!incoming)
+    }
+
+    // MARK: Chips
+
+    /// Only real values; one that is missing is left out.
+    private var chipSpecs: [Day0PauseChipSpec] {
+        var out: [Day0PauseChipSpec] = []
+        if facts.streakWeeks > 0 {
+            out.append(Day0PauseChipSpec(key: "stake", value: "\(facts.streakWeeks)", unit: facts.streakWeeks == 1 ? "week" : "weeks", flame: true))
+        }
+        if facts.context == .windowClosed {
+            if facts.graceMinutes > 0 {
+                out.append(Day0PauseChipSpec(key: "close", value: "+\(facts.graceMinutes)", unit: "min if you go now"))
+            }
+        } else if let by = facts.gymBy, let b = day0ClockMinutes(by), let n = day0ClockMinutes(facts.nowLabel) {
+            out.append(Day0PauseChipSpec(key: "close", value: "\(max(0, b - n))", unit: "min to gym"))
+        }
+        let number = min(66, max(1, facts.visitNumber))
+        let share = min(1.0, max(0.0, Double(facts.visitsBefore) / 66.0))
+        out.append(Day0PauseChipSpec(key: "fact", value: "\(number)", unit: "of 66", bar: share))
+        return out
+    }
+
+    /// Which chip the line on screen belongs to, and how far its lift has come (0...1, 0.35 s each way).
+    private func onAmount(_ key: String) -> Double {
+        var best = 0.0
+        for (i, line) in lines.enumerated() {
+            let mapped: String?
+            switch line.kind {
+            case .stake: mapped = "stake"
+            case .fact: mapped = "fact"
+            case .close, .ground: mapped = "close"
+            case .own, .quote: mapped = nil
+            }
+            guard mapped == key, t >= line.start else { continue }
+            let end: Double? = i + 1 < lines.count ? lines[i + 1].start : nil
+            if let end, t >= end {
+                best = max(best, 1 - day0Prog(t, end, 0.35))
+            } else {
+                best = max(best, day0Prog(t, line.start, 0.35))
+            }
+        }
+        return best
+    }
+
+    /// Fits on one row if it can, then without the bar and with tighter padding, then on two rows,
+    /// and last of all shrinks the text, so nothing overflows at 375 wide.
+    private func chipsFitting(_ spec: [Day0PauseChipSpec]) -> some View {
+        ViewThatFits(in: .horizontal) {
+            chipRows(spec, tight: false, shrink: false, wrap: false)
+            chipRows(spec, tight: true, shrink: false, wrap: false)
+            chipRows(spec, tight: true, shrink: false, wrap: true)
+            chipRows(spec, tight: true, shrink: true, wrap: true)
+        }
+        .frame(maxWidth: width, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func chipRows(_ spec: [Day0PauseChipSpec], tight: Bool, shrink: Bool, wrap: Bool) -> some View {
+        if wrap && spec.count > 1 {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(Array(spec.dropLast())) { chip in
+                        chipView(chip, tight: tight, shrink: shrink)
+                    }
+                }
+                HStack(spacing: 8) {
+                    chipView(spec[spec.count - 1], tight: tight, shrink: shrink)
+                }
+            }
+        } else {
+            HStack(spacing: 8) {
+                ForEach(spec) { chip in
+                    chipView(chip, tight: tight, shrink: shrink)
+                }
+            }
+        }
+    }
+
+    private func chipView(_ chip: Day0PauseChipSpec, tight: Bool, shrink: Bool) -> some View {
+        let on = onAmount(chip.key)
+        let height: CGFloat = compact ? 34 : 38
+        let valueSize: CGFloat = compact ? 15 : 17
+        let unitSize: CGFloat = tight ? 11 : 12
+        let scaleFloor: CGFloat = shrink ? 0.7 : 1
+        return HStack(spacing: tight ? 6 : 7) {
+            if chip.flame {
+                Image(systemName: "flame.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(Self.flameGradient)
+                    .frame(width: 15, height: 18)
+            }
+            Text(chip.value)
+                .font(.system(size: valueSize, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+                .minimumScaleFactor(scaleFloor)
+            Text(chip.unit)
+                .font(.system(size: unitSize, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.65))
+                .lineLimit(1)
+                .minimumScaleFactor(scaleFloor)
+            if let bar = chip.bar, !tight {
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.22))
+                    Capsule().fill(Color.white).frame(width: 34 * CGFloat(bar))
+                }
+                .frame(width: 34, height: 4)
+            }
+        }
+        .padding(.leading, tight ? 9 : 10)
+        .padding(.trailing, tight ? 10 : 12)
+        .frame(height: height)
+        .background {
+            ZStack {
+                Capsule().fill(.ultraThinMaterial)
+                Capsule().fill(Color(red: 20.0 / 255, green: 20.0 / 255, blue: 22.0 / 255).opacity(0.42))
+                Capsule().fill(Color.white.opacity(0.2 * on))
+            }
+            .environment(\.colorScheme, .dark)
+        }
+        .overlay {
+            Capsule().strokeBorder(Color.white.opacity(0.14 + 0.26 * on), lineWidth: 1)
+        }
+        .scaleEffect(reduceMotion ? 1 : CGFloat(1 + 0.04 * on))
+        .offset(y: reduceMotion ? 0 : CGFloat(-3 * on))
     }
 }
 
