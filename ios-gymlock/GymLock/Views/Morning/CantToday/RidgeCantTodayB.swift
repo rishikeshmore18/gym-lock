@@ -73,7 +73,7 @@ private func rcbRidgeY(_ x: Double) -> Double {
     return rcbRidge[i] + (rcbRidge[j] - rcbRidge[i]) * (f - Double(i))
 }
 
-// MARK: - The sun's day (real sunrise to real sunset)
+// MARK: - The sun's day (6:00 am to 6:00 pm)
 
 private struct RCBTime {
     let aStart: Double
@@ -85,10 +85,13 @@ private struct RCBTime {
         aLen = Double(l == 0 ? 1440 : l)
     }
 
-    /// The sun's day is the real one: it comes up at sunrise and goes down at sunset where the
-    /// person trains. The hours around it are night, whatever the sleep schedule says.
+    /// The sun's day is the one people picture: up at 6:00 am, highest at noon, down at 6:00 pm.
+    /// The hours around it are night, whatever the sleep schedule or the season says.
+    static let sunrise = 6 * 60
+    static let sunset = 18 * 60
+
     init(data: CantTodayData) {
-        self.init(sleepStart: data.daylight.sunset, sleepEnd: data.daylight.sunrise)
+        self.init(sleepStart: Self.sunset, sleepEnd: Self.sunrise)
     }
 
     /// 0 at first light, 1 at last light, outside = below the horizon
