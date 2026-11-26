@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// "Plans changed": a 30-second pause before the three doors, then the doors one at a time.
+/// "Plans changed": a 30-second pause, then straight on to the can't today screen.
 ///
-/// The user is about to bail on the gym, usually at 6 or 7 in the morning and half awake. Instead of
-/// three buttons at once, the screen spends 30 seconds making today's stakes concrete (their own
-/// words from day 0, this week, the streak, the 66 visits), then offers the doors in order: still
-/// going, a quick workout at home, can't today. Every door stays open, and none is hidden (FLOW,
-/// Flow 4: skipping is always allowed). The X works at any moment and always means "keep going":
-/// friction sits only on the way to skipping, never on the way to the gym.
+/// The user is about to bail on the gym, usually at 6 or 7 in the morning and half awake. The screen
+/// spends 30 seconds making today's stakes concrete (their own words from day 0, this week, the
+/// streak, the 66 visits). "continue" then opens the can't today screen, which holds every way
+/// forward (make it up, home workout, skip), and none is hidden (FLOW, Flow 4: skipping is always
+/// allowed). The X works at any moment and always means "keep going": friction sits only on the way
+/// to skipping, never on the way to the gym.
 ///
 /// Three looks draw the same script (PauseScript):
 ///   - Ridge or Matrix printer, following the hero card style (`gymlock.home.cardStyle`)
@@ -37,6 +37,7 @@ struct PlansChangedView: View {
     @State private var haptics = PauseHaptics()
     @State private var earlyTapShake = 0
     @State private var didAct = false
+    @State private var leaving = false
 
     var body: some View {
         GeometryReader { geo in
@@ -72,6 +73,7 @@ struct PlansChangedView: View {
                 }
             }
             .ignoresSafeArea()
+            .opacity(leaving ? 0 : 1)
         }
         .onAppear(perform: start)
         .onDisappear { haptics.stop() }
@@ -140,10 +142,7 @@ struct PlansChangedView: View {
                 shake: earlyTapShake
             ) {
                 if ready {
-                    haptics.play(.rigid)
-                    withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.settle) {
-                        phase = .choosing(index: 0, since: input.t, from: nil)
-                    }
+                    proceed()
                 } else {
                     // Tapping early does nothing but say "not yet".
                     withAnimation(.linear(duration: 0.24)) { earlyTapShake += 1 }
@@ -218,6 +217,22 @@ struct PlansChangedView: View {
         didAct = true
         haptics.stop()
         onStillGoing()
+    }
+
+    /// The 30 seconds are up and they tapped "continue": straight to the can't today screen, which now
+    /// holds every way forward (make it up, home workout, skip). The three door slips are gone, so the
+    /// way to the gym is the X.
+    private func proceed() {
+        guard !didAct else { return }
+        haptics.play(.rigid)
+        withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.25)) { leaving = true }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(reduceMotion ? 150 : 280))
+            guard !didAct else { return }
+            didAct = true
+            haptics.stop()
+            onCantToday()
+        }
     }
 
     /// The door is taken: a heavy tap, a beat for the look to answer, then the real action.
