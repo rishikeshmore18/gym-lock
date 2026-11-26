@@ -94,7 +94,8 @@ struct CantTodayView: View {
             choices: choices,
             defaultTimeFor: defaultTimeFor,
             isTimeAvailable: isTimeAvailable,
-            comebackMode: isComebackModeOn
+            comebackMode: isComebackModeOn,
+            daylight: CantTodayDaylight.current(gym: store.primaryGym)
         )
         model = CantTodayModel(data: data, facts: facts, look: look)
         haptics.prepare()

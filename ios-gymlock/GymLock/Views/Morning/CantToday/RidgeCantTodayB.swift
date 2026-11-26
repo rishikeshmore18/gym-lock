@@ -73,7 +73,7 @@ private func rcbRidgeY(_ x: Double) -> Double {
     return rcbRidge[i] + (rcbRidge[j] - rcbRidge[i]) * (f - Double(i))
 }
 
-// MARK: - Awake window (the sun's day)
+// MARK: - The sun's day (real sunrise to real sunset)
 
 private struct RCBTime {
     let aStart: Double
@@ -85,34 +85,10 @@ private struct RCBTime {
         aLen = Double(l == 0 ? 1440 : l)
     }
 
-    /// The data has no sleep window of its own, so it is read from the rule: the minutes the rule
-    /// calls "sleep hours" are asleep, everything else is awake.
+    /// The sun's day is the real one: it comes up at sunrise and goes down at sunset where the
+    /// person trains. The hours around it are night, whatever the sleep schedule says.
     init(data: CantTodayData) {
-        var start = 1350
-        var end = 330
-        if let t = data.targets.first(where: { !$0.isToday }) ?? data.targets.first {
-            func awake(_ m: Int) -> Bool {
-                switch data.allowed(t, minutes: ((m % 1440) + 1440) % 1440) {
-                case .ok: return true
-                case .blocked(let why): return why != "sleep hours"
-                }
-            }
-            var foundEnd: Int? = nil
-            var foundStart: Int? = nil
-            var m = 0
-            while m < 1440 {
-                let a = awake(m)
-                let p = awake(m - 5)
-                if a && !p { foundEnd = m }
-                if !a && p { foundStart = m }
-                m += 5
-            }
-            if let e = foundEnd, let s = foundStart {
-                end = e
-                start = s
-            }
-        }
-        self.init(sleepStart: start, sleepEnd: end)
+        self.init(sleepStart: data.daylight.sunset, sleepEnd: data.daylight.sunrise)
     }
 
     /// 0 at first light, 1 at last light, outside = below the horizon

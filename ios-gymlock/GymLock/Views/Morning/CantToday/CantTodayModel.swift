@@ -89,6 +89,8 @@ struct CantTodayData {
     let comebackMode: Bool
     /// The real rule, asked of the coordinator. Combined with sleep and "too soon" notes.
     let allowance: (CantTodayTarget, Int) -> CantTodayAllowance
+    /// Real sunrise and sunset where the person trains. The Ridge sky and sun follow it.
+    var daylight: CantTodayDaylight = .fallback
 
     func allowed(_ target: CantTodayTarget, minutes: Int) -> CantTodayAllowance {
         allowance(target, minutes)
@@ -145,6 +147,7 @@ enum CantTodayDataProvider {
         defaultTimeFor: (Date) -> TimeOfDay,
         isTimeAvailable: @escaping (Date, TimeOfDay) -> Bool,
         comebackMode: Bool,
+        daylight: CantTodayDaylight = .fallback,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> CantTodayData {
@@ -230,7 +233,8 @@ enum CantTodayDataProvider {
             order: order,
             skipNeedsHold: !reachable,
             comebackMode: comebackMode,
-            allowance: allowance
+            allowance: allowance,
+            daylight: daylight
         )
     }
 }

@@ -212,12 +212,13 @@ GymLock/Views/Morning/AudioFilePicker.swift [50] AudioFilePicker,Coordinator —
 GymLock/Views/Morning/BlockedAppsSetupView.swift [292] BlockedAppsSetupView — Choosing what GymLock actually blocks. Asked once, then never again.
 GymLock/Views/Morning/CantToday/CantTodayDrum.swift [523] CantTodayDrumEngine,Phase,Event,CantTodayDrum — GymLock · the "can't today" screen (three looks)
 GymLock/Views/Morning/CantToday/CantTodayHold.swift [131] +View,CantTodayHoldModifier — GymLock · the "can't today" screen (three looks)
-GymLock/Views/Morning/CantToday/CantTodayModel.swift [275] CantTodayDoor,CantTodayTarget,CantTodayAllowance,CantTodayCost,Kind,CantTodayData… — GymLock · the "can't today" screen (three looks)
+GymLock/Views/Morning/CantToday/CantTodayModel.swift [279] CantTodayDoor,CantTodayTarget,CantTodayAllowance,CantTodayCost,Kind,CantTodayData… — GymLock · the "can't today" screen (three looks)
 GymLock/Views/Morning/CantToday/CantTodayNudger.swift [134] CantTodayNudger — GymLock · the "can't today" screen (three looks)
-GymLock/Views/Morning/CantToday/Day0CantTodayB.swift [1635] D0B,D0BFrameKey,D0BMetrics,D0BReel,D0BBeat,D0BResched… — Day0CantTodayB.swift
-GymLock/Views/Morning/CantToday/MatrixPrinterCantTodayB.swift [2925] MatrixPrinterCantTodayB,MPBPressTarget,MPBPressStyle,MPBDrumCell,Target,Cost… — GymLock · the "can't today" screen · Matrix printer look (b)
-GymLock/Views/Morning/CantToday/RidgeCantTodayB.swift [2367] RCBM,RCBTime,RCBSky,RCBCam,RCBGeo,RCBShapes… — GymLock · the "can't today" screen · Ridge look (b)
-GymLock/Views/Morning/CantTodayView.swift [111] CantTodayView,CantTodayModel — The one skip screen (FLOW, Flow 4), the "can't today" page.
+GymLock/Views/Morning/CantToday/CantTodaySun.swift [78] CantTodayDaylight — GymLock · the "can't today" screen
+GymLock/Views/Morning/CantToday/Day0CantTodayB.swift [1644] D0B,D0BFrameKey,D0BMetrics,D0BReel,D0BBeat,D0BResched… — Day0CantTodayB.swift
+GymLock/Views/Morning/CantToday/MatrixPrinterCantTodayB.swift [2937] MatrixPrinterCantTodayB,MPBPressTarget,MPBPressStyle,MPBDrumCell,Target,Cost… — GymLock · the "can't today" screen · Matrix printer look (b)
+GymLock/Views/Morning/CantToday/RidgeCantTodayB.swift [2378] RCBM,RCBTime,RCBSky,RCBCam,RCBGeo,RCBShapes… — GymLock · the "can't today" screen · Ridge look (b)
+GymLock/Views/Morning/CantTodayView.swift [112] CantTodayView,CantTodayModel — The one skip screen (FLOW, Flow 4), the "can't today" page.
 GymLock/Views/Morning/CelestialRhythmView.swift [192] CelestialRhythmView,+CelestialRhythmView — The moon-to-sun illustration used wherever time of day is the actual subject.
 GymLock/Views/Morning/DayDial.swift [1740] DayDialModel,Grab,Zone,Bar,DragTracker,GymPush… — The maths behind the Day Dial, kept out of the view so every rule is
 GymLock/Views/Morning/DebugMorningPanel.swift [686] DebugMorningPanel,SimRoute — The Day Flow Simulator: pick a scenario, see what it sets, run it once.
@@ -257,13 +258,13 @@ GymLock/Views/Morning/MorningFlowView.swift [242] MorningFlowView — The router
 GymLock/Views/Morning/MorningKit.swift [397] MorningHeader,HaloedGlyph,SparkMark,StatusPill,MorningPrimaryButton,MorningPrimaryStyle… — The small wordmark that sits at the top of every morning screen, with an
 GymLock/Views/Morning/MorningSetupFlowView.swift [123] MorningSetupFlowView,Step — The one-time setup that runs after activation.
 GymLock/Views/Morning/PlansChanged/Day0PauseStage.swift [1544] Day0PauseStage,Day0PauseWave,Day0PauseChipSpec,Day0PauseLowerThird,Day0PauseBeat,Kind… — Day0PauseStage.swift
-GymLock/Views/Morning/PlansChanged/MatrixPrinterPauseStage.swift [1514] MatrixPrinterPauseStage,Day,Row,Door,Part,MPPCache… — GymLock · the "plans changed" pause · Matrix printer look
+GymLock/Views/Morning/PlansChanged/MatrixPrinterPauseStage.swift [1539] MatrixPrinterPauseStage,Day,Row,Door,Part,MPPCache… — GymLock · the "plans changed" pause · Matrix printer look
 GymLock/Views/Morning/PlansChanged/PauseFacts.swift [174] PauseWeekDay,State,PauseFacts,Context,PauseFactsProvider — GymLock · the "plans changed" pause
 GymLock/Views/Morning/PlansChanged/PauseHaptics.swift [85] PauseHaptics,Kind — GymLock · the "plans changed" pause
 GymLock/Views/Morning/PlansChanged/PauseScript.swift [247] PauseLine,Kind,PauseChoice,Key,PauseReceiptRow,PauseScript… — GymLock · the "plans changed" pause
 GymLock/Views/Morning/PlansChanged/PrinterDotFont.swift [176]  — GymLock · the "plans changed" pause · Matrix printer look
 GymLock/Views/Morning/PlansChanged/RidgePauseStage.swift [898] RidgePauseMath,RidgeCamState,RidgePauseGeo,RidgePausePath,RidgePauseShapes,RidgePauseFrame… — GymLock · the "plans changed" pause · Ridge look
-GymLock/Views/Morning/PlansChangedView.swift [420] PlansChangedView,PauseLook,PauseModel,PausePhase,PauseLayout,PauseStageInput… — "Plans changed": a 30-second pause before the three doors, then the doors one at a time.
+GymLock/Views/Morning/PlansChangedView.swift [446] PlansChangedView,PauseLook,PauseModel,PausePhase,PauseLayout,PauseStageInput… — "Plans changed": a 30-second pause, then straight on to the can't today screen.
 GymLock/Views/Morning/QuickWorkoutView.swift [321] QuickWorkoutView,QuickWorkoutActiveView — The home fallback picker.
 GymLock/Views/Morning/RhythmDial.swift [505] RhythmDial,Handle,MinuteDial,CountdownRing — The 24-hour sleep dial: a moon at bedtime, a sun at wake time, and a coral
 GymLock/Views/Morning/SleepWakeRhythmView.swift [412] SleepWakeRhythmView,TimeField,PresetChips,TimePickerSheet — Sets the window that gets the user from bed to moving.
