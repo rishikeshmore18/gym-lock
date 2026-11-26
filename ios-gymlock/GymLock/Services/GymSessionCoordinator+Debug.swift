@@ -1475,6 +1475,9 @@ extension GymSessionCoordinator {
     /// Above 0 while a test step is setting things up, so its own endSession calls don't restore.
     private static var debugSimulatingDepth = 0
 
+    /// The decoded copy, kept so the reschedule rules don't decode it on every check.
+    private static var debugSavedPlanCache: MorningPlan?
+
     /// Saves the user's settings once, before the first test changes them. Stored on disk so a
     /// relaunch mid-test still gets them back.
     private func debugBackUpPlanIfNeeded() {
@@ -1482,6 +1485,16 @@ extension GymSessionCoordinator {
               UserDefaults.standard.data(forKey: Self.debugPlanBackupKey) == nil,
               let data = try? JSONEncoder().encode(store.plan) else { return }
         UserDefaults.standard.set(data, forKey: Self.debugPlanBackupKey)
+        Self.debugSavedPlanCache = store.plan
+    }
+
+    /// The user's own settings while a test has replaced them, else nil.
+    var debugSavedPlan: MorningPlan? {
+        if let cached = Self.debugSavedPlanCache { return cached }
+        guard let data = UserDefaults.standard.data(forKey: Self.debugPlanBackupKey),
+              let plan = try? JSONDecoder().decode(MorningPlan.self, from: data) else { return nil }
+        Self.debugSavedPlanCache = plan
+        return plan
     }
 
     /// Puts the user's alarm, sleep schedule, repeat days and gym days back once the test morning
@@ -1491,6 +1504,7 @@ extension GymSessionCoordinator {
               let store = debugStore,
               let data = UserDefaults.standard.data(forKey: Self.debugPlanBackupKey) else { return }
         UserDefaults.standard.removeObject(forKey: Self.debugPlanBackupKey)
+        Self.debugSavedPlanCache = nil
         guard var saved = try? JSONDecoder().decode(MorningPlan.self, from: data) else { return }
         saved.oneOffAlarms = store.plan.oneOffAlarms
         store.plan = saved

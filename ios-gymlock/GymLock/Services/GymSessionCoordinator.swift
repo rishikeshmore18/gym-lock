@@ -1938,21 +1938,44 @@ final class GymSessionCoordinator {
         )
     }
 
+    /// The plan the reschedule rules read, with the sleep schedule and wake time the user set in
+    /// the alarm settings. A debug test moves those to make the alarm ring "now"; the user's own
+    /// copy, saved before the test, is used for them instead. Gym days and one-off alarms stay as
+    /// they are, so the skip tests still see the week they set up.
+    private var reschedulePlan: MorningPlan? {
+        guard let store else { return nil }
+        var plan = store.plan
+        #if DEBUG
+        if let saved = debugSavedPlan {
+            plan.rhythm = saved.rhythm
+            plan.pendingBedtime = saved.pendingBedtime
+            plan.sleepScheduleDays = saved.sleepScheduleDays
+            plan.sleepDaysAreWakeDays = saved.sleepDaysAreWakeDays
+        }
+        #endif
+        return plan
+    }
+
+    /// The sleep schedule in force on `day`, as the user set it in the alarm settings.
+    func rescheduleRhythm(for day: Date) -> MorningRhythm {
+        reschedulePlan?.rhythm(at: day, calendar: .current) ?? .default
+    }
+
     /// Where today's workout can be moved to.
     var rescheduleChoices: [ReschedulePlanner.Choice] {
-        guard let store, let day = session?.day else { return [] }
-        return ReschedulePlanner.choices(plan: store.plan, day: day, now: Date(), calendar: .current)
+        guard let plan = reschedulePlan, let day = session?.day else { return [] }
+        return ReschedulePlanner.choices(plan: plan, day: day, now: Date(), calendar: .current)
     }
 
     /// The usual lock-alarm time for `day`'s mode, as the picker's default.
     func rescheduleDefaultTime(for day: Date) -> TimeOfDay {
-        guard let store else { return TimeOfDay(hour: 6, minute: 30) }
-        return ReschedulePlanner.defaultTime(plan: store.plan, on: day, calendar: .current)
+        guard let plan = reschedulePlan else { return TimeOfDay(hour: 6, minute: 30) }
+        return ReschedulePlanner.defaultTime(plan: plan, on: day, calendar: .current)
     }
 
     func isRescheduleTimeAvailable(_ time: TimeOfDay, on day: Date) -> Bool {
-        guard let store else { return false }
-        return ReschedulePlanner.isTimeAvailable(time, on: day, plan: store.plan, now: Date(), calendar: .current)
+        guard let plan = reschedulePlan else { return false }
+        return ReschedulePlanner.isTimeAvailable(time, on: day, plan: plan, now: Date(), calendar: .current)
     }
 
     var homeWorkoutsUsedThisMonth: Int {
