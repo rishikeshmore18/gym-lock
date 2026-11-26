@@ -1060,7 +1060,8 @@ private nonisolated enum MPPDraw {
 
     /// The sheet that was just torn off (or replaced), lifting away and fading.
     static func flyingSheet(_ c: inout GraphicsContext, scene: MPPScene, fly: MPPFly, reduce: Bool, blink: Bool, colors: MPPColors) {
-        let dur = reduce ? 0.2 : 0.38
+        // A torn receipt lives a little longer than a ticket swap, so the tear reads.
+        let dur = reduce ? 0.2 : (fly.atPerforation ? 0.5 : 0.38)
         let u = mppClamp(fly.age / dur, 0, 1)
         if u >= 1 { return }
         let g = scene.g
@@ -1073,17 +1074,41 @@ private nonisolated enum MPPDraw {
             perfY = win - feed + r.py + r.h
         }
         var fc = c
-        fc.opacity = 1 - u
+        fc.opacity = 1 - u * u
         if !reduce {
             let e = CGFloat(u * u)
-            fc.translateBy(x: 0, y: -fly.lift * e)
-            let ox = g.px + g.pw / 2
-            fc.translateBy(x: ox, y: perfY)
-            fc.rotate(by: .degrees(Double(2 * e)))
-            fc.translateBy(x: -ox, y: -perfY)
+            if fly.atPerforation {
+                // Torn from the left: the left corner lifts first, then the sheet goes up and away.
+                let ox = g.px
+                fc.translateBy(x: 18 * e, y: -(fly.lift * 4) * e)
+                fc.translateBy(x: ox, y: perfY)
+                fc.rotate(by: .degrees(Double(-5 * e)))
+                fc.translateBy(x: -ox, y: -perfY)
+            } else {
+                fc.translateBy(x: 0, y: -fly.lift * e)
+                let ox = g.px + g.pw / 2
+                fc.translateBy(x: ox, y: perfY)
+                fc.rotate(by: .degrees(Double(2 * e)))
+                fc.translateBy(x: -ox, y: -perfY)
+            }
         }
         if fly.atPerforation {
-            fc.clip(to: Path(CGRect(x: -400, y: -4000, width: g.w + 800, height: perfY + 4000)))
+            // A ragged bottom edge where the paper parted along the perforation.
+            var edge = Path()
+            edge.move(to: CGPoint(x: -400, y: -4000))
+            edge.addLine(to: CGPoint(x: g.w + 400, y: -4000))
+            edge.addLine(to: CGPoint(x: g.w + 400, y: perfY))
+            var x = g.px + g.pw
+            var i = 0
+            while x > g.px {
+                let jag: CGFloat = (i % 3 == 0) ? 2.2 : ((i % 2 == 0) ? -1.4 : 0.8)
+                edge.addLine(to: CGPoint(x: x, y: perfY + jag))
+                x -= 3.5
+                i += 1
+            }
+            edge.addLine(to: CGPoint(x: -400, y: perfY))
+            edge.closeSubpath()
+            fc.clip(to: edge)
         }
         paperSheet(&fc, scene: scene, job: fly.job, t: finalT, reduce: reduce, blink: blink, colors: colors)
     }

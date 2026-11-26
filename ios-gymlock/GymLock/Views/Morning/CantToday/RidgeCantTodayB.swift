@@ -190,6 +190,26 @@ private struct RCBGeo: Equatable {
     let cwH: CGFloat
     let cwM: CGFloat
     let cwA: CGFloat
+    /// Width of the ":" column in the time panel.
+    let colon: CGFloat
+
+    /// Column widths for the time panel at row height `rh`, measured with the fonts the reels use.
+    static func columns(_ rh: CGFloat) -> (h: CGFloat, m: CGFloat, a: CGFloat, colon: CGFloat, total: CGFloat) {
+        let digits = UIFont.monospacedDigitSystemFont(ofSize: rh * 1.02, weight: .bold)
+        let small = UIFont.systemFont(ofSize: rh * 0.6, weight: .bold)
+        let colonFont = UIFont.systemFont(ofSize: (rh * 0.95).rounded(), weight: .bold)
+        func width(_ text: String, _ font: UIFont) -> CGFloat {
+            ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        }
+        let two = max(width("12", digits), width("00", digits))
+        let h = two + 6
+        let m = two + 6
+        let a = max(width("am", small), width("pm", small)) + 10
+        let colon = width(":", colonFont) + 8
+        // 8 pt before am/pm, 14 pt either side inside the glass
+        let total = h + colon + m + 8 + a + 28
+        return (h, m, a, colon, total)
+    }
     let pw: CGFloat
     let sb: CGFloat
     let rys: CGFloat
@@ -218,16 +238,25 @@ private struct RCBGeo: Equatable {
         let hdBottom = hdTop + CGFloat(lines) * 36
 
         let rx = min(vw / 2 - 24, 190)
-        let ry: CGFloat = vh >= 780 ? 212 : 150
+        // Scales with the screen (212 on the 874 pt reference phone) instead of two fixed steps.
+        let ry: CGFloat = min(240, max(140, (vh * 0.2426).rounded()))
         let apexC = hdBottom + 24 + Self.sunD / 2
         let hyS = apexC + ry
         let peakTop = hyS + 40
-        let rh: CGFloat = vh >= 780 ? 46 : 36
+        // The time panel is sized from the real glyph widths, so "12:55 pm" always fits its columns,
+        // and the whole panel shrinks if it would not fit the screen width.
+        var rh: CGFloat = min(50, max(34, (vh * 0.0526).rounded()))
+        var cols = RCBGeo.columns(rh)
+        let maxW = vw - 48
+        if cols.total > maxW {
+            rh = max(28, (rh * maxW / cols.total).rounded(.down))
+            cols = RCBGeo.columns(rh)
+        }
         let panelH = rh * 3
         let panelBot = hyS - 12
-        let cwH = (rh * 1.3).rounded()
-        let cwM = (rh * 1.25).rounded()
-        let cwA = rh.rounded()
+        let cwH = cols.h
+        let cwM = cols.m
+        let cwA = cols.a
         let sb = peakTop + 64
         let farTY = (hyS + 30) - 8 - oy - Self.farScale * k * 1300
 
@@ -257,7 +286,8 @@ private struct RCBGeo: Equatable {
         self.cwH = cwH
         self.cwM = cwM
         self.cwA = cwA
-        self.pw = cwH + cwM + cwA + 14 + 8 + 28
+        self.colon = cols.colon
+        self.pw = cols.total
         self.sb = sb
         self.rys = sb - apexC
         self.farTY = farTY
@@ -1007,6 +1037,7 @@ private struct RCBReelRow: View {
     let anchor: UnitPoint
     let small: Bool
     let peek: Double
+    let width: CGFloat
 
     var body: some View {
         let th = max(-1.5, min(1.5, Double(d) * 0.5))
@@ -1022,8 +1053,7 @@ private struct RCBReelRow: View {
             .foregroundStyle(Color.white)
             .lineLimit(1)
             .minimumScaleFactor(0.6)
-            .frame(maxWidth: .infinity, alignment: align)
-            .frame(height: rh)
+            .frame(width: width, height: rh, alignment: align)
             .scaleEffect(CGFloat(sc), anchor: anchor)
             .rotation3DEffect(.radians(-th), axis: (x: 1, y: 0, z: 0), anchor: .center, perspective: 0.4)
             .offset(y: CGFloat(yOff) - CGFloat(peek) * rh)
@@ -1468,7 +1498,7 @@ struct RidgeCantTodayB: View {
                 ) { idx, dist in
                     RCBReelRow(text: "\(idx + 1)", d: dist, rh: rh,
                                blocked: !isOK(selMin),
-                               align: .trailing, anchor: .trailing, small: false, peek: f.reel[0])
+                               align: .trailing, anchor: .trailing, small: false, peek: f.reel[0], width: g.cwH)
                 }
                 .frame(width: g.cwH, height: rh * 3)
                 .mask(mask)
@@ -1480,7 +1510,7 @@ struct RidgeCantTodayB: View {
                 Text(":")
                     .font(.system(size: (rh * 0.95).rounded(), weight: .bold))
                     .foregroundStyle(Color.white)
-                    .frame(width: 14)
+                    .frame(width: g.colon)
                     .offset(y: -2)
                     .accessibilityHidden(true)
 
@@ -1497,7 +1527,7 @@ struct RidgeCantTodayB: View {
                 ) { idx, dist in
                     RCBReelRow(text: minuteText(idx), d: dist, rh: rh,
                                blocked: !isOK(selMin),
-                               align: .leading, anchor: .leading, small: false, peek: f.reel[1])
+                               align: .leading, anchor: .leading, small: false, peek: f.reel[1], width: g.cwM)
                 }
                 .frame(width: g.cwM, height: rh * 3)
                 .mask(mask)
@@ -1519,7 +1549,7 @@ struct RidgeCantTodayB: View {
                 ) { idx, dist in
                     RCBReelRow(text: idx == 1 ? "pm" : "am", d: dist, rh: rh,
                                blocked: !isOK(selMin),
-                               align: .center, anchor: .center, small: true, peek: f.reel[2])
+                               align: .center, anchor: .center, small: true, peek: f.reel[2], width: g.cwA)
                 }
                 .frame(width: g.cwA, height: rh * 3)
                 .mask(mask)
