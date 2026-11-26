@@ -24,6 +24,8 @@ struct MorningFlowView: View {
     /// The session whose verified finale has finished, so the arrival screen
     /// takes over and stays.
     @State private var finaleDoneFor: UUID?
+    /// The session whose X on the trip page opened the 30-second pause (first time this morning).
+    @State private var tripPauseFor: UUID?
 
     private var session: GymSession? { coordinator.session }
 
@@ -43,6 +45,24 @@ struct MorningFlowView: View {
         .storyEditor(origin: $shareOrigin)
         // The nudge is a sheet rather than a route: the countdown underneath is
         // still the truth, and the user should be able to dismiss back onto it.
+        // The X on the trip page: the 30-second pause the first time this morning, then can't today.
+        .fullScreenCover(isPresented: tripPauseBinding) {
+            if let session {
+                PlansChangedView(
+                    session: session,
+                    context: .windowOpen,
+                    onStillGoing: { tripPauseFor = nil },
+                    onQuickWorkout: {
+                        tripPauseFor = nil
+                        coordinator.offerQuickWorkout()
+                    },
+                    onCantToday: {
+                        tripPauseFor = nil
+                        coordinator.beginCantToday(from: .trip)
+                    }
+                )
+            }
+        }
         .sheet(isPresented: nudgeBinding) {
             if let session {
                 StillGettingReadyView(
@@ -61,6 +81,23 @@ struct MorningFlowView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
+        }
+    }
+
+    private var tripPauseBinding: Binding<Bool> {
+        Binding(
+            get: { tripPauseFor != nil && tripPauseFor == session?.id },
+            set: { if !$0 { tripPauseFor = nil } }
+        )
+    }
+
+    /// The X on the trip page or the countdown. The 30-second pause plays once a morning: if it has
+    /// already been seen, the X goes straight to the can't today screen.
+    private func endFromTrip(_ session: GymSession) {
+        if PauseSeenLedger.hasSeen(session.id) {
+            coordinator.beginCantToday(from: .trip)
+        } else {
+            tripPauseFor = session.id
         }
     }
 
@@ -107,7 +144,7 @@ struct MorningFlowView: View {
             route: route,
             gym: gym,
             onLeft: { coordinator.markDeparted(detected: false) },
-            onEnd: { coordinator.beginCantToday() },
+            onEnd: { endFromTrip(session) },
             onTrouble: { coordinator.reportArrivalTroubleManually() },
             onAcknowledgeDeparture: { coordinator.acknowledgeDeparture() },
             onShown: { tripShownFor = sessionID },
@@ -126,7 +163,7 @@ struct MorningFlowView: View {
                 onSnooze: { coordinator.snooze() },
                 runningLateOptions: coordinator.runningLateOptions,
                 onRunningLate: { coordinator.runningLate(by: $0) },
-                onCantToday: { coordinator.beginCantToday() }
+                onCantToday: { coordinator.beginCantToday(from: .alarm) }
             )
 
         case .mission:
@@ -136,7 +173,7 @@ struct MorningFlowView: View {
                 onChoose: { coordinator.chooseMission($0) },
                 onReroll: { coordinator.rerollMission(capabilities: $0) },
                 onSkip: { coordinator.skipMission() },
-                onCancel: { coordinator.beginCantToday() }
+                onCancel: { coordinator.beginCantToday(from: .trip) }
             )
 
         case .countdown:
@@ -144,7 +181,7 @@ struct MorningFlowView: View {
                 session: session,
                 lockedApps: store.profile.orderedDistractingApps,
                 onDeparted: { coordinator.markDeparted(detected: false) },
-                onEnd: { coordinator.beginCantToday() }
+                onEnd: { endFromTrip(session) }
             )
 
         case .departed:
@@ -158,7 +195,7 @@ struct MorningFlowView: View {
                 context: .windowClosed,
                 onStillGoing: { coordinator.grantGrace() },
                 onQuickWorkout: { coordinator.offerQuickWorkout() },
-                onCantToday: { coordinator.beginCantToday() }
+                onCantToday: { coordinator.beginCantToday(from: .closedWindow) }
             )
 
         case .quickWorkoutPicker:
@@ -202,7 +239,11 @@ struct MorningFlowView: View {
                 onReschedule: { coordinator.reschedule(to: $0, at: $1) },
                 onHomeWorkout: { coordinator.resolveCantToday(.homeWorkout) },
                 onSkip: { coordinator.resolveCantToday(.skip) },
-                onBack: { coordinator.endSession() },
+                onBack: {
+                    // Back to "let's go" when they came from the wake page's "plans changed".
+                    if coordinator.cantTodayOrigin == .wakePage { WakeIntroLedger.allowReplay(session.id) }
+                    coordinator.leaveCantToday()
+                },
                 startsOnPicker: coordinator.wantsReschedulePicker,
                 onPickerShown: { coordinator.consumeReschedulePicker() }
             )

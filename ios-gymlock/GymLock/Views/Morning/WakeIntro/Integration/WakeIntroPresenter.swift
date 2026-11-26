@@ -45,6 +45,12 @@ enum WakeIntroLedger {
         defaults.set(sessionID.uuidString, forKey: playedSessionKey)
     }
 
+    /// Lets the page play again for this session: the X on the can't today screen brings the user
+    /// back to it ("let's go") when they came from its "plans changed".
+    static func allowReplay(_ sessionID: UUID, defaults: UserDefaults = .standard) {
+        if hasPlayed(sessionID, defaults: defaults) { defaults.removeObject(forKey: playedSessionKey) }
+    }
+
     /// Whether the page should play now for this session on this screen.
     static func isEligible(_ session: GymSession, route: MorningRoute, now: Date = Date(), defaults: UserDefaults = .standard) -> Bool {
         guard route == .mission || route == .countdown else { return false }
@@ -132,7 +138,7 @@ struct WakeIntroPresenter: View {
                     },
                     onCantToday: {
                         isShowingPlansChanged = false
-                        coordinator.beginCantToday()
+                        coordinator.beginCantToday(from: .wakePage)
                     }
                 )
             }

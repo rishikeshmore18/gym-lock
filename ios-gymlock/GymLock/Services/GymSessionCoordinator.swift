@@ -23,6 +23,18 @@ enum MorningRoute: Equatable {
     case gymSuccess
 }
 
+/// Where the user opened the can't today screen from, so its X can take them back there.
+enum CantTodayOrigin: Equatable {
+    /// "can't today" on the alarm screen: back to the alarm screen.
+    case alarm
+    /// "plans changed" on the wake page: back to the wake page ("let's go").
+    case wakePage
+    /// The X on the trip page, the countdown or the mission: back to that screen.
+    case trip
+    /// The countdown ran out ("plans changed" with the window closed): back to that screen.
+    case closedWindow
+}
+
 /// Runs the morning, from the alarm to whatever actually happened.
 ///
 /// The shape of this type follows the product's central claim: **make the
@@ -116,6 +128,15 @@ final class GymSessionCoordinator {
     private(set) var pendingSpotlightDay: Date?
 
     private var ticker: Task<Void, Never>?
+
+    /// The screen the can't today X goes back to. Nil when the screen was opened for a morning
+    /// that is already over (the missed-alarm notice, a phone that was off): its X then ends it.
+    private var cantTodayReturn: (sessionID: UUID, state: GymSessionState, origin: CantTodayOrigin)?
+    /// Where the open can't today screen came from, if it can go back.
+    var cantTodayOrigin: CantTodayOrigin? {
+        guard let back = cantTodayReturn, back.sessionID == session?.id else { return nil }
+        return back.origin
+    }
     /// The long-lived observers, held somewhere that can clean itself up.
     private let observers = AlarmObserverBag()
     /// The evening lock. Independent of the session: it holds the shield by
@@ -1898,8 +1919,13 @@ final class GymSessionCoordinator {
 
     // MARK: - Can't today
 
-    func beginCantToday() {
+    func beginCantToday(from origin: CantTodayOrigin? = nil) {
         guard var current = session else { return }
+        if let origin, current.state != .cantToday {
+            cantTodayReturn = (current.id, current.state, origin)
+        } else if origin == nil {
+            cantTodayReturn = nil
+        }
         current.state = .cantToday
         current.runningLateUntil = nil
         session = current
@@ -1911,6 +1937,32 @@ final class GymSessionCoordinator {
         clearRunningLateAlarm(for: current)
         clearSnoozeRealert()
         noteSkipScreenShown()
+    }
+
+    /// The X on the can't today screen. While the morning is still on (the lock is up), it goes
+    /// back to where the screen was opened from: the alarm, the wake page, the trip page, or the
+    /// closed-window pause. A morning that is already over (no way back) ends, as before.
+    func leaveCantToday() {
+        guard var current = session, current.state == .cantToday,
+              let back = cantTodayReturn, back.sessionID == current.id,
+              current.isMakeUpOffer != true else {
+            cantTodayReturn = nil
+            endSession()
+            return
+        }
+        cantTodayReturn = nil
+        switch back.origin {
+        case .alarm:
+            current.state = .awaitingDecision
+        case .closedWindow:
+            current.state = .windowExpired
+        case .wakePage, .trip:
+            current.state = back.state
+        }
+        session = current
+        persist()
+        // The "missed this morning" notice was cancelled when the screen opened; it stands again.
+        scheduleMissedNotice(for: current)
     }
 
     // MARK: - The skip screen (FLOW, Flow 4)
@@ -2209,6 +2261,7 @@ final class GymSessionCoordinator {
 
         isShowingDepartureMoment = false
         isShowingPreparationNudge = false
+        cantTodayReturn = nil
         session = nil
         defaults.removeObject(forKey: Key.session)
 
