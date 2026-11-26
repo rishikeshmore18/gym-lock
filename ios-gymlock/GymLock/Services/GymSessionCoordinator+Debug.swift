@@ -827,14 +827,38 @@ extension GymSessionCoordinator {
             Task { await syncAlarms() }
 
         case .alarmRingsNow:
-            // For testing the wake page at any hour: the wake alarm is this minute and the gym is
-            // 35 minutes later, so the window is alive whatever the real clock says. The fixed
-            // 06:30 presets are already over by the afternoon and land on "plans changed".
-            let wake = TimeOfDay(from: Date())
-            debugSetAlarmRhythm(wake: wake, gym: wake.offset(byMinutes: 35), timeToGym: 35)
+            // For testing the wake page at any hour: today's alarm is this minute and the gym is
+            // 35 minutes later, so the window is alive whatever the real clock says.
+            //
+            // Done the way a user would: "change next alarm only" for today (a one-off alarm with
+            // its own rhythm). The user's own alarm, bedtime and wake time are not touched, so
+            // every other day, the reschedule picker and the alarm settings keep reading them.
+            guard let store = debugStore else { return }
             endSession()
-            debugStore?.debugSeedGym()
-            beginSession(for: debugStore?.plan.enabledSlots.first)
+            store.seedPlanIfNeeded()
+            store.debugSeedGym()
+            let now = Date()
+            let calendar = Calendar.current
+            let wake = TimeOfDay(from: now)
+            var today = store.plan.rhythm
+            today.wakeTime = wake
+            today.gymTime = wake.offset(byMinutes: 35)
+            today.timeToGymMinutes = MorningRhythm.normalizedTimeToGym(35)
+            var plan = store.plan
+            if plan.slots.isEmpty {
+                plan.slots = [AlarmSlot(days: [debugToday()], alarmTime: wake)]
+            }
+            guard let index = plan.slots.firstIndex(where: { $0.id == plan.primaryAlarmSlot?.id })
+                ?? plan.slots.indices.first else { return }
+            // The slot must ring today. If today is not one of its days it is added for the test;
+            // the user's days come back when the test morning ends.
+            plan.slots[index].isEnabled = true
+            plan.slots[index].days.insert(debugToday())
+            let slotID = plan.slots[index].id
+            plan.oneOffAlarms.removeAll { $0.kind == .nextAlarmChange && calendar.isDate($0.fireDate, inSameDayAs: now) }
+            plan.oneOffAlarms.append(OneOffAlarm(kind: .nextAlarmChange, slotID: slotID, fireDate: now, rhythm: today))
+            store.plan = plan
+            beginSession(for: store.plan.slots.first { $0.id == slotID }, at: now)
             Task { await syncAlarms() }
 
         case .goLaterGymDay:
@@ -1475,9 +1499,6 @@ extension GymSessionCoordinator {
     /// Above 0 while a test step is setting things up, so its own endSession calls don't restore.
     private static var debugSimulatingDepth = 0
 
-    /// The decoded copy, kept so the reschedule rules don't decode it on every check.
-    private static var debugSavedPlanCache: MorningPlan?
-
     /// Saves the user's settings once, before the first test changes them. Stored on disk so a
     /// relaunch mid-test still gets them back.
     private func debugBackUpPlanIfNeeded() {
@@ -1485,16 +1506,6 @@ extension GymSessionCoordinator {
               UserDefaults.standard.data(forKey: Self.debugPlanBackupKey) == nil,
               let data = try? JSONEncoder().encode(store.plan) else { return }
         UserDefaults.standard.set(data, forKey: Self.debugPlanBackupKey)
-        Self.debugSavedPlanCache = store.plan
-    }
-
-    /// The user's own settings while a test has replaced them, else nil.
-    var debugSavedPlan: MorningPlan? {
-        if let cached = Self.debugSavedPlanCache { return cached }
-        guard let data = UserDefaults.standard.data(forKey: Self.debugPlanBackupKey),
-              let plan = try? JSONDecoder().decode(MorningPlan.self, from: data) else { return nil }
-        Self.debugSavedPlanCache = plan
-        return plan
     }
 
     /// Puts the user's alarm, sleep schedule, repeat days and gym days back once the test morning
@@ -1504,7 +1515,6 @@ extension GymSessionCoordinator {
               let store = debugStore,
               let data = UserDefaults.standard.data(forKey: Self.debugPlanBackupKey) else { return }
         UserDefaults.standard.removeObject(forKey: Self.debugPlanBackupKey)
-        Self.debugSavedPlanCache = nil
         guard var saved = try? JSONDecoder().decode(MorningPlan.self, from: data) else { return }
         saved.oneOffAlarms = store.plan.oneOffAlarms
         store.plan = saved
