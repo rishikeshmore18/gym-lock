@@ -330,6 +330,12 @@ extension GymSessionCoordinator {
     }
 
     func simulate(_ step: DebugStep) {
+        // A test may move the alarm, the sleep schedule and the gym days to make "now" the right
+        // moment. Keep a copy of the user's own settings first; they come back when the test
+        // morning ends (debugRestorePlanIfNeeded, from endSession).
+        debugBackUpPlanIfNeeded()
+        Self.debugSimulatingDepth += 1
+        defer { Self.debugSimulatingDepth -= 1 }
         switch step {
         // MARK: Flow
 
@@ -1461,6 +1467,33 @@ extension GymSessionCoordinator {
         let freeze = banner.freezeLine.map { " \"\($0)\"" } ?? ""
         let when = notice.map { TimeOfDay(from: $0.fireDate).clockString } ?? "none"
         Self.debugFreezeResult = "\"\(banner.line)\"\(freeze) · \(buttons) · notice at \(when)"
+    }
+
+    // MARK: - Keeping the user's own settings
+
+    private static let debugPlanBackupKey = "gymlock.debug.planBackup"
+    /// Above 0 while a test step is setting things up, so its own endSession calls don't restore.
+    private static var debugSimulatingDepth = 0
+
+    /// Saves the user's settings once, before the first test changes them. Stored on disk so a
+    /// relaunch mid-test still gets them back.
+    private func debugBackUpPlanIfNeeded() {
+        guard let store = debugStore,
+              UserDefaults.standard.data(forKey: Self.debugPlanBackupKey) == nil,
+              let data = try? JSONEncoder().encode(store.plan) else { return }
+        UserDefaults.standard.set(data, forKey: Self.debugPlanBackupKey)
+    }
+
+    /// Puts the user's alarm, sleep schedule, repeat days and gym days back once the test morning
+    /// is over. One-off alarms made during the test (a reschedule, a snooze) are kept.
+    func debugRestorePlanIfNeeded() {
+        guard Self.debugSimulatingDepth == 0,
+              let store = debugStore,
+              let data = UserDefaults.standard.data(forKey: Self.debugPlanBackupKey) else { return }
+        UserDefaults.standard.removeObject(forKey: Self.debugPlanBackupKey)
+        guard var saved = try? JSONDecoder().decode(MorningPlan.self, from: data) else { return }
+        saved.oneOffAlarms = store.plan.oneOffAlarms
+        store.plan = saved
     }
 
     // MARK: - Alarm rules helpers
