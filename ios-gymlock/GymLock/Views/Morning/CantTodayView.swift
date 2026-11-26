@@ -94,7 +94,11 @@ struct CantTodayView: View {
             choices: choices,
             defaultTimeFor: defaultTimeFor,
             isTimeAvailable: isTimeAvailable,
-            comebackMode: isComebackModeOn
+            comebackMode: isComebackModeOn,
+            sleepFor: { [store] day in
+                let r = store.plan.rhythm(at: day)
+                return (bed: r.bedtime, wake: r.wakeTime)
+            }
         )
         model = CantTodayModel(data: data, facts: facts, look: look)
         haptics.prepare()

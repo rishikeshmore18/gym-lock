@@ -76,34 +76,38 @@ private func rcbRidgeY(_ x: Double) -> Double {
 // MARK: - The sun's day (6:00 am to 6:00 pm)
 
 private struct RCBTime {
-    let aStart: Double
-    let aLen: Double
-
-    init(sleepStart: Int, sleepEnd: Int) {
-        aStart = Double(sleepEnd)
-        let l = ((sleepStart - sleepEnd) + 1440) % 1440
-        aLen = Double(l == 0 ? 1440 : l)
-    }
-
-    /// The sun's day is the one people picture: up at 6:00 am, highest at noon, down at 6:00 pm.
-    /// The hours around it are night, whatever the sleep schedule or the season says.
+    /// The sun's day is the one people picture: it comes over the mountains at 6:00 am on the
+    /// left, is highest at noon, and goes down behind the mountains at 6:00 pm on the right.
+    /// Before 6:00 am and after 6:00 pm it is below the horizon and the sky is night.
     static let sunrise = 6 * 60
     static let sunset = 18 * 60
 
-    init(data: CantTodayData) {
-        self.init(sleepStart: Self.sunset, sleepEnd: Self.sunrise)
+    let aStart = Double(RCBTime.sunrise)
+    let aLen = Double(RCBTime.sunset - RCBTime.sunrise)
+    /// Where on the arc the sun meets the horizon. The arc runs on below the mountains, so
+    /// 6:00 am and 6:00 pm sit at this point, not at the arc's ends.
+    let edge: Double
+
+    init(edge: Double) {
+        self.edge = RCBM.cl(edge, 0, 0.4)
     }
 
-    /// 0 at first light, 1 at last light, outside = below the horizon
-    func u(_ t: Double) -> Double {
+    /// 0 at 6:00 am, 1 at 6:00 pm, outside the day below 0 or above 1.
+    func dayFraction(_ t: Double) -> Double {
         let rel = RCBM.modD(t - aStart, 1440)
         if rel <= aLen { return rel / aLen }
         let nl = 1440 - aLen
         return (rel - aLen < nl / 2) ? 1 + (rel - aLen) / aLen : -(1440 - rel) / aLen
     }
 
+    /// Position on the arc: `edge` at 6:00 am (sunrise), 0.5 at noon, 1 - edge at 6:00 pm (sunset).
+    func u(_ t: Double) -> Double {
+        edge + (1 - 2 * edge) * dayFraction(t)
+    }
+
     func minOfU(_ x: Double) -> Int {
-        Int(RCBM.modD(((aStart + aLen * x) / 5).rounded() * 5, 1440))
+        let f = (x - edge) / (1 - 2 * edge)
+        return Int(RCBM.modD(((aStart + aLen * f) / 5).rounded() * 5, 1440))
     }
 }
 
@@ -112,13 +116,15 @@ private struct RCBSky {
     let warm: Double
     let night: Double
 
-    init(u: Double, blk: Double) {
-        let ex = u < 0 ? -u : (u > 1 ? u - 1 : 0)
-        let el = sin(Double.pi * RCBM.cl(u))
+    /// `day` is the time as a share of the sun's day: 0 at 6:00 am, 1 at 6:00 pm. Warm light
+    /// near sunrise and sunset, the clearest sky at noon, night within 45 minutes either side.
+    init(day f: Double) {
+        let ex = f < 0 ? -f : (f > 1 ? f - 1 : 0)
+        let el = sin(Double.pi * RCBM.cl(f))
         let day = 1 - RCBM.cl(ex * 16)
         cool = RCBM.cl((el - 0.1) / 0.6) * day
         warm = RCBM.cl(1 - el / 0.6) * day
-        night = RCBM.cl(RCBM.cl(ex * 16) + blk * 0.8)
+        night = RCBM.cl(ex * 16)
     }
 }
 
@@ -1078,7 +1084,11 @@ struct RidgeCantTodayB: View {
         let home = d.order.contains(.home) && d.homeMinutes != nil
         canReschedule = can
         hasHome = home
-        tm = RCBTime(data: d)
+        // the sun meets the horizon where the arc crosses the mountains' line
+        let g0 = RCBGeo(layout: input.layout, heading: d.heading)
+        // 12 pt above the horizon line, so at 6:00 am about half the sun shows over the ridge
+        let drop = Double(g0.sb - (g0.hyS - 12)) / Double(max(1, g0.rys))
+        tm = RCBTime(edge: asin(RCBM.cl(drop, 0, 1)) / Double.pi)
         var earliest: Int? = nil
         if let t = d.targets.first(where: { $0.isToday }) {
             var m = (d.nowMinutes / 5 + 1) * 5
@@ -1891,7 +1901,6 @@ struct RidgeCantTodayB: View {
         f.selOK = mode == .time ? isOK(selMin) : true
         let bt = (mode == .time && !f.selOK) ? 1.0 : 0.0
         sim.blk += (bt - sim.blk) * (rm ? 1 : RCBM.cl(dt * 9))
-        let blk = sim.blk
 
         // hold / tap to skip
         var holdP = holdProgress
@@ -1910,7 +1919,7 @@ struct RidgeCantTodayB: View {
         let hp = rm ? (holdP > 0.02 ? 1.0 : 0.0) : RCBM.ease(holdP)
         f.hp = hp
 
-        let sky = RCBSky(u: u, blk: blk)
+        let sky = RCBSky(day: tm.dayFraction(sim.w))
         f.cool = sky.cool * 0.9
         f.warm = sky.warm
         f.night = sky.night
@@ -1930,13 +1939,13 @@ struct RidgeCantTodayB: View {
         f.sunX = sx
         f.sunY = sy
         f.sunScreenR = 21 * RCBM.lerp(26.0 / 42.0, 1, q)
-        f.sunOpacity = 1 - blk * 0.55
+        f.sunOpacity = 1
         f.sunBright = rm ? vSun : 0
         f.ringOpacity = rm ? 0 : vSun
         f.ringScale = 1 + 0.9 * (rm ? 0 : vSun)
 
         // the soft sunrise light (skyGlow)
-        let fade = (1 - blk) * (1 - hp)
+        let fade = 1 - hp
         let rY = rcbRidgeY(sx)
         let d = rY - sy
         let alt = RCBM.cl(d / 280)
