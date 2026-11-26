@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// Whether this morning's session has already shown the 30-second pause, so a later X on the trip
+/// page goes straight to the can't today screen.
+@MainActor
+enum PauseSeenLedger {
+    static let key = "gymlock.morning.pauseSeenSession"
+
+    static func hasSeen(_ sessionID: UUID, defaults: UserDefaults = .standard) -> Bool {
+        defaults.string(forKey: key) == sessionID.uuidString
+    }
+
+    static func markSeen(_ sessionID: UUID, defaults: UserDefaults = .standard) {
+        defaults.set(sessionID.uuidString, forKey: key)
+    }
+}
+
 /// "Plans changed": a 30-second pause, then straight on to the can't today screen.
 ///
 /// The user is about to bail on the gym, usually at 6 or 7 in the morning and half awake. The screen
@@ -206,6 +221,7 @@ struct PlansChangedView: View {
 
     private func start() {
         guard model == nil else { return }
+        PauseSeenLedger.markSeen(session.id)
         let facts = PauseFactsProvider.facts(store: store, coordinator: coordinator, session: session, context: context)
         let style = HeroCardStyle(rawValue: cardStyleRaw) ?? .default
         let look: PauseLook = facts.isCritical ? .day0 : (style == .matrix ? .matrixPrinter : .ridge)
