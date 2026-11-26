@@ -95,8 +95,8 @@ struct CantTodayView: View {
             defaultTimeFor: defaultTimeFor,
             isTimeAvailable: isTimeAvailable,
             comebackMode: isComebackModeOn,
-            sleepFor: { [store] day in
-                let r = store.plan.rhythm(at: day)
+            sleepFor: { [coordinator] day in
+                let r = coordinator.rescheduleRhythm(for: day)
                 return (bed: r.bedtime, wake: r.wakeTime)
             }
         )

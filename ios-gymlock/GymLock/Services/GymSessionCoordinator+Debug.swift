@@ -827,14 +827,38 @@ extension GymSessionCoordinator {
             Task { await syncAlarms() }
 
         case .alarmRingsNow:
-            // For testing the wake page at any hour: the wake alarm is this minute and the gym is
-            // 35 minutes later, so the window is alive whatever the real clock says. The fixed
-            // 06:30 presets are already over by the afternoon and land on "plans changed".
-            let wake = TimeOfDay(from: Date())
-            debugSetAlarmRhythm(wake: wake, gym: wake.offset(byMinutes: 35), timeToGym: 35)
+            // For testing the wake page at any hour: today's alarm is this minute and the gym is
+            // 35 minutes later, so the window is alive whatever the real clock says.
+            //
+            // Done the way a user would: "change next alarm only" for today (a one-off alarm with
+            // its own rhythm). The user's own alarm, bedtime and wake time are not touched, so
+            // every other day, the reschedule picker and the alarm settings keep reading them.
+            guard let store = debugStore else { return }
             endSession()
-            debugStore?.debugSeedGym()
-            beginSession(for: debugStore?.plan.enabledSlots.first)
+            store.seedPlanIfNeeded()
+            store.debugSeedGym()
+            let now = Date()
+            let calendar = Calendar.current
+            let wake = TimeOfDay(from: now)
+            var today = store.plan.rhythm
+            today.wakeTime = wake
+            today.gymTime = wake.offset(byMinutes: 35)
+            today.timeToGymMinutes = MorningRhythm.normalizedTimeToGym(35)
+            var plan = store.plan
+            if plan.slots.isEmpty {
+                plan.slots = [AlarmSlot(days: [debugToday()], alarmTime: wake)]
+            }
+            guard let index = plan.slots.firstIndex(where: { $0.id == plan.primaryAlarmSlot?.id })
+                ?? plan.slots.indices.first else { return }
+            // The slot must ring today. If today is not one of its days it is added for the test;
+            // the user's days come back when the test morning ends.
+            plan.slots[index].isEnabled = true
+            plan.slots[index].days.insert(debugToday())
+            let slotID = plan.slots[index].id
+            plan.oneOffAlarms.removeAll { $0.kind == .nextAlarmChange && calendar.isDate($0.fireDate, inSameDayAs: now) }
+            plan.oneOffAlarms.append(OneOffAlarm(kind: .nextAlarmChange, slotID: slotID, fireDate: now, rhythm: today))
+            store.plan = plan
+            beginSession(for: store.plan.slots.first { $0.id == slotID }, at: now)
             Task { await syncAlarms() }
 
         case .goLaterGymDay:

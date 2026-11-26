@@ -1938,21 +1938,26 @@ final class GymSessionCoordinator {
         )
     }
 
+    /// The sleep schedule in force on `day`, as the user set it in the alarm settings.
+    func rescheduleRhythm(for day: Date) -> MorningRhythm {
+        store?.plan.rhythm(at: day, calendar: .current) ?? .default
+    }
+
     /// Where today's workout can be moved to.
     var rescheduleChoices: [ReschedulePlanner.Choice] {
-        guard let store, let day = session?.day else { return [] }
-        return ReschedulePlanner.choices(plan: store.plan, day: day, now: Date(), calendar: .current)
+        guard let plan = store?.plan, let day = session?.day else { return [] }
+        return ReschedulePlanner.choices(plan: plan, day: day, now: Date(), calendar: .current)
     }
 
     /// The usual lock-alarm time for `day`'s mode, as the picker's default.
     func rescheduleDefaultTime(for day: Date) -> TimeOfDay {
-        guard let store else { return TimeOfDay(hour: 6, minute: 30) }
-        return ReschedulePlanner.defaultTime(plan: store.plan, on: day, calendar: .current)
+        guard let plan = store?.plan else { return TimeOfDay(hour: 6, minute: 30) }
+        return ReschedulePlanner.defaultTime(plan: plan, on: day, calendar: .current)
     }
 
     func isRescheduleTimeAvailable(_ time: TimeOfDay, on day: Date) -> Bool {
-        guard let store else { return false }
-        return ReschedulePlanner.isTimeAvailable(time, on: day, plan: store.plan, now: Date(), calendar: .current)
+        guard let plan = store?.plan else { return false }
+        return ReschedulePlanner.isTimeAvailable(time, on: day, plan: plan, now: Date(), calendar: .current)
     }
 
     var homeWorkoutsUsedThisMonth: Int {
