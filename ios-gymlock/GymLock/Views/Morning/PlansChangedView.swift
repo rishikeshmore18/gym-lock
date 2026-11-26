@@ -38,6 +38,8 @@ struct PlansChangedView: View {
     @State private var earlyTapShake = 0
     @State private var didAct = false
     @State private var leaving = false
+    /// Matrix only: the receipt is tearing off at the perforation before the can't today screen.
+    @State private var tearing = false
 
     var body: some View {
         GeometryReader { geo in
@@ -64,7 +66,7 @@ struct PlansChangedView: View {
                         )
                         ZStack {
                             stage(model.look, input)
-                            chrome(model, input)
+                            if !tearing { chrome(model, input) }
                         }
                         .onChange(of: t >= PauseScript.wait) { _, ready in
                             if ready { haptics.cue("ready", .medium) }
@@ -142,7 +144,7 @@ struct PlansChangedView: View {
                 shake: earlyTapShake
             ) {
                 if ready {
-                    proceed()
+                    proceed(at: input.t)
                 } else {
                     // Tapping early does nothing but say "not yet".
                     withAnimation(.linear(duration: 0.24)) { earlyTapShake += 1 }
@@ -222,12 +224,21 @@ struct PlansChangedView: View {
     /// The 30 seconds are up and they tapped "continue": straight to the can't today screen, which now
     /// holds every way forward (make it up, home workout, skip). The three door slips are gone, so the
     /// way to the gym is the X.
-    private func proceed() {
-        guard !didAct else { return }
+    private func proceed(at t: Double) {
+        guard !didAct, !tearing else { return }
         haptics.play(.rigid)
-        withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.25)) { leaving = true }
+        // The printer tears the receipt off at the perforation first, so the next page is a new
+        // sheet (the stage's own receipt fly-off). The other looks just fade.
+        let tears = model?.look == .matrixPrinter && !reduceMotion
+        if tears {
+            tearing = true
+            phase = .choosing(index: 0, since: t, from: nil)
+            haptics.play(.medium)
+        }
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(reduceMotion ? 150 : 280))
+            if tears { try? await Task.sleep(for: .milliseconds(380)) }
+            withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.2)) { leaving = true }
+            try? await Task.sleep(for: .milliseconds(reduceMotion ? 150 : 220))
             guard !didAct else { return }
             didAct = true
             haptics.stop()

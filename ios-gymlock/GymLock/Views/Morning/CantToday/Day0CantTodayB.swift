@@ -422,6 +422,7 @@ struct Day0CantTodayB: View {
                 nudger.touched(kind: "reel")
             } else {
                 nudger.rest(at: clock())
+                noteIfBlocked()
             }
         }
         .onChange(of: holdProgress) { _, p in
@@ -927,8 +928,10 @@ struct Day0CantTodayB: View {
             rowHeight: m.rh,
             visibleRows: 3,
             wraps: wraps,
-            isBlocked: { i in !isAllowed(r, at: i) },
-            onBlocked: { i in handleBlocked(r, i) },
+            // Every value can be picked. A time that can't be an alarm stays dim, says why, and
+            // "set alarm" waits until the time is a valid one (Rishi, 2026-11-25).
+            isBlocked: { _ in false },
+            onBlocked: { _ in },
             onDetent: { input.haptics.play(.light) },
             isInteracting: busyBinding(r)
         ) { index, dist in
@@ -938,7 +941,7 @@ struct Day0CantTodayB: View {
                 size: r == .meridiem ? m.rf2 : m.rf,
                 tracking: r == .meridiem ? 0 : -0.025 * m.rf,
                 align: r == .hour ? .trailing : (r == .minute ? .leading : .center),
-                dim: !isAllowed(r, at: index),
+                dim: !timeIsOK,
                 rowHeight: m.rh,
                 nudge: a,
                 sign: sign
@@ -1490,6 +1493,15 @@ struct Day0CantTodayB: View {
         }
     }
 
+    /// After the reels stop: if the time can't be an alarm, say why (the time itself is left alone).
+    private func noteIfBlocked() {
+        guard let tgt = target else { return }
+        if case .blocked(let text) = input.data.allowed(tgt, minutes: currentMinutes) {
+            input.haptics.play(.soft)
+            showNote(text)
+        }
+    }
+
     private func showNote(_ text: String) {
         noteText = text
         withAnimation(.linear(duration: 0.25)) { noteOn = true }
@@ -1531,11 +1543,8 @@ struct Day0CantTodayB: View {
             break
         }
         guard next != cur else { return }
-        if isAllowed(r, at: next) {
-            binding(r).wrappedValue = next
-        } else {
-            handleBlocked(r, next)
-        }
+        binding(r).wrappedValue = next
+        noteIfBlocked()
     }
 
     // MARK: Nudges (the "this is interactive" wave)

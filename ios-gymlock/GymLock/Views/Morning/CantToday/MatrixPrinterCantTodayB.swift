@@ -197,7 +197,6 @@ struct MatrixPrinterCantTodayB: View {
             Color.clear
                 .contentShape(Rectangle())
                 .frame(width: hit.rect.width, height: hit.rect.height)
-                .offset(x: hit.rect.minX, y: hit.rect.minY)
                 .cantTodayHold(
                     duration: 1.5,
                     progress: $holdProgress,
@@ -213,6 +212,8 @@ struct MatrixPrinterCantTodayB: View {
                 .accessibilityLabel(Text(hit.label))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction(named: Text("skip today")) { finishHold() }
+                // Moved last: an offset before the gesture leaves the touch area at the top left.
+                .offset(x: hit.rect.minX, y: hit.rect.minY)
         }
     }
 
@@ -242,22 +243,21 @@ struct MatrixPrinterCantTodayB: View {
             rowHeight: pitch,
             visibleRows: 3,
             wraps: k < 2,
-            isBlocked: { idx in !engine.cellAllowed(k, idx) },
-            onBlocked: { idx in
-                engine.cellBlocked(k, idx)
-                input.haptics.play(.soft)
-            },
+            // Every value can be picked. A time that can't be an alarm stays dim, says why, and
+            // "set alarm" waits until the time is a valid one (Rishi, 2026-11-25).
+            isBlocked: { _ in false },
+            onBlocked: { _ in },
             onDetent: { input.haptics.play(.light) },
             isInteracting: Binding(get: { engine.drumTouch[k] }, set: { engine.setDrumTouch(k, $0) })
         ) { index, distance in
             MPBDrumCell(
                 text: MPBFormat.reel(k, index),
-                dim: !engine.cellAllowed(k, index),
+                dim: !engine.currentAllowed,
                 distance: distance,
                 width: d.rect.width,
                 pitch: pitch,
                 p: p,
-                ink: colors.canvas
+                ink: engine.currentAllowed ? Theme.surface : colors.canvas
             )
         }
         .offset(y: -peek)
@@ -2410,6 +2410,21 @@ private final class MPBEngine {
         MPBFormat.minutes(h: reel[0], m: reel[1], a: reel[2])
     }
 
+    /// The open row's time, as the reels show it now, can be an alarm.
+    var currentAllowed: Bool {
+        sel >= 0 && allowedMinutes(sel, readMinutes)
+    }
+
+    /// Says why the open row's time can't be an alarm, or clears the note when it can.
+    private func refreshNote() {
+        guard sel >= 0 else { return }
+        let why = blockedWhy(sel, readMinutes)
+        if why != note {
+            note = why
+            noteT = now
+        }
+    }
+
     func cellAllowed(_ k: Int, _ idx: Int) -> Bool {
         if sel < 0 { return true }
         var r = reel
@@ -2428,20 +2443,15 @@ private final class MPBEngine {
     /// VoiceOver: move a reel one value, skipping values that are not allowed.
     func step(_ k: Int, _ delta: Int) {
         let count = k == 2 ? 2 : 12
-        var idx = reel[k]
-        for _ in 0..<count {
-            idx += delta
-            if k < 2 {
-                idx = ((idx % count) + count) % count
-            } else if idx < 0 || idx >= count {
-                return
-            }
-            if cellAllowed(k, idx) {
-                reel[k] = idx
-                printed = readMinutes
-                return
-            }
+        var idx = reel[k] + delta
+        if k < 2 {
+            idx = ((idx % count) + count) % count
+        } else if idx < 0 || idx >= count {
+            return
         }
+        reel[k] = idx
+        refreshNote()
+        if currentAllowed { printed = readMinutes }
     }
 
     // MARK: Touch
@@ -2466,6 +2476,7 @@ private final class MPBEngine {
         let ix = MPBFormat.indices(m)
         reel = [ix.h, ix.m, ix.a]
         printed = m
+        refreshNote()
         if instant {
             for j in selA.indices { selA[j] = j == i ? 1 : 0 }
         }
@@ -2485,6 +2496,7 @@ private final class MPBEngine {
             nudger?.touched(kind: "reel")
             nudger?.cancel()
         } else if !isNow && was {
+            refreshNote()
             let m = readMinutes
             if sel >= 0 && allowedMinutes(sel, m) && m != printed {
                 printed = m
