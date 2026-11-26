@@ -2207,6 +2207,11 @@ final class GymSessionCoordinator {
         session = nil
         defaults.removeObject(forKey: Key.session)
 
+        #if DEBUG
+        // A test morning is over: the user's own alarm settings come back.
+        debugRestorePlanIfNeeded()
+        #endif
+
         // The geofence stays armed for the next morning; only the per-session
         // callbacks are torn down.
         armArrivalIfPossible()
