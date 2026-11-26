@@ -1,15 +1,17 @@
 import SwiftUI
 
-/// The one skip screen (FLOW, Flow 4).
+/// The one skip screen (FLOW, Flow 4), the "can't today" page.
 ///
-/// The same screen appears whether they tapped "can't today" or slept through
-/// the alarm. The heading and the order of the three doors follow one
-/// question: can they still reach this week's goal with the planned days left?
-/// There is no skip budget and nothing is taken away.
+/// The same screen appears whether they tapped "can't today" or slept through the alarm. The heading
+/// and the order of the doors follow one question: can they still reach this week's goal with the
+/// planned days left? There is no skip budget and nothing is taken away.
 ///
-/// PLACEHOLDER UI: designed in Step 3
+/// This view owns the data and the doors' actions. A look draws everything else, and picks itself the
+/// same way the "plans changed" pause does: Day 0 at the worst moment to skip (`PauseFacts.isCritical`),
+/// otherwise Ridge or the Matrix printer following the hero card style. Approved prototype:
+/// docs/prototypes/cant-today-variations.html (the three "b" versions).
 struct CantTodayView: View {
-    let voice: SessionVoice
+    let session: GymSession
     let plan: SkipScreenPlan
     let choices: [ReschedulePlanner.Choice]
     let defaultTimeFor: (Date) -> TimeOfDay
@@ -19,202 +21,90 @@ struct CantTodayView: View {
     let onHomeWorkout: () -> Void
     let onSkip: () -> Void
     let onBack: () -> Void
-    /// Opened from the Home banner's "reschedule for today": the picker
-    /// comes up straight away.
+    /// Opened from the Home banner's "reschedule for today": the time reel is open straight away.
     var startsOnPicker = false
     var onPickerShown: () -> Void = {}
 
-    @State private var isPickingReschedule = false
-    @State private var chosenDay: Date?
-    @State private var chosenTime = Date()
-    @State private var timeNote: String?
+    @Environment(AppStore.self) private var store
+    @Environment(GymSessionCoordinator.self) private var coordinator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(HeroCardStyle.storageKey) private var cardStyleRaw = HeroCardStyle.default.rawValue
+
+    /// Read once when the screen opens, so nothing shifts under the user while they choose.
+    @State private var model: CantTodayModel?
+    @State private var haptics = PauseHaptics()
 
     var body: some View {
-        MorningScreen(trailingTitle: "Back", trailingAction: onBack) {
-            VStack(spacing: 22) {
-                HaloedGlyph(systemName: "heart.fill", size: 82)
-                    .frame(height: 158)
+        GeometryReader { geo in
+            let insets = geo.safeAreaInsets
+            let full = CGSize(
+                width: geo.size.width + insets.leading + insets.trailing,
+                height: geo.size.height + insets.top + insets.bottom
+            )
+            ZStack {
+                (model?.look.isDark ?? true ? Color(red: 0.043, green: 0.043, blue: 0.047) : Theme.canvas)
 
-                VStack(spacing: 8) {
-                    Text(plan.heading)
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(Theme.ink)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                if let model {
+                    let input = CantTodayInput(
+                        data: model.data,
+                        facts: model.facts,
+                        layout: CantTodayLayout(size: full, safeArea: insets),
+                        reduceMotion: reduceMotion,
+                        haptics: haptics,
+                        actions: CantTodayActions(
+                            reschedule: onReschedule,
+                            homeWorkout: onHomeWorkout,
+                            skip: onSkip,
+                            close: onBack
+                        ),
+                        startsOnReschedule: startsOnPicker
+                    )
+                    look(model.look, input)
                 }
-
-                options
-
-                if let note = plan.rescheduleNote {
-                    Text(note)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.inkTertiary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if isComebackModeOn { comebackNote }
             }
-        } footer: {
-            EmptyView()
+            .ignoresSafeArea()
         }
-        .onAppear {
-            guard startsOnPicker else { return }
-            isPickingReschedule = true
-            onPickerShown()
-        }
-        .sheet(isPresented: $isPickingReschedule) {
-            rescheduleSheet
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
+        .onAppear(perform: start)
+        .onDisappear { haptics.stop() }
+        .blocksHeroHaptics("cantToday")
     }
-
-    // MARK: - The three doors
 
     @ViewBuilder
-    private var options: some View {
-        VStack(spacing: 12) {
-            ForEach(Array(plan.options.enumerated()), id: \.element) { pair in
-                switch pair.element {
-                case .reschedule:
-                    MorningChoiceRow(
-                        title: "reschedule",
-                        subtitle: "a real alarm on a day you pick",
-                        systemImage: "calendar.badge.clock"
-                    ) {
-                        isPickingReschedule = true
-                    }
-
-                case .homeWorkout:
-                    MorningChoiceRow(
-                        title: "home workout, 25 min",
-                        subtitle: "counts with apple health or a photo",
-                        systemImage: "house.fill"
-                    ) {
-                        onHomeWorkout()
-                    }
-
-                case .skip:
-                    MorningChoiceRow(
-                        title: "skip",
-                        subtitle: voice.dayOffDetail,
-                        systemImage: "moon.zzz.fill"
-                    ) {
-                        onSkip()
-                    }
-                }
-            }
+    private func look(_ look: PauseLook, _ input: CantTodayInput) -> some View {
+        switch look {
+        case .ridge: RidgeCantTodayB(input: input)
+        case .matrixPrinter: MatrixPrinterCantTodayB(input: input)
+        case .day0: Day0CantTodayB(input: input)
         }
     }
 
-    // MARK: - Reschedule picker
-
-    private var rescheduleSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    // PLACEHOLDER UI: designed in Step 3
-                    if let day = chosenDay {
-                        VStack(spacing: 10) {
-                            DatePicker(
-                                "alarm",
-                                selection: $chosenTime,
-                                displayedComponents: .hourAndMinute
-                            )
-                            .labelsHidden()
-
-                            if let timeNote {
-                                Text(timeNote)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Theme.accentWarm)
-                                    .multilineTextAlignment(.center)
-                            }
-
-                            MorningPrimaryButton(
-                                title: "set alarm",
-                                systemImage: "bell.badge.fill",
-                                trailingImage: nil
-                            ) {
-                                confirmReschedule(on: day)
-                            }
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity)
-                        .background(Theme.surfaceMuted, in: .rect(cornerRadius: 16))
-                    }
-
-                    ForEach(choices, id: \.self) { choice in
-                        MorningChoiceRow(
-                            title: choice.label,
-                            subtitle: defaultTimeFor(choice.day).clockString,
-                            systemImage: choice.isLaterToday ? "clock.fill" : "calendar"
-                        ) {
-                            pick(choice)
-                        }
-                    }
-                }
-                .padding(.horizontal, Theme.pageMargin)
-                .padding(.vertical, 18)
-            }
-            .scrollIndicators(.hidden)
-            .background(Theme.canvas.ignoresSafeArea())
-            .navigationTitle("reschedule")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Close") { isPickingReschedule = false }
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Theme.accent)
-                }
-            }
-        }
+    private func start() {
+        guard model == nil else { return }
+        let facts = PauseFactsProvider.facts(
+            store: store,
+            coordinator: coordinator,
+            session: session,
+            context: .windowOpen
+        )
+        let style = HeroCardStyle(rawValue: cardStyleRaw) ?? .default
+        let look: PauseLook = facts.isCritical ? .day0 : (style == .matrix ? .matrixPrinter : .ridge)
+        let data = CantTodayDataProvider.make(
+            plan: plan,
+            facts: facts,
+            choices: choices,
+            defaultTimeFor: defaultTimeFor,
+            isTimeAvailable: isTimeAvailable,
+            comebackMode: isComebackModeOn
+        )
+        model = CantTodayModel(data: data, facts: facts, look: look)
+        haptics.prepare()
+        if startsOnPicker { onPickerShown() }
     }
+}
 
-    private func pick(_ choice: ReschedulePlanner.Choice) {
-        chosenDay = choice.day
-        chosenTime = date(defaultTimeFor(choice.day), on: choice.day)
-        timeNote = nil
-        Haptics.tap()
-    }
-
-    private func confirmReschedule(on day: Date) {
-        let time = TimeOfDay(from: chosenTime)
-        guard isTimeAvailable(day, time) else {
-            timeNote = "that time is inside your sleep hours."
-            Haptics.soft()
-            return
-        }
-        isPickingReschedule = false
-        onReschedule(day, time)
-    }
-
-    // MARK: - Helpers
-
-    private func date(_ time: TimeOfDay, on day: Date) -> Date {
-        Calendar.current.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: day) ?? Date()
-    }
-
-    private var comebackNote: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "arrow.uturn.backward.circle.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Theme.accent)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("comeback mode is on")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.ink)
-                Text("your next realistic session is already set. nothing to make up.")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.inkSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.accent.opacity(0.07), in: .rect(cornerRadius: 16))
-    }
+/// Read once when the screen opens.
+private struct CantTodayModel {
+    let data: CantTodayData
+    let facts: PauseFacts
+    let look: PauseLook
 }

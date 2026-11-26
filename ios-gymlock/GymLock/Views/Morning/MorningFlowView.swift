@@ -193,7 +193,7 @@ struct MorningFlowView: View {
 
         case .cantToday:
             CantTodayView(
-                voice: SessionVoice(session: session),
+                session: session,
                 plan: coordinator.skipScreen,
                 choices: coordinator.rescheduleChoices,
                 defaultTimeFor: { coordinator.rescheduleDefaultTime(for: $0) },
