@@ -97,7 +97,7 @@ struct CantTodayView: View {
             comebackMode: isComebackModeOn,
             daylight: CantTodayDaylight.current(gym: store.primaryGym)
         )
-        model =CantTodayModel(data: data, facts: facts, look: look)
+        model = CantTodayModel(data: data, facts: facts, look: look)
         haptics.prepare()
         if startsOnPicker { onPickerShown() }
     }
