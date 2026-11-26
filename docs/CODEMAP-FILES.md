@@ -212,13 +212,12 @@ GymLock/Views/Morning/AudioFilePicker.swift [50] AudioFilePicker,Coordinator —
 GymLock/Views/Morning/BlockedAppsSetupView.swift [292] BlockedAppsSetupView — Choosing what GymLock actually blocks. Asked once, then never again.
 GymLock/Views/Morning/CantToday/CantTodayDrum.swift [523] CantTodayDrumEngine,Phase,Event,CantTodayDrum — GymLock · the "can't today" screen (three looks)
 GymLock/Views/Morning/CantToday/CantTodayHold.swift [131] +View,CantTodayHoldModifier — GymLock · the "can't today" screen (three looks)
-GymLock/Views/Morning/CantToday/CantTodayModel.swift [279] CantTodayDoor,CantTodayTarget,CantTodayAllowance,CantTodayCost,Kind,CantTodayData… — GymLock · the "can't today" screen (three looks)
+GymLock/Views/Morning/CantToday/CantTodayModel.swift [277] CantTodayDoor,CantTodayTarget,CantTodayAllowance,CantTodayCost,Kind,CantTodayData… — GymLock · the "can't today" screen (three looks)
 GymLock/Views/Morning/CantToday/CantTodayNudger.swift [134] CantTodayNudger — GymLock · the "can't today" screen (three looks)
-GymLock/Views/Morning/CantToday/CantTodaySun.swift [78] CantTodayDaylight — GymLock · the "can't today" screen
 GymLock/Views/Morning/CantToday/Day0CantTodayB.swift [1644] D0B,D0BFrameKey,D0BMetrics,D0BReel,D0BBeat,D0BResched… — Day0CantTodayB.swift
 GymLock/Views/Morning/CantToday/MatrixPrinterCantTodayB.swift [2937] MatrixPrinterCantTodayB,MPBPressTarget,MPBPressStyle,MPBDrumCell,Target,Cost… — GymLock · the "can't today" screen · Matrix printer look (b)
-GymLock/Views/Morning/CantToday/RidgeCantTodayB.swift [2378] RCBM,RCBTime,RCBSky,RCBCam,RCBGeo,RCBShapes… — GymLock · the "can't today" screen · Ridge look (b)
-GymLock/Views/Morning/CantTodayView.swift [112] CantTodayView,CantTodayModel — The one skip screen (FLOW, Flow 4), the "can't today" page.
+GymLock/Views/Morning/CantToday/RidgeCantTodayB.swift [2381] RCBM,RCBTime,RCBSky,RCBCam,RCBGeo,RCBShapes… — GymLock · the "can't today" screen · Ridge look (b)
+GymLock/Views/Morning/CantTodayView.swift [111] CantTodayView,CantTodayModel — The one skip screen (FLOW, Flow 4), the "can't today" page.
 GymLock/Views/Morning/CelestialRhythmView.swift [192] CelestialRhythmView,+CelestialRhythmView — The moon-to-sun illustration used wherever time of day is the actual subject.
 GymLock/Views/Morning/DayDial.swift [1740] DayDialModel,Grab,Zone,Bar,DragTracker,GymPush… — The maths behind the Day Dial, kept out of the view so every rule is
 GymLock/Views/Morning/DebugMorningPanel.swift [686] DebugMorningPanel,SimRoute — The Day Flow Simulator: pick a scenario, see what it sets, run it once.
