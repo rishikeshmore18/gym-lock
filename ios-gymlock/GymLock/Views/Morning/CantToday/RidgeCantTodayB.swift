@@ -257,7 +257,7 @@ private struct RCBGeo: Equatable {
         self.cwH = cwH
         self.cwM = cwM
         self.cwA = cwA
-        self.pw = cwH + cwM + cwA + 10 + 8 + 28
+        self.pw = cwH + cwM + cwA + 14 + 8 + 28
         self.sb = sb
         self.rys = sb - apexC
         self.farTY = farTY
@@ -1461,13 +1461,13 @@ struct RidgeCantTodayB: View {
                     rowHeight: rh,
                     visibleRows: 3,
                     wraps: true,
-                    isBlocked: { i in !isOK(rcbMinutes(i, mIdx, aIdx)) },
-                    onBlocked: { i in blockedTapped(rcbMinutes(i, mIdx, aIdx)) },
+                    isBlocked: { _ in false },
+                    onBlocked: { _ in },
                     onDetent: { detent() },
                     isInteracting: $hBusy
                 ) { idx, dist in
                     RCBReelRow(text: "\(idx + 1)", d: dist, rh: rh,
-                               blocked: !isOK(rcbMinutes(idx, mIdx, aIdx)),
+                               blocked: !isOK(selMin),
                                align: .trailing, anchor: .trailing, small: false, peek: f.reel[0])
                 }
                 .frame(width: g.cwH, height: rh * 3)
@@ -1480,7 +1480,7 @@ struct RidgeCantTodayB: View {
                 Text(":")
                     .font(.system(size: (rh * 0.95).rounded(), weight: .bold))
                     .foregroundStyle(Color.white)
-                    .frame(width: 10)
+                    .frame(width: 14)
                     .offset(y: -2)
                     .accessibilityHidden(true)
 
@@ -1490,13 +1490,13 @@ struct RidgeCantTodayB: View {
                     rowHeight: rh,
                     visibleRows: 3,
                     wraps: true,
-                    isBlocked: { i in !isOK(rcbMinutes(hIdx, i, aIdx)) },
-                    onBlocked: { i in blockedTapped(rcbMinutes(hIdx, i, aIdx)) },
+                    isBlocked: { _ in false },
+                    onBlocked: { _ in },
                     onDetent: { detent() },
                     isInteracting: $mBusy
                 ) { idx, dist in
                     RCBReelRow(text: minuteText(idx), d: dist, rh: rh,
-                               blocked: !isOK(rcbMinutes(hIdx, idx, aIdx)),
+                               blocked: !isOK(selMin),
                                align: .leading, anchor: .leading, small: false, peek: f.reel[1])
                 }
                 .frame(width: g.cwM, height: rh * 3)
@@ -1512,13 +1512,13 @@ struct RidgeCantTodayB: View {
                     rowHeight: rh,
                     visibleRows: 3,
                     wraps: false,
-                    isBlocked: { i in !isOK(rcbMinutes(hIdx, mIdx, i)) },
-                    onBlocked: { i in blockedTapped(rcbMinutes(hIdx, mIdx, i)) },
+                    isBlocked: { _ in false },
+                    onBlocked: { _ in },
                     onDetent: { detent() },
                     isInteracting: $aBusy
                 ) { idx, dist in
                     RCBReelRow(text: idx == 1 ? "pm" : "am", d: dist, rh: rh,
-                               blocked: !isOK(rcbMinutes(hIdx, mIdx, idx)),
+                               blocked: !isOK(selMin),
                                align: .center, anchor: .center, small: true, peek: f.reel[2])
                 }
                 .frame(width: g.cwA, height: rh * 3)
@@ -1555,14 +1555,11 @@ struct RidgeCantTodayB: View {
         case 1: m = RCBM.mod(m + (up ? 1 : -1), 12)
         default: a = RCBM.mod(a + (up ? 1 : -1), 2)
         }
+        hIdx = h
+        mIdx = m
+        aIdx = a
         let total = rcbMinutes(h, m, a)
-        if isOK(total) {
-            hIdx = h
-            mIdx = m
-            aIdx = a
-        } else {
-            blockedTapped(total)
-        }
+        if !isOK(total) { blockedTapped(total) }
     }
 
     private func detent() {
@@ -1977,10 +1974,11 @@ struct RidgeCantTodayB: View {
         if sim.pendingCheck && n - sim.lastChange > 0.16 && !(hBusy || mBusy || aBusy)
             && sim.dialPhase != 1 && mode == .time && sim.posTarget == nil {
             sim.pendingCheck = false
+            // The time stays where the user put it (Rishi, 2026-11-25). If it can't be an alarm,
+            // it stays dim, the note says why, and "set alarm" waits for a valid time.
             if curTarget != nil && !isOK(selMin) {
                 input.haptics.play(.soft)
                 showNote(blockedText(selMin))
-                setTime(nearestAllowed(selMin))
             }
         }
 
@@ -2088,6 +2086,11 @@ struct RidgeCantTodayB: View {
         aIdx = hh >= 12 ? 1 : 0
     }
 
+    /// The time the reels open on for a day (the default, or the nearest valid one).
+    private func rcbOpenedMinutes(_ m: Int) -> Int {
+        isOK(m) ? m : nearestAllowed(m)
+    }
+
     private func selectTarget(_ idx: Int) {
         guard idx != selIdx, let t = target(at: idx) else { return }
         selIdx = idx
@@ -2095,6 +2098,8 @@ struct RidgeCantTodayB: View {
         sim.progrUntil = CACurrentMediaTime() + 0.65
         setTime(m)
         if !isOK(m) { setTime(nearestAllowed(m)) }
+        let opened = rcbOpenedMinutes(m)
+        if !isOK(opened) { showNote(blockedText(opened)) }
         for d in 0..<7 { sim.setFade("ring\(d)", d == idx ? 1 : 0, 0.2) }
     }
 
