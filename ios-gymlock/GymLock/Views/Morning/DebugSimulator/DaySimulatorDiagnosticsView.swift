@@ -135,6 +135,7 @@ struct DaySimulatorDiagnosticsView: View {
     @State private var handoffSummary = "none"
     @State private var resolvedSummary = "none"
     @State private var pendingTool: SimTool?
+    @State private var isRecordingDay0 = false
 
     private var source: SimReadingSource { SimReadingSource(store: store, coordinator: coordinator) }
 
@@ -144,6 +145,7 @@ struct DaySimulatorDiagnosticsView: View {
                 heroLabLink
                 environmentCard
                 toolsSection
+                day0Section
             }
             .padding(.horizontal, Theme.pageMargin)
             .padding(.vertical, 18)
@@ -161,6 +163,16 @@ struct DaySimulatorDiagnosticsView: View {
         .task {
             alarmAuthorization = await coordinator.alarmAuthorization()
             refreshDoorReadings()
+        }
+        .fullScreenCover(isPresented: $isRecordingDay0) {
+            Day0CaptureSheet(
+                kind: .video,
+                onCaptured: { captured in
+                    store.profile.day0Media = captured
+                    isRecordingDay0 = false
+                },
+                onCancel: { isRecordingDay0 = false }
+            )
         }
         .confirmationDialog(
             pendingTool?.title ?? "",
@@ -308,6 +320,41 @@ struct DaySimulatorDiagnosticsView: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    // MARK: Day 0 video
+
+    /// The Day 0 look plays the user's own day 0 video. This records one here, the same way
+    /// onboarding does, so "day 0 pause now" has something to play.
+    private var day0Section: some View {
+        let media = store.profile.day0Media
+        let onDisk = media?.fileURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        let status: String = {
+            guard let media, onDisk else { return "none on this iPhone" }
+            return media.kind == .video ? "video saved" : "photo saved"
+        }()
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("day 0 video")
+                .font(.footnote.weight(.heavy))
+                .tracking(0.6)
+                .foregroundStyle(Theme.inkTertiary)
+
+            Text("Used by the Day 0 look. Now: \(status). Then run \"day 0 pause now\".")
+                .font(.footnote)
+                .foregroundStyle(Theme.inkSecondary)
+
+            Button {
+                isRecordingDay0 = true
+            } label: {
+                Text(onDisk ? "record a new day 0 video" : "record a day 0 video")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 48)
+                    .background(Theme.surfaceMuted, in: .rect(cornerRadius: Theme.controlRadius))
+            }
+            .buttonStyle(.plain)
         }
     }
 

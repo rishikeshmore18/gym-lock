@@ -41,7 +41,7 @@ enum SimStage: String, CaseIterable, Identifiable {
     var presets: [SimStep] {
         switch self {
         case .sleep: [.windDownLockStart, .windDownLockEnd, .changeBedtimeTonight, .bedtimeAfterMidnightGymMonday]
-        case .alarm: [.alarmRingsNow, .wakeAndGoGymDay, .snoozedMorning, .goLaterGymDay, .ignoreAlarmUntilDeadline, .plainWakeAlarmRings]
+        case .alarm: [.alarmRingsNow, .day0PauseNow, .wakeAndGoGymDay, .snoozedMorning, .goLaterGymDay, .ignoreAlarmUntilDeadline, .plainWakeAlarmRings]
         case .journey: [.tripDemo, .tripRealWalk, .departed, .countdownAt75, .runningLate30]
         case .arrival: [.gymRegionEntered, .driveBy, .gymDwellConfirmed, .arrivalTrouble]
         case .workout: [.arriveStay20, .healthWorkout22, .quickWorkoutComplete, .imHereCameraPhoto]
@@ -600,6 +600,13 @@ enum SimCatalog {
                                expected: "Wake & Go; the wake alarm is the gym alarm; snooze yes.", stage: .alarm,
                                time: .fixed(TimeOfDay(hour: 6, minute: 30), note: "fixed by scenario"),
                                journey: notDeparted, conditions: st, fixedNotes: ["Flow: Wake & Go"],
+                               writesRealData: true)
+        case .day0PauseNow:
+            return SimScenario(step: step, summary: "Rings an alarm now; the pause and can't today use the Day 0 look.",
+                               expected: "Tap I'm up, then plans changed: your day 0 video plays behind the 30-second pause. Continue opens can't today in Day 0. Record a video in Diagnostics first if you have none.",
+                               stage: .alarm,
+                               time: .now(note: "rings this minute"),
+                               journey: notDeparted, conditions: st, fixedNotes: ["Flow: Wake & Go", "Look: Day 0 forced"],
                                writesRealData: true)
         case .alarmRingsNow:
             return SimScenario(step: step, summary: "Rings a Wake & Go alarm right now, gym 35 min later.",
