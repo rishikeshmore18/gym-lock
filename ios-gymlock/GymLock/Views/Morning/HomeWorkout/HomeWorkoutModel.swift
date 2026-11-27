@@ -97,6 +97,12 @@ enum HomeWorkoutCopy {
     static let endMessage = "it won't count before 20 min."
     static let keepGoing = "keep going"
     static let endWithout = "end without counting"
+
+    // Back sheet (after the first minute, before 20:00 only).
+    static let backTitle = "go back?"
+    static let backMessage = "your timer starts over."
+    static let stay = "stay"
+    static let goBack = "go back"
 }
 
 // MARK: - The clock (pure)
@@ -212,6 +218,8 @@ struct HomeWorkoutFrame {
 /// Layout slots shared by all four looks. The host draws the top-right glass button and the
 /// bottom primary button in these places, so a look keeps them clear.
 enum HomeWorkoutLayout {
+    /// Seconds after "start" in which back asks nothing.
+    static let mistakeWindow: Double = 60
     static let margin: CGFloat = 28
     static let buttonHeight: CGFloat = 56
     /// Distance from the bottom safe edge to the button's bottom.

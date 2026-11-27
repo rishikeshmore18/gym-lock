@@ -1845,6 +1845,21 @@ final class GymSessionCoordinator {
         persist()
     }
 
+    /// Back from a running home workout that is not yet at 20 minutes (a mistaken start).
+    ///
+    /// The timer is thrown away and the user returns to the same screen the setup X goes to.
+    /// Nothing is counted or recorded, so the monthly cap is untouched.
+    func backOutOfQuickWorkout() {
+        guard var current = session, current.state == .quickWorkoutActive,
+              !current.homeWorkoutMinimumReached(at: Date()) else { return }
+        current.quickWorkoutMinutes = nil
+        current.quickWorkoutStartedAt = nil
+        current.quickWorkoutDeadline = nil
+        session = current
+        leaveQuickWorkoutPicker()
+        reconcileShieldWithSession()
+    }
+
     /// Starts the home fallback.
     ///
     /// The shield stays on for the duration. The user chose a workout instead of
