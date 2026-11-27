@@ -852,7 +852,11 @@ export class Painter2 {
       const base = this.layer('p-base', key, w, h, (c) => {
         skyGrad(c, w, h, Lp.horizon, pal);
         clouds(c, w, h, Lp.horizon, pal, rng(S.seed), 5);
-        paintFar(c, w, h, Lp, pal, rng(S.seed + 1), S.seed, S);
+        // the far range, then the volcano (the mountain), then the forested ridges in front of it
+        paintFar(c, w, h, Lp, pal, rng(S.seed + 1), S.seed, S, {peak: false, ridges: false});
+        const cone = vcConeOf(w, h, L);
+        vcPaintCone(c, cone, vcGulliesOf(cone, L.tall), pal);
+        paintFar(c, w, h, Lp, pal, rng(S.seed + 7), S.seed, S, {back: false, peak: false});
         // near hills
         const hy = (x: number) => (L.tall ? h * 0.86 : h * 0.8) - Math.pow(fbm1(x / (w * 0.3) + S.seed, 4), 1.4) * h * 0.12;
         const hp = ridgePts(-0.02 * w, 1.02 * w, 80, hy);
@@ -911,13 +915,6 @@ export class Painter2 {
       ctx.beginPath();
       ctx.arc(px, py, rad, 0, Math.PI * 2);
       ctx.fill();
-      // the summit, a small white flag-less marker
-      const top = route[route.length - 1];
-      ctx.strokeStyle = css(pal.near, 0.8);
-      ctx.lineWidth = Math.max(1, w * 0.002);
-      ctx.beginPath();
-      ctx.arc(top[0], top[1], rad * 1.2, 0, Math.PI * 2);
-      ctx.stroke();
     },
 
     // ---- fog: pines receding into it ----
@@ -1192,4 +1189,332 @@ export const routeOf = (w: number, h: number, L: Layout, Lp: Layout): [number, n
     out.push([fx + (sx - fx) * u + (i < m ? (i % 2 ? 1 : -1) * w * 0.035 * (1 - u) : 0), fy + (sy - fy) * u, 1, true]);
   }
   return out;
+};
+
+// ---------- the summit volcano (the path world's mountain) ----------
+// One stratovolcano cone: broad concave flanks, a dark broken rim with a notch (no crater ring), a dark rock
+// top and dry-brush gullies. The lava (wash3.ts `volcano`) follows the same gullies and is clipped to the same
+// cone, so it can never leave the mountain. All sizes derive from `sc`, so the story (tall) and the card (wide)
+// share one shape. The cone is built around the route's last point, so the summit scenes still land on it.
+export type Cone = {cx: number; y0: number; sc: number; hw0: number; a1: number; a2: number; D: number; seed: number; vx: number; vy: number; rim: Pt[]; tabL: number[]; tabR: number[]};
+export type Gully = {i: number; seed: number; w: number; delay: number; wid: number; dStart: number; dEnd: number; s0: number; par: number; lava: boolean};
+
+export const vcRnd = (i: number) => {
+  const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+};
+export const vcVn = (x: number) => {
+  const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+  return vcRnd(i) * (1 - u) + vcRnd(i + 1) * u;
+};
+export const vcCl = (v: number) => Math.max(0, Math.min(1, v));
+export const vcClamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+export const vcEase = (u: number) => u * u * (3 - 2 * u);
+export const vcLerp = (a: number, b: number, u: number) => a + (b - a) * u;
+
+const vcNone = (): Pt[] => [];
+const vcLump = (C: Cone, d: number, k: number) => 1 + 0.07 * (vcVn(C.seed + k + d / (70 * C.sc)) * 2 - 1) + 0.018 * (vcVn(C.seed * 3 + k + d / (8 * C.sc)) * 2 - 1);
+/** half widths of the cone d below the rim, left and right (the left is a little steeper) */
+export const vcHwL = (C: Cone, d: number) => (C.hw0 * 1.05 + C.a1 * 1.1 * d + C.a2 * 1.07 * d * d) * vcLump(C, d, 3);
+export const vcHwR = (C: Cone, d: number) => (C.hw0 * 0.97 + C.a1 * 0.9 * d + C.a2 * 0.88 * d * d) * vcLump(C, d, 41);
+/** a point on the cone: s -1..1 across the slope, d below the rim */
+export const vcPt = (C: Cone, s: number, d: number): Pt => [C.cx + (s < 0 ? s * vcHwL(C, d) : s * vcHwR(C, d)), C.y0 + d];
+
+/** the cone around the vent (vx, vy); sc scales every length */
+export const vcCone = (vx: number, vy: number, sc: number, hw0: number, a1: number, a2: number, D: number, seed: number): Cone => {
+  const y0 = vy - 13 * sc;
+  const C: Cone = {cx: vx, y0, sc, hw0, a1, a2, D, seed, vx, vy, rim: [], tabL: [], tabR: []};
+  const rf: number[][] = [[-1, 2], [-0.9, -4], [-0.76, -8], [-0.6, -5], [-0.46, -10], [-0.32, -3], [-0.2, 5], [-0.08, 10], [0.06, 12], [0.18, 6], [0.3, -4], [0.44, -9], [0.58, -6], [0.72, -10], [0.86, -4], [1, 1]];
+  for (let i = 0; i < rf.length; i++) {
+    const f = rf[i][0];
+    C.rim.push([vx + f * (f < 0 ? vcHwL(C, 0) : vcHwR(C, 0)), y0 + rf[i][1] * sc]);
+  }
+  const nn = Math.ceil(D / 3);
+  for (let i = 0; i <= nn; i++) {
+    C.tabL.push(vx - vcHwL(C, i * 3));
+    C.tabR.push(vx + vcHwR(C, i * 3));
+  }
+  return C;
+};
+
+/** the cone for this canvas: tall (the story) or wide (the card) */
+export const vcConeOf = (w: number, h: number, L: Layout): Cone => {
+  const Lp = pathLayout(L, w, h);
+  const vy = Lp.peakTop + h * 0.01;
+  if (L.tall) {
+    const sc = w / 592;
+    return vcCone(Lp.peakX, vy, sc, 58 * sc, 0.29, 0.0022 / sc, Math.min(320 * sc, h * 0.8 - (vy - 13 * sc)), 11);
+  }
+  const sc = (0.9 * h) / 488;
+  return vcCone(Lp.peakX, vy, sc, 58 * sc, 0.29, 0.0022 / sc, (270 * h) / 488, 17);
+};
+
+/** the rim at f (-1..1 across the top) */
+export const vcRimAt = (C: Cone, f: number): Pt => {
+  const x = C.cx + f * (f < 0 ? vcHwL(C, 0) : vcHwR(C, 0));
+  for (let i = 1; i < C.rim.length; i++) {
+    if (x <= C.rim[i][0]) {
+      const a = C.rim[i - 1], b = C.rim[i];
+      const u = (x - a[0]) / (b[0] - a[0] || 1);
+      return [x, a[1] + (b[1] - a[1]) * u];
+    }
+  }
+  return C.rim[C.rim.length - 1];
+};
+
+/** y of the cone's surface at x (1e9 when x is off the cone): where flying rock lands */
+export const vcSurf = (C: Cone, x: number): number => {
+  const first = C.rim[0][0], last = C.rim[C.rim.length - 1][0];
+  if (x >= first && x <= last) return vcRimAt(C, (x - C.cx) / (x < C.cx ? vcHwL(C, 0) : vcHwR(C, 0)))[1];
+  if (x < C.cx) {
+    for (let i = 1; i < C.tabL.length; i++) if (C.tabL[i] <= x) return C.y0 + (i - 1 + (C.tabL[i - 1] - x) / (C.tabL[i - 1] - C.tabL[i] || 1)) * 3;
+    return 1e9;
+  }
+  for (let i = 1; i < C.tabR.length; i++) if (C.tabR[i] >= x) return C.y0 + (i - 1 + (x - C.tabR[i - 1]) / (C.tabR[i] - C.tabR[i - 1] || 1)) * 3;
+  return 1e9;
+};
+
+/** the silhouette: flanks down to D, the broken rim across the top */
+export const vcConePath = (ctx: CanvasRenderingContext2D, C: Cone, extra: number) => {
+  const n = Math.ceil(C.D / 5);
+  ctx.beginPath();
+  ctx.moveTo(C.cx - vcHwL(C, C.D), C.y0 + C.D + extra);
+  ctx.lineTo(C.cx - vcHwL(C, C.D), C.y0 + C.D);
+  for (let i = n; i >= 0; i--) {
+    const d = (i / n) * C.D;
+    ctx.lineTo(C.cx - vcHwL(C, d), C.y0 + d);
+  }
+  for (const p of C.rim) ctx.lineTo(p[0], p[1]);
+  for (let i = 0; i <= n; i++) {
+    const d = (i / n) * C.D;
+    ctx.lineTo(C.cx + vcHwR(C, d), C.y0 + d);
+  }
+  ctx.lineTo(C.cx + vcHwR(C, C.D), C.y0 + C.D + extra);
+  ctx.closePath();
+};
+
+const vcGul = (i: number, s0: number, dEnd: number, wid: number, delay: number, w: number, par: number, dStart: number, lava: boolean): Gully => ({i, seed: i * 13 + 5, w, delay, wid, dStart, dEnd, s0, par, lava});
+
+/** the gullies: painted as dry-brush streaks and followed by the lava. `k` scales the preview lengths to this cone. */
+export const vcGullies = (tall: boolean, k: number): Gully[] => {
+  if (tall) {
+    const r = 0.92 * k;
+    return [
+      vcGul(0, -0.5, 255 * r, 0.6, 0, 0.1, -1, 0, true), vcGul(1, 0.46, 185 * r, 0.5, 0.08, 0.1, -1, 0, true), vcGul(2, 0.02, 105 * r, 0.4, 0.15, 0.08, -1, 0, true),
+      vcGul(3, -0.74, 205 * r, 0.3, 0.5, 0.055, 0, 120 * k, true), vcGul(4, 0.7, 150 * r, 0.3, 0.45, 0.055, 1, 90 * k, true), vcGul(5, 0.2, 100 * r, 0.25, 0.5, 0.055, 2, 60 * k, true),
+      vcGul(6, -0.2, 38 * k, 0.45, 0, 0.055, -1, 0, true), vcGul(7, 0.22, 36 * k, 0.45, 0, 0.055, -1, 0, true),
+      vcGul(8, -0.84, 120 * k, 0.4, 0, 0.055, -1, 0, false), vcGul(9, -0.3, 170 * k, 0.4, 0, 0.055, -1, 0, false), vcGul(10, 0.26, 140 * k, 0.35, 0, 0.055, -1, 0, false),
+      vcGul(11, 0.62, 150 * k, 0.4, 0, 0.055, -1, 0, false), vcGul(12, 0.86, 150 * k, 0.4, 0, 0.055, -1, 0, false),
+    ];
+  }
+  const r = 0.85 * k;
+  return [
+    vcGul(0, -0.5, 178 * r, 0.6, 0, 0.1, -1, 0, true), vcGul(1, 0.4, 130 * r, 0.5, 0.1, 0.1, -1, 0, true),
+    vcGul(2, -0.74, 150 * r, 0.3, 0.5, 0.055, 0, 90 * k, true), vcGul(3, -0.18, 34 * k, 0.45, 0, 0.055, -1, 0, true), vcGul(4, 0.2, 32 * k, 0.45, 0, 0.055, -1, 0, true),
+    vcGul(5, -0.84, 100 * k, 0.4, 0, 0.055, -1, 0, false), vcGul(6, -0.12, 120 * k, 0.4, 0, 0.055, -1, 0, false), vcGul(7, 0.66, 110 * k, 0.4, 0, 0.055, -1, 0, false),
+  ];
+};
+/** the gullies for a cone */
+export const vcGulliesOf = (C: Cone, tall: boolean): Gully[] => vcGullies(tall, C.D / (tall ? 320 : 185));
+
+/** s (-1..1 across the slope) of gully g, d below the rim; a branch follows its parent down to dStart */
+export function vcGs(C: Cone, G: Gully[], g: Gully, dd: number): number {
+  const sc = C.sc;
+  const wob = g.w * (vcVn(g.seed + dd / (45 * sc)) * 2 - 1) + g.w * 0.5 * (vcVn(g.seed * 2 + dd / (17 * sc)) * 2 - 1);
+  if (g.par >= 0) {
+    if (dd <= g.dStart) return vcGs(C, G, G[g.par], dd);
+    const ps = vcGs(C, G, G[g.par], g.dStart);
+    const e = vcEase(vcCl((dd - g.dStart) / (70 * sc)));
+    return ps + (g.s0 - ps) * e + wob * vcEase(vcCl((dd - g.dStart) / (40 * sc)));
+  }
+  const e = vcEase(vcCl((dd - 16 * sc) / (46 * sc)));
+  return g.s0 * 0.1 + g.s0 * 0.9 * e + wob * e;
+}
+export const vcGPt = (C: Cone, G: Gully[], g: Gully, dd: number): Pt => vcPt(C, vcClamp(vcGs(C, G, g, dd), -0.88, 0.88), dd);
+
+/** a ribbon polygon along P with a width at every point */
+export const vcRib = (ctx: CanvasRenderingContext2D, P: Pt[], Wd: number[]) => {
+  const n = P.length;
+  const Lft: Pt[] = [], Rgt: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = P[i], a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1];
+    const d = Math.hypot(dx, dy) || 1;
+    dx /= d;
+    dy /= d;
+    const hw = Wd[i] / 2;
+    Lft.push([p[0] - dy * hw, p[1] + dx * hw]);
+    Rgt.push([p[0] + dy * hw, p[1] - dx * hw]);
+  }
+  ctx.beginPath();
+  ctx.moveTo(Lft[0][0], Lft[0][1]);
+  for (let i = 1; i < n; i++) ctx.lineTo(Lft[i][0], Lft[i][1]);
+  for (let i = n - 1; i >= 0; i--) ctx.lineTo(Rgt[i][0], Rgt[i][1]);
+  ctx.closePath();
+};
+/** a tapered, ragged brush stroke */
+export const vcBrush = (ctx: CanvasRenderingContext2D, pts: Pt[], w0: number, w1: number, fill: string, seed: number, rag: number) => {
+  const n = pts.length;
+  if (n < 3) return;
+  const Wd: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const u = i / (n - 1);
+    Wd.push((w0 + (w1 - w0) * u) * (1 - rag + rag * 2 * vcVn(seed + i * 0.9)));
+  }
+  vcRib(ctx, pts, Wd);
+  ctx.fillStyle = fill;
+  ctx.fill();
+};
+
+/** paints the cone into the cached base layer */
+export const vcPaintCone = (ctx: CanvasRenderingContext2D, C: Cone, G: Gully[], pal: Pal) => {
+  const sc = C.sc, cx = C.cx, y0 = C.y0;
+  const xl = cx - vcHwL(C, C.D), xr = cx + vcHwR(C, C.D);
+  const dark = mixc(pal.near, pal.mid2, 0.2);
+  ctx.save();
+  vcConePath(ctx, C, 60);
+  ctx.clip();
+  let g = ctx.createLinearGradient(xl, 0, xr, 0);
+  g.addColorStop(0, css(mixc(pal.far, pal.sky1, 0.3)));
+  g.addColorStop(0.4, css(mixc(pal.far, pal.farShade, 0.05)));
+  g.addColorStop(0.55, css(mixc(pal.far, pal.farShade, 0.6)));
+  g.addColorStop(0.75, css(pal.mid));
+  g.addColorStop(1, css(mixc(pal.mid, pal.mid2, 0.65)));
+  ctx.fillStyle = g;
+  ctx.fillRect(xl - 10, y0 - 40, xr - xl + 20, C.D + 120);
+  // atmospheric haze toward the base
+  g = ctx.createLinearGradient(0, y0 + C.D * 0.5, 0, y0 + C.D);
+  g.addColorStop(0, css(pal.mist, 0));
+  g.addColorStop(1, css(pal.mist, 0.3));
+  ctx.fillStyle = g;
+  ctx.fillRect(xl - 10, y0 + C.D * 0.5, xr - xl + 20, C.D);
+  // faceted washes between neighbouring gully lines
+  const fs = [-1, -0.8, -0.58, -0.36, -0.14, 0.06, 0.26, 0.48, 0.7, 1];
+  for (let k = 0; k < fs.length - 1; k++) {
+    const a = fs[k], b = fs[k + 1], mid = (a + b) / 2;
+    ctx.beginPath();
+    for (let d = 2 * sc; d <= C.D + 4; d += 8 * sc) {
+      const s = vcClamp(a + 0.035 * (vcVn(k * 3 + d / (60 * sc)) * 2 - 1), -1, 1);
+      const p = vcPt(C, s, d);
+      ctx.lineTo(p[0], p[1]);
+    }
+    for (let d = C.D; d >= 2 * sc; d -= 8 * sc) {
+      const s = vcClamp(b + 0.035 * (vcVn(k * 3 + 3 + d / (60 * sc)) * 2 - 1), -1, 1);
+      const p = vcPt(C, s, d);
+      ctx.lineTo(p[0], p[1]);
+    }
+    ctx.closePath();
+    if (k % 2 === 0) ctx.fillStyle = css(pal.snow, 0.09 + 0.05 * vcRnd(k + 9));
+    else ctx.fillStyle = css(pal.near, 0.05 + 0.07 * vcRnd(k + 3) + 0.1 * vcCl(mid * 1.3));
+    ctx.fill();
+  }
+  // dark rock top: a charcoal wash with a ragged lower edge, running out in tongues
+  g = ctx.createLinearGradient(0, y0 - 20 * sc, 0, y0 + 150 * sc);
+  g.addColorStop(0, css(dark, 0.96));
+  g.addColorStop(0.28, css(dark, 0.78));
+  g.addColorStop(0.62, css(dark, 0.3));
+  g.addColorStop(1, css(dark, 0));
+  ctx.fillStyle = g;
+  ctx.fillRect(xl - 10, y0 - 30 * sc, xr - xl + 20, 190 * sc);
+  ctx.beginPath();
+  for (let i = 0; i <= 20; i++) {
+    const p = vcPt(C, -1 + i * 0.1, 2 * sc);
+    ctx.lineTo(p[0], p[1]);
+  }
+  for (let i = 20; i >= 0; i--) {
+    const s = -1 + i * 0.1;
+    const p = vcPt(C, s, (52 + 70 * vcVn(31 + s * 3.1) + 22 * vcVn(77 + s * 9)) * sc);
+    ctx.lineTo(p[0], p[1]);
+  }
+  ctx.closePath();
+  ctx.fillStyle = css(dark, 0.34);
+  ctx.fill();
+  for (let k = 0; k < 9; k++) {
+    const s0 = -0.85 + k * 0.21 + (vcRnd(k + 5) - 0.5) * 0.1, len = (70 + 90 * vcRnd(k + 11)) * sc;
+    const P: Pt[] = [];
+    for (let d = 4 * sc; d < len; d += 8 * sc) P.push(vcPt(C, vcClamp(s0 + 0.04 * (vcVn(k * 9 + d / (40 * sc)) * 2 - 1), -0.9, 0.9), d));
+    vcBrush(ctx, P, 6 * sc, 1.0 * sc, css(dark, 0.2), k * 17, 0.5);
+  }
+  // dry-brush gully hairs, dark and light, following the same curves the lava follows
+  for (let gi = 0; gi < G.length; gi++) {
+    const gu = G[gi];
+    const d0 = gu.par >= 0 ? gu.dStart : 12 * sc, d1 = gu.dEnd;
+    for (let h = 0; h < 2; h++) {
+      let run: Pt[] = [];
+      const w1 = (0.6 + gu.wid * 1.6) * sc * (0.8 + 0.5 * vcRnd(gi * 3 + h));
+      for (let d = d0; d <= d1; d += 6 * sc) {
+        if (vcVn(gu.seed * 3 + h * 7 + d / (24 * sc)) > 0.42) {
+          const p = vcGPt(C, G, gu, d);
+          run.push([p[0] + (h - 1) * 1.7 * sc, p[1]]);
+        } else {
+          vcBrush(ctx, run, w1 * 0.35, w1, css(pal.near, 0.2 + 0.14 * vcRnd(gi + h)), gi * 5 + h, 0.45);
+          run = vcNone();
+        }
+      }
+      vcBrush(ctx, run, w1 * 0.35, w1, css(pal.near, 0.2 + 0.14 * vcRnd(gi + h)), gi * 5 + h, 0.45);
+    }
+    // a light companion hair on the lit side
+    let run: Pt[] = [];
+    for (let d = d0 + 8 * sc; d <= d1 * 0.9; d += 6 * sc) {
+      if (vcVn(gu.seed * 5 + d / (20 * sc)) > 0.4) {
+        const p = vcGPt(C, G, gu, d);
+        run.push([p[0] - 2.6 * sc * (0.6 + 0.8 * gu.wid), p[1]]);
+      } else {
+        vcBrush(ctx, run, 0.6 * sc, 1.5 * sc, css(pal.snow, 0.4), gi * 3, 0.4);
+        run = vcNone();
+      }
+    }
+    vcBrush(ctx, run, 0.6 * sc, 1.5 * sc, css(pal.snow, 0.4), gi * 3, 0.4);
+  }
+  // rock speckle, dark and light in two passes
+  const nsp = Math.round(900 * sc * sc), sz = sc > 0.8 ? 1.4 : 1;
+  ctx.fillStyle = css(pal.crack, 0.2);
+  ctx.beginPath();
+  for (let i = 0; i < nsp; i++) {
+    if (vcRnd(i + 5) >= 0.6) continue;
+    const p = vcPt(C, (vcRnd(i * 2 + 1000) * 2 - 1) * 0.96, vcRnd(i * 2 + 1001) * C.D * 0.9);
+    ctx.rect(p[0], p[1], sz, sz);
+  }
+  ctx.fill();
+  ctx.fillStyle = css(pal.snow, 0.25);
+  ctx.beginPath();
+  for (let i = 0; i < nsp; i++) {
+    if (vcRnd(i + 5) < 0.6) continue;
+    const p = vcPt(C, (vcRnd(i * 2 + 1000) * 2 - 1) * 0.96, vcRnd(i * 2 + 1001) * C.D * 0.9);
+    ctx.rect(p[0], p[1], sz, sz);
+  }
+  ctx.fill();
+  ctx.restore();
+  // the rim and the silhouette edge: a dark lip with a light catch on the left shoulder
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (let d = C.D * 0.9; d >= 0; d -= 4) ctx.lineTo(cx - vcHwL(C, d), y0 + d);
+  for (const p of C.rim) ctx.lineTo(p[0], p[1]);
+  for (let d = 0; d <= C.D * 0.9; d += 4) ctx.lineTo(cx + vcHwR(C, d), y0 + d);
+  ctx.strokeStyle = css(pal.near, 0.34);
+  ctx.lineWidth = 1.5 * sc + 0.4;
+  ctx.stroke();
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    if (i === 0) ctx.moveTo(C.rim[i][0], C.rim[i][1] - 1.2 * sc);
+    else ctx.lineTo(C.rim[i][0], C.rim[i][1] - 1.2 * sc);
+  }
+  ctx.strokeStyle = css(pal.snow, 0.55);
+  ctx.lineWidth = 1.2 * sc + 0.3;
+  ctx.stroke();
+  // the throat: a ragged dark patch just under the notch (not a ring)
+  const T: Pt[] = [];
+  for (let i = 0; i <= 8; i++) T.push(vcRimAt(C, -0.3 + i * 0.075));
+  ctx.beginPath();
+  for (let i = 0; i < T.length; i++) {
+    if (i === 0) ctx.moveTo(T[i][0], T[i][1] - 0.5 * sc);
+    else ctx.lineTo(T[i][0], T[i][1] - 0.5 * sc);
+  }
+  for (let i = T.length - 1; i >= 0; i--) ctx.lineTo(T[i][0] + (vcRnd(i + 3) - 0.5) * 2 * sc, T[i][1] + (7 + 6 * vcVn(60 + i * 1.9)) * sc);
+  ctx.closePath();
+  ctx.fillStyle = css(pal.crack, 0.82);
+  ctx.fill();
+  ctx.restore();
 };

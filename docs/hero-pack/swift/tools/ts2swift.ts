@@ -2024,7 +2024,7 @@ const RIDGE_FIELDS: Record<string, Record<string, string>> = {
   RScene: {
     seed: 'Double', tree: 'Double', cracks: 'Double', broken: 'Double', rubble: 'Double', sun: 'Double', night: 'Double', mist: 'Double', rain: 'Double', peak: 'Double', kind: 'String',
     rockIn: 'Double?', noRock: 'Bool?', noYou: 'Bool?', hgBg: 'String?', prop: 'String?', candle: 'Double?', moonX: 'Double?', moonY: 'Double?', boatX: 'Double?', sand: 'Double?', charge: 'Double?', stones: 'Double?', trail: 'Double?', birds: 'Double?', chipsAt: 'Double?',
-    snow: 'Double?', frozen: 'Bool?', fireflies: 'Double?', drip: 'Bool?', tide: 'Double?', steps: 'Double?', beacon: 'Double?', lanterns: '[Double]?', stars: 'Double?', starLines: 'Double?', shoot: 'Double?', skips: '[Double]?', skipN: 'Double?', skipDone: 'Double?', burst: 'Double?', burstAt: 'String?', flash: 'Double?', ripples: 'Double?',
+    snow: 'Double?', frozen: 'Bool?', fireflies: 'Double?', drip: 'Bool?', tide: 'Double?', steps: 'Double?', beacon: 'Double?', rumble: 'Double?', tapAt: 'Double?', eruptAt: 'Double?', still: 'Bool?', lanterns: '[Double]?', stars: 'Double?', starLines: 'Double?', shoot: 'Double?', skips: '[Double]?', skipN: 'Double?', skipDone: 'Double?', burst: 'Double?', burstAt: 'String?', flash: 'Double?', ripples: 'Double?',
   },
 };
 function ridgeConfig(): Config {

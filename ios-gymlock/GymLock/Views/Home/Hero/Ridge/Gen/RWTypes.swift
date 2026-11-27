@@ -139,6 +139,62 @@ nonisolated final class O_cx_cy_w_h {
     }
 }
 
+nonisolated final class Cone {
+    var cx: Double
+    var y0: Double
+    var sc: Double
+    var hw0: Double
+    var a1: Double
+    var a2: Double
+    var D: Double
+    var seed: Double
+    var vx: Double
+    var vy: Double
+    var rim: [(Double, Double)]
+    var tabL: [Double]
+    var tabR: [Double]
+    init(cx: Double, y0: Double, sc: Double, hw0: Double, a1: Double, a2: Double, D: Double, seed: Double, vx: Double, vy: Double, rim: [(Double, Double)], tabL: [Double], tabR: [Double]) {
+        self.cx = cx
+        self.y0 = y0
+        self.sc = sc
+        self.hw0 = hw0
+        self.a1 = a1
+        self.a2 = a2
+        self.D = D
+        self.seed = seed
+        self.vx = vx
+        self.vy = vy
+        self.rim = rim
+        self.tabL = tabL
+        self.tabR = tabR
+    }
+}
+
+nonisolated final class Gully {
+    var i: Double
+    var seed: Double
+    var w: Double
+    var delay: Double
+    var wid: Double
+    var dStart: Double
+    var dEnd: Double
+    var s0: Double
+    var par: Double
+    var lava: Bool
+    init(i: Double, seed: Double, w: Double, delay: Double, wid: Double, dStart: Double, dEnd: Double, s0: Double, par: Double, lava: Bool) {
+        self.i = i
+        self.seed = seed
+        self.w = w
+        self.delay = delay
+        self.wid = wid
+        self.dStart = dStart
+        self.dEnd = dEnd
+        self.s0 = s0
+        self.par = par
+        self.lava = lava
+    }
+}
+
 nonisolated final class O_x_bot_w_h_top {
     var x: Double
     var bot: Double

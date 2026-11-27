@@ -1549,28 +1549,11 @@ nonisolated extension RW {
         return o
     }, cam: { (c: RPC) -> RCam in
         return RCam.make([]) { _o in _o.s = 1.12 - 0.09 * ez(c.T / 1.3); _o.px = A.treeX - 10.0; _o.py = A.treeTop(0.78) + 10.0 }
-    }, hap: ([HapticCue(t: 0.4, kind: .heavy), HapticCue(t: 0.45, kind: .success)] as [HapticCue]), type: "slam"), Scn(draw: { (c: RPC) -> [RShape] in
+    }, hap: ([HapticCue(t: 0.4, kind: .heavy), HapticCue(t: 0.45, kind: .success)] as [HapticCue]), type: "slam"), Scn(bd: { (c: RPC) -> RScene in
+        return RScene.make([]) { _o in _o.beacon = ez((c.T - 0.25) / 2.2) }
+    }, draw: { (c: RPC) -> [RShape] in
         var o: [RShape] = ([] as [RShape])
-        let _d68 = A.summit
-        let sx: Double = _d68.0
-        let sy: Double = _d68.1
-        let b: Double = ez((c.T - 0.25) / 1.0)
-        let fh: Double = 2.0 + 8.0 * b
-        let f: Double = JS.sin(c.t * 11.0) * 0.5
-        o.append(gl(sx, sy - 2.0, 6.0 + 16.0 * b, "light", 0.6 * b))
-        if b > 0.0 {
-            o.append(fx(pgs(([sx - fh * 0.42, sy, sx + f, sy - fh * 1.3, sx + fh * 0.42, sy] as [Double]), "light", 0.95))); o.append(fx(pg(([sx - fh * 0.14, sy, sx + f * 0.6, sy - fh * 0.5, sx + fh * 0.14, sy] as [Double]), "coral")))
-        }
-        var p: [Double] = ([] as [Double])
-        do {
-            var i: Double = 0.0
-            while i < JS.round(16.0 * b) {
-                defer { i += 1 }
-                let ph: Double = JSMath.rem((rnd(i) + c.t * 0.5), 1.0)
-                p.append(sx + JS.sin(ph * 6.0 + i) * 3.0 * (1.0 + ph)); p.append(sy - fh - ph * 18.0)
-            }
-        }
-        o.append(ds(p, 0.3, "light", 0.85)); o.append(ds(JS.slice(p, 0.0, 6.0), 0.32, "coral", 0.9)); o.append(fl(0.3 * JS.exp(-(c.T - 0.3) / 0.3) * ((c.T > 0.3 ? 1.0 : 0.0))))
+        o.append(fl(0.3 * JS.exp(-(c.T - 0.3) / 0.3) * ((c.T > 0.3 ? 1.0 : 0.0))))
         return o
     }, cam: { (c: RPC) -> RCam in
         return RCam.make([]) { _o in _o.s = 1.14 - 0.1 * ez(c.T / 1.4); _o.px = A.summit.0; _o.py = A.summit.1 + 6.0 }
@@ -1613,10 +1596,10 @@ nonisolated extension RW {
                 }
             }
         }
-        fe69: for (_ii, _e70) in P.enumerated() {
+        fe68: for (_ii, _e69) in P.enumerated() {
             let i = Double(_ii)
-            let x: Double = _e70[0]
-            let y: Double = _e70[1]
+            let x: Double = _e69[0]
+            let y: Double = _e69[1]
             o.append(contentsOf: star4(x, y, 1.6 + (((i == 6.0 && lines >= 1.0) ? 0.8 : 0.0)), ((i == 6.0 && lines >= 1.0) ? "coral" : "light")))
         }
         let s: Double = (c.T - 1.6) / 0.9
@@ -1695,9 +1678,9 @@ nonisolated extension RW {
     }), Scn(bd: { (_ _x0: RPC) -> RScene in
         return RScene.make([]) { _o in _o.sun = 0.12; _o.night = 0.25 }
     }, draw: { (c: RPC) -> [RShape] in
-        let _d71 = A.summit
-        let sx: Double = _d71.0
-        let sy: Double = _d71.1
+        let _d70 = A.summit
+        let sx: Double = _d70.0
+        let sy: Double = _d70.1
         let H: Double = 3.0 + slP(c) * 14.0
         return ([fx(pgs(([sx, sy - 0.4, sx + H * 0.7, sy + H, sx - H * 0.6, sy + H * 0.9] as [Double]), "light", 0.85)), ln(([sx - H * 0.6, sy + H * 0.9, sx + H * 0.7, sy + H] as [Double]), "coral", 0.9, 0.35), gl(sx, sy + H * 0.4, H * 1.4, "light", 0.4)] as [RShape])
     }), Scn(bd: { (c: RPC) -> RScene in
@@ -1794,9 +1777,9 @@ nonisolated extension RW {
                         }
                     }
                 }
-                let _d72 = (pts[Int(Double(pts.count) - 2.0)], pts[Int(Double(pts.count) - 1.0)])
-                let hx: Double = _d72.0
-                let hy: Double = _d72.1
+                let _d71 = (pts[Int(Double(pts.count) - 2.0)], pts[Int(Double(pts.count) - 1.0)])
+                let hx: Double = _d71.0
+                let hy: Double = _d71.1
                 o.append(ln(pts, "ink", 1.0, 0.4))
                 if unf < 1.0 {
                     o.append(rg(hx + 0.8, hy, 1.2 * (1.0 - unf) + 0.4, "ink", 1.0, 0.35, nil, 0.0, Double.pi * 2.0 * (1.0 - unf * 0.8)))
@@ -1815,9 +1798,9 @@ nonisolated extension RW {
         }
         return o
     }, type: "blur"), Scn(draw: { (c: RPC) -> [RShape] in
-        let _d73 = A.summit
-        let sx: Double = _d73.0
-        let sy: Double = _d73.1
+        let _d72 = A.summit
+        let sx: Double = _d72.0
+        let sy: Double = _d72.1
         let a: Double = c.t * 0.35
         return ([bird(sx + JS.cos(a) * 16.0, sy - 8.0 + JS.sin(a) * 4.0, 2.4, JS.sin(c.t * 0.8) * 0.4 + 1.6), ln(([sx + JS.cos(a - 0.4) * 16.0, sy - 8.0 + JS.sin(a - 0.4) * 4.0, sx + JS.cos(a - 0.15) * 16.0, sy - 8.0 + JS.sin(a - 0.15) * 4.0] as [Double]), "mist", 0.4, 0.25, 0.8)] as [RShape])
     }, type: "blur"), Scn(draw: { (c: RPC) -> [RShape] in
@@ -1943,9 +1926,9 @@ nonisolated extension RW {
             while i < 18.0 {
                 defer { i += 1 }
                 let u: Double = 0.2 + (i / 17.0) * 0.75
-                let _d74 = routeAt(u)
-                let x: Double = _d74.0
-                let y: Double = _d74.1
+                let _d73 = routeAt(u)
+                let x: Double = _d73.0
+                let y: Double = _d73.1
                 if rnd(i) < p {
                     o.append(pg(ell(x, y, 1.4 + rnd(i + 3.0), 0.7, 8.0), "paper", 0.95))
                 }
@@ -1968,9 +1951,9 @@ nonisolated extension RW {
             return (x + dx * JS.cos(r) - dy * JS.sin(r), y + dx * JS.sin(r) + dy * JS.cos(r))
         }
         let body: [Double] = ([pt(-(4.0), -(0.9)), pt(1.4, -(0.9)), pt(2.6, -(0.5)), pt(4.0, -(0.4)), pt(4.0, 0.4), pt(2.6, 0.5), pt(1.4, 0.9), pt(-(4.0), 0.9)] as [(Double, Double)]).flatMap { [$0.0, $0.1] }
-        let _d75 = pt(4.4, 0.0)
-        let cx: Double = _d75.0
-        let cy: Double = _d75.1
+        let _d74 = pt(4.4, 0.0)
+        let cx: Double = _d74.0
+        let cy: Double = _d74.1
         return ([pg(body, "ink", 0.9), ln((Array(pt(-(3.0), 0.0)) + Array(pt(0.8, 0.0))), "paper", 0.8, 0.3), dk(cx, cy, 0.5, "coral"), rg(x, y + 1.0, 6.0, "mist", 0.5, 0.3, 0.8)] as [RShape])
     }, type: "blur"), Scn(bd: { (_ _x0: RPC) -> RScene in
         return RScene.make([]) { _o in _o.night = 1.0; _o.charge = 0.4 }
@@ -2074,17 +2057,17 @@ nonisolated extension RW {
         return o
     }, type: "rise"), Scn(draw: { (c: RPC) -> [RShape] in
         var o: [RShape] = ([] as [RShape])
-        let _d76 = routeAt(0.06)
-        let x: Double = _d76.0
-        let y: Double = _d76.1
+        let _d75 = routeAt(0.06)
+        let x: Double = _d75.0
+        let y: Double = _d75.1
         o.append(ln(([x + 5.0, y, x + 5.0, y - 7.0] as [Double]), "ink", 1.0, 0.5)); o.append(pg(([x + 5.0, y - 7.0, x + 10.0, y - 6.2, x + 10.0, y - 4.4, x + 5.0, y - 5.2] as [Double]), "ink"))
         do {
             var i: Double = 0.0
             while i < 4.0 {
                 defer { i += 1 }
-                let _d77 = routeAt(0.12 + i * 0.06)
-                let cx: Double = _d77.0
-                let cy: Double = _d77.1
+                let _d76 = routeAt(0.12 + i * 0.06)
+                let cx: Double = _d76.0
+                let cy: Double = _d76.1
                 let on: Double = pulse(c.t - i * 0.18, 1.6, 0.25)
                 o.append(ln(([cx - 1.6, cy + 1.2, cx, cy - 0.6, cx + 1.6, cy + 1.2] as [Double]), (on > 0.5 ? "coral" : "light"), 0.4 + on * 0.6, 0.5))
             }
@@ -2110,9 +2093,9 @@ nonisolated extension RW {
         return RScene.make([]) { _o in _o.charge = 0.08; _o.moonX = 0.75; _o.moonY = 0.22 }
     }, draw: { (c: RPC) -> [RShape] in
         var o: [RShape] = ([] as [RShape])
-        let _d78 = toStage(750.0, 0.22 * 488.0)
-        let mx: Double = _d78.0
-        let my: Double = _d78.1
+        let _d77 = toStage(750.0, 0.22 * 488.0)
+        let mx: Double = _d77.0
+        let my: Double = _d77.1
         let g: Double = (JSMath.rem(c.T, 3.0)) / 3.0
         o.append(dk(mx - 2.6 + JS.cos(-(0.9) + g * 1.8) * 3.4, my + JS.sin(-(0.9) + g * 1.8) * 3.4, 0.5, "light", 0.9))
         do {
@@ -2213,9 +2196,9 @@ nonisolated extension RW {
         return RScene.make([]) { _o in _o.sun = 0.2; _o.mist = 1.1 }
     }, draw: { (c: RPC) -> [RShape] in
         var o: [RShape] = ([] as [RShape])
-        let _d79 = routeAt(0.55)
-        let x: Double = _d79.0
-        let y: Double = _d79.1
+        let _d78 = routeAt(0.55)
+        let x: Double = _d78.0
+        let y: Double = _d78.1
         do {
             var i: Double = 0.0
             while i < 6.0 {
@@ -2289,9 +2272,9 @@ nonisolated extension RW {
         return o
     }, type: "jolt")] as [Scn]), "weekkept": ([Scn(draw: { (c: RPC) -> [RShape] in
         var o: [RShape] = ([] as [RShape])
-        let _d80 = A.peak2
-        let px: Double = _d80.0
-        let py: Double = _d80.1
+        let _d79 = A.peak2
+        let px: Double = _d79.0
+        let py: Double = _d79.1
         do {
             var i: Double = 0.0
             while i < 5.0 {
@@ -2511,9 +2494,9 @@ nonisolated extension RW {
             while i <= 40.0 {
                 defer { i += 1 }
                 let u: Double = i / 40.0
-                let _d81 = routeAt(u)
-                let x: Double = _d81.0
-                let y: Double = _d81.1
+                let _d80 = routeAt(u)
+                let x: Double = _d80.0
+                let y: Double = _d80.1
                 old.append(x); old.append(y)
                 if u <= p {
                     nw.append(x); nw.append(y)
@@ -2586,9 +2569,9 @@ nonisolated extension RW {
             return (x + dx * JS.cos(r) - dy * JS.sin(r) * 0.3, y + dx * JS.sin(r) * 0.3 + dy * JS.cos(r))
         }
         let hull: [Double] = (Array(pt(-(5.0), -(0.6))) + Array(pt(5.0, -(0.6))) + Array(pt(3.6, 0.8)) + Array(pt(-(3.6), 0.8)))
-        let _d82 = pt(-(5.0), -(0.4))
-        let rx: Double = _d82.0
-        let ry: Double = _d82.1
+        let _d81 = pt(-(5.0), -(0.4))
+        let rx: Double = _d81.0
+        let ry: Double = _d81.1
         return ([pg(hull, "ink"), ln(([rx, ry, rx - 4.0, ry + 1.6, rx - 7.0, ry + 1.0, rx - 10.0, ry + 2.0] as [Double]), "mid", 0.8, 0.3), rg(x, y + 1.4, 8.0, "mist", 0.4, 0.3, 1.0)] as [RShape])
     }, type: "blur"), Scn(bd: { (_ _x0: RPC) -> RScene in
         return RScene.make([]) { _o in _o.mist = 1.4; _o.peak = 0.25 }
@@ -2641,9 +2624,9 @@ nonisolated extension RW {
             return (x + dx * JS.cos(r) - dy * JS.sin(r), y + dx * JS.sin(r) + dy * JS.cos(r))
         }
         let blink: Double = pulse(c.t, 2.4, 0.35)
-        let _d83 = pt(0.0, -(8.5))
-        let lx: Double = _d83.0
-        let ly: Double = _d83.1
+        let _d82 = pt(0.0, -(8.5))
+        let lx: Double = _d82.0
+        let ly: Double = _d82.1
         var o: [RShape] = ([pg((Array(pt(-(3.0), 0.0)) + Array(pt(-(1.4), -(7.0))) + Array(pt(1.4, -(7.0))) + Array(pt(3.0, 0.0))), "ink"), ln((Array(pt(-(1.8), -(3.4))) + Array(pt(1.8, -(3.4)))), "paper", 0.8, 0.5), gl(lx, ly, 3.0 + blink * 8.0, "light", 0.3 + blink * 0.6), dk(lx, ly, 0.8, (blink > 0.5 ? "coral" : "light"), 0.9), rg(x, y + 0.6, 6.0, "mist", 0.5, 0.3, 1.0)] as [RShape])
         do {
             var k: Double = 0.0
@@ -2665,15 +2648,15 @@ nonisolated extension RW {
                 o.append(ln(([(D[Int(i - 1.0)])[0], (D[Int(i - 1.0)])[1], (D[Int(i)])[0], (D[Int(i)])[1]] as [Double]), "light", 0.35, 0.3))
             }
         }
-        fe84: for _e85 in D {
-            let x: Double = _e85[0]
-            let y: Double = _e85[1]
+        fe83: for _e84 in D {
+            let x: Double = _e84[0]
+            let y: Double = _e84[1]
             o.append(dk(x, y, 0.7, "light", 0.9))
         }
         let p: Double = ez(since(c.T, 0.8) / 1.4)
-        let _d86 = (74.0, 14.0)
-        let px: Double = _d86.0
-        let py: Double = _d86.1
+        let _d85 = (74.0, 14.0)
+        let px: Double = _d85.0
+        let py: Double = _d85.1
         o.append(ln(([66.0, 40.0, lerp(66.0, px, p), lerp(40.0, py, p)] as [Double]), "light", 0.6, 0.3, 1.0)); o.append(contentsOf: star4(px, py, 1.0 + p * 1.6, (p > 0.95 ? "coral" : "light"), 0.4 + p * 0.6))
         return o
     }, hap: ([HapticCue(t: 2.2, kind: .medium)] as [HapticCue]), type: "blur")] as [Scn]), "halfway": ([Scn(bd: { (_ _x0: RPC) -> RScene in
@@ -2748,9 +2731,9 @@ nonisolated extension RW {
         return RCam.make([]) { _o in _o.s = 1.08 - 0.04 * ez(c.T / 2.0); _o.px = 62.0; _o.py = A.ledge - 6.0 }
     }, type: "track"), Scn(draw: { (c: RPC) -> [RShape] in
         var o: [RShape] = ([] as [RShape])
-        let _d87 = routeAt(0.62)
-        let x: Double = _d87.0
-        let y: Double = _d87.1
+        let _d86 = routeAt(0.62)
+        let x: Double = _d86.0
+        let y: Double = _d86.1
         let px: Double = x + 6.0
         o.append(ln(([px, y, px, y - 14.0] as [Double]), "ink", 1.0, 0.45))
         do {
@@ -2908,15 +2891,15 @@ nonisolated extension RW {
             while k < 4.0 {
                 defer { k += 1 }
                 let u: Double = (JSMath.rem((c.t * 0.12 + k / 4.0), 1.0))
-                let _d88 = routeAt(u)
-                let x: Double = _d88.0
-                let y: Double = _d88.1
+                let _d87 = routeAt(u)
+                let x: Double = _d87.0
+                let y: Double = _d87.1
                 o.append(gl(x, y, 3.0, "light", 0.6)); o.append(dk(x, y, 0.5, (k == 0.0 ? "coral" : "light")))
             }
         }
-        let _d89 = A.summit
-        let sx: Double = _d89.0
-        let sy: Double = _d89.1
+        let _d88 = A.summit
+        let sx: Double = _d88.0
+        let sy: Double = _d88.1
         o.append(gl(sx, sy, 9.0, "light", 0.5 + 0.2 * JS.sin(c.t * 2.0)))
         return o
     }, type: "stamp"), Scn(draw: { (c: RPC) -> [RShape] in
