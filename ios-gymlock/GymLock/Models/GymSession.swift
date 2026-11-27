@@ -432,3 +432,12 @@ struct GymSession: Codable, Hashable, Identifiable {
     }
 }
 
+
+extension GymSession {
+    /// The home workout has reached its 20-minute minimum (FLOW, Flow 4). Past this the apps
+    /// stay unlocked while the count-up timer keeps running.
+    func homeWorkoutMinimumReached(at now: Date) -> Bool {
+        guard state == .quickWorkoutActive, let started = quickWorkoutStartedAt else { return false }
+        return now.timeIntervalSince(started) >= Double(HomeWorkoutRules.defaultMinutes * 60)
+    }
+}

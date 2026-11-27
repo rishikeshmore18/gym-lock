@@ -618,7 +618,7 @@ Paths are under `ios-gymlock/GymLock/`, as of commit `40b723c`. This map is for 
 | An alarm tap reaching the app | `Services/AlarmHandoff.swift`, `Services/AlarmNotificationDelegate.swift`, `Models/SessionResume.swift` |
 | The session, from alarm to result | `Services/GymSessionCoordinator.swift`, `Models/GymSession.swift` |
 | Morning vs evening wording, the snooze rule | `Models/SessionVoice.swift` |
-| Flow screens | `Views/Morning/MorningFlowView.swift`, `Views/Morning/AlarmFiredView.swift`, `Views/Morning/ArrivalViews.swift`, `Views/Morning/CantTodayView.swift`, `Views/Morning/QuickWorkoutView.swift` |
+| Flow screens | `Views/Morning/MorningFlowView.swift`, `Views/Morning/AlarmFiredView.swift`, `Views/Morning/ArrivalViews.swift`, `Views/Morning/CantTodayView.swift`, `Views/Morning/HomeWorkout/HomeWorkoutView.swift` |
 | Alarm sound inside the app | `Services/AlarmRinger.swift` |
 | Locking and unlocking apps | `Services/AppShielding.swift` |
 | Gym arrival (GPS) | `Services/GymArrivalMonitor.swift` |
