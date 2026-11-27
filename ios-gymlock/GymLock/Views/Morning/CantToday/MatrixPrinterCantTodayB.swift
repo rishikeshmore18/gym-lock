@@ -437,9 +437,13 @@ private struct MPBDrumCell: View {
             let th = d * 0.66
             if abs(th) > 0.95 { return }
             let s = cos(th)
-            let curve = CGFloat(sin(th) / sin(0.66) * 0.98) * pitch - CGFloat(d) * pitch
+            // The row on the centre line is full size. The rows above and below are a good deal
+            // smaller (about two thirds wide, half as tall) and sit a little further out, so there
+            // is clear space between them and it reads as a turning drum, not a stack.
+            let push = CGFloat(d < 0 ? -1 : 1) * CGFloat(min(1, abs(d))) * 0.16 * pitch
+            let curve = CGFloat(sin(th) / sin(0.66) * 0.98) * pitch - CGFloat(d) * pitch + push
             let cy = size.height / 2 + curve
-            let px = p * CGFloat(0.55 + 0.45 * s)
+            let px = p * CGFloat(0.45 + 0.55 * pow(s, 4))
             let py = px * CGFloat(s)
             let bold = abs(d) < 0.5
             var path = Path()
