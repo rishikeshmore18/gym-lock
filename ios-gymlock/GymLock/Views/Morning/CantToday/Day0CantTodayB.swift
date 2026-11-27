@@ -1467,8 +1467,11 @@ struct Day0CantTodayB: View {
         if a != .close, !reduce {
             withAnimation(D0B.curve(0.56)) { polFlat = true }
         }
+        // The home workout answer stays up long enough to be seen (the polaroid settles, the
+        // answer lands); the other answers move on after the usual beat.
+        let wait: UInt64 = a == .home ? (reduce ? 700_000_000 : 1_350_000_000) : 450_000_000
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 450_000_000)
+            try? await Task.sleep(nanoseconds: wait)
             action()
         }
     }

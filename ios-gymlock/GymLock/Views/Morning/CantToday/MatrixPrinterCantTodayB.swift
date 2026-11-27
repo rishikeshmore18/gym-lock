@@ -314,7 +314,9 @@ struct MatrixPrinterCantTodayB: View {
         let actions = input.actions
         switch kind {
         case .home:
-            finish(afterMilliseconds: 450) { actions.homeWorkout() }
+            // The home workout slip prints in full and sits for a moment before the next screen.
+            let wait = Int(((engine.printRemaining + 0.7) * 1000).rounded())
+            finish(afterMilliseconds: min(2600, max(1000, wait)), reduceMilliseconds: 700) { actions.homeWorkout() }
         case .skip:
             finish(afterMilliseconds: 450) { actions.skip() }
         case .alarm:
@@ -353,10 +355,10 @@ struct MatrixPrinterCantTodayB: View {
         finish(afterMilliseconds: 450) { actions.close() }
     }
 
-    private func finish(afterMilliseconds ms: Int, _ action: @escaping () -> Void) {
+    private func finish(afterMilliseconds ms: Int, reduceMilliseconds: Int = 150, _ action: @escaping () -> Void) {
         let reduce = input.reduceMotion
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(reduce ? 150 : ms))
+            try? await Task.sleep(for: .milliseconds(reduce ? reduceMilliseconds : ms))
             action()
         }
     }
@@ -2237,6 +2239,12 @@ private nonisolated struct MPBTearState {
 @MainActor
 private final class MPBEngine {
     enum Mode { case menu, done, closing }
+
+    /// Seconds until the paper has finished printing what it has been given, as of the last frame.
+    var printRemaining: Double {
+        guard let end = job.rows.last?.e else { return 0 }
+        return max(0, end - (now - job.t0))
+    }
 
     // set up once
     private var prepared = false
