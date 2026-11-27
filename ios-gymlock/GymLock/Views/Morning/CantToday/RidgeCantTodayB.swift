@@ -2347,7 +2347,9 @@ struct RidgeCantTodayB: View {
             bigSub = "\(minutes) min"
             sim.setFade("big", 1, 0.45)
         }
-        later(0.45) {
+        // "home workout · N min" fades in (0.2 s, then 0.45 s) and sits for a moment before the
+        // next screen, so the answer can be read.
+        later(1.35) {
             input.actions.homeWorkout()
         }
     }
