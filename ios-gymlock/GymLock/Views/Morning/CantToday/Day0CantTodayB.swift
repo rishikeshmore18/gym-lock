@@ -469,6 +469,7 @@ struct Day0CantTodayB: View {
 
             progressBar(done: done)
                 .opacity(closing ? 0 : 1)
+            backButton
             closeButton
             endText
         }
@@ -548,6 +549,37 @@ struct Day0CantTodayB: View {
         .opacity(closing ? 0 : 1)
         .animation(.linear(duration: 0.3), value: closing)
         .allowsHitTesting(answer == nil)
+    }
+
+    /// Back to the day step from the time step. Same circle as the close button, mirrored to the
+    /// top left; it is only there while the time reels are up.
+    private var backButton: some View {
+        let layout = input.layout
+        let shown = beat == .time && answer == nil
+        return Button {
+            goDay()
+        } label: {
+            ZStack {
+                Circle().fill(Color.white.opacity(0.16))
+                Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.white)
+            }
+            .frame(width: 36, height: 36)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(D0BPressStyle(scale: 0.95))
+        .accessibilityLabel("back, pick another day")
+        .padding(.top, layout.safeArea.top + 6)
+        .padding(.leading, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .opacity(shown && !closing ? 1 : 0)
+        .animation(.linear(duration: 0.2), value: shown)
+        .animation(.linear(duration: 0.3), value: closing)
+        .allowsHitTesting(shown)
+        .accessibilityHidden(!shown)
     }
 
     private var endText: some View {
