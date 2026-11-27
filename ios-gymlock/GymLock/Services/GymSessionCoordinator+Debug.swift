@@ -90,6 +90,7 @@ extension GymSessionCoordinator {
         case goLaterGymDay
         case plainWakeAlarmRings
         case alarmRingsNow
+        case day0PauseNow
         case ignoreAlarmUntilDeadline
         case runningLate30
         case runningLateNearBedtime
@@ -171,7 +172,7 @@ extension GymSessionCoordinator {
             case .legacyEveningUser, .changeBedtimeTonight,
                  .bedtimeAfterMidnightGymMonday, .oldPlanNightLockOff:
                 "sleep and night lock"
-            case .wakeAndGoGymDay, .goLaterGymDay, .plainWakeAlarmRings, .alarmRingsNow,
+            case .wakeAndGoGymDay, .goLaterGymDay, .plainWakeAlarmRings, .alarmRingsNow, .day0PauseNow,
                  .ignoreAlarmUntilDeadline, .runningLate30, .runningLateNearBedtime,
                  .runningLateTwice, .phoneWasOffOnGymDay:
                 "alarm rules"
@@ -251,6 +252,7 @@ extension GymSessionCoordinator {
             case .goLaterGymDay: "go later gym day (time to go 17:30)"
             case .plainWakeAlarmRings: "plain wake alarm rings (no lock)"
             case .alarmRingsNow: "alarm rings now (wake page test)"
+            case .day0PauseNow: "day 0 pause now (your day 0 video)"
             case .ignoreAlarmUntilDeadline: "ignore alarm until deadline"
             case .runningLate30: "running late +30"
             case .runningLateNearBedtime: "running late near bedtime"
@@ -825,6 +827,13 @@ extension GymSessionCoordinator {
             Self.debugAlarmRulesResult =
                 "\(debugStore?.plan.rhythm.flowMode.label ?? "none") · \(summary) · snooze \(snooze ? "yes" : "NO") · running late \(runningLateOptions.isEmpty ? "no" : "SHOWN")"
             Task { await syncAlarms() }
+
+        case .day0PauseNow:
+            // The same morning as "alarm rings now", with the pause and can't today drawn in the
+            // Day 0 look (the user's own day 0 video or photo behind) whatever the streak says.
+            // Normally Day 0 plays only at the worst moment to skip (PauseFacts.isCritical).
+            simulate(.alarmRingsNow)
+            if let id = session?.id { DebugDay0.force(for: id) }
 
         case .alarmRingsNow:
             // For testing the wake page at any hour: today's alarm is this minute and the gym is
@@ -1723,4 +1732,19 @@ extension GymSessionCoordinator {
         debugMarkResolved(resolved)
     }
 }
+
+/// Debug only: draws the pause and can't today in the Day 0 look for one test session.
+@MainActor
+enum DebugDay0 {
+    private static let key = "gymlock.debug.forceDay0Session"
+
+    static func force(for sessionID: UUID) {
+        UserDefaults.standard.set(sessionID.uuidString, forKey: key)
+    }
+
+    static func isForced(for sessionID: UUID) -> Bool {
+        UserDefaults.standard.string(forKey: key) == sessionID.uuidString
+    }
+}
+
 #endif

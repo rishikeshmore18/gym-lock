@@ -87,7 +87,13 @@ struct CantTodayView: View {
             context: .windowOpen
         )
         let style = HeroCardStyle(rawValue: cardStyleRaw) ?? .default
-        let look: PauseLook = facts.isCritical ? .day0 : (style == .matrix ? .matrixPrinter : .ridge)
+        #if DEBUG
+        // The simulator's "day 0 pause now" test shows this look whatever the streak says.
+        let forcedDay0 = DebugDay0.isForced(for: session.id)
+        #else
+        let forcedDay0 = false
+        #endif
+        let look: PauseLook = (facts.isCritical || forcedDay0) ? .day0 : (style == .matrix ? .matrixPrinter : .ridge)
         let data = CantTodayDataProvider.make(
             plan: plan,
             facts: facts,

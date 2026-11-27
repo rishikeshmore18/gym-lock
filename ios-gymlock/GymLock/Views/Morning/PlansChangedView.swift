@@ -228,7 +228,13 @@ struct PlansChangedView: View {
         guard model == nil else { return }
         let facts = PauseFactsProvider.facts(store: store, coordinator: coordinator, session: session, context: context)
         let style = HeroCardStyle(rawValue: cardStyleRaw) ?? .default
-        let look: PauseLook = facts.isCritical ? .day0 : (style == .matrix ? .matrixPrinter : .ridge)
+        #if DEBUG
+        // The simulator's "day 0 pause now" test shows this look whatever the streak says.
+        let forcedDay0 = DebugDay0.isForced(for: session.id)
+        #else
+        let forcedDay0 = false
+        #endif
+        let look: PauseLook = (facts.isCritical || forcedDay0) ? .day0 : (style == .matrix ? .matrixPrinter : .ridge)
         model = PauseModel(facts: facts, script: PauseScript(facts: facts), look: look)
         startedAt = Date()
         haptics.prepare()
