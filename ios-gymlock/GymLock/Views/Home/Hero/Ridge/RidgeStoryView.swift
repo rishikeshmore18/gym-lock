@@ -13,6 +13,8 @@
 //      about 330k pixels) so a portrait repaint stays inside a frame on CPU CoreGraphics; the world is
 //      soft watercolour, so the upscale reads as paper, not blur.
 //    - Day 1 (the rock): chips on every hit and on the break (wash.ts drawChips).
+//    - Day 4 (Friday, the summit): one painted volcano. Each climb tap rumbles and puffs it, the seal bursts it
+//      (`eruptAt`, with the seal's heavy + success haptics), then it keeps erupting (wash3.ts `volcano`).
 //  Motion: every screen opens on a pull-back; each tap on the finish punches in and rings out; the
 //  seal flashes. Reduce Motion drops the camera, the shake, the ring and the flash.
 //
@@ -195,6 +197,8 @@ final class RidgeStoryRuntime {
                 return S { o in
                     o.kind = "path"; o.trail = 0.81 + 0.19 * h; o.sun = 0.45; o.beacon = s != nil ? ease(since / 1) : 0
                     o.flash = s.map { $0 + 0.1 }
+                    // the volcano: each tap warms it and puffs; the last tap (the seal, with its heavy + success haptics) bursts it
+                    o.rumble = h; o.tapAt = s == nil ? m.tapTimes.last : nil; o.eruptAt = s
                 }
             case 5:
                 return S { o in
@@ -229,7 +233,7 @@ final class RidgeStoryRuntime {
         bm.cg.saveGState()
         defer { bm.cg.restoreGState() }
         let S = Self.scene(m, t: t)
-        if reduceMotion { S.flash = nil }
+        if reduceMotion { S.flash = nil; S.still = true }
         let w = Double(cw), h = Double(ch)
         painter.render3(ctx, w, h, S, theme, t)
         if m.screen == .climax && m.day == 1 {
@@ -375,15 +379,24 @@ struct RidgeStoryView: View {
         return s
     }
 
-    /// story12.tsx shake: the rock jolts on each hit; the rock and the summit settle hard on the seal.
+    /// story12.tsx shake: the rock jolts on each hit and settles hard on the seal; the summit shakes on each tap and for 0.9 s on the burst.
     private static func shake(_ m: MatrixStoryModel, t: Double, dz: Bool, s0: Double) -> CGSize {
         guard dz, m.screen == .climax else { return .zero }
         if m.day == 1, m.sealT == nil, let tapAt = m.tapTimes.last, t >= tapAt {
             let x = exp(-(t - tapAt) * 9) * sin((t - tapAt) * 70) * (6 + Double(m.tapTimes.count) * 2)
             return CGSize(width: x * s0 * 2, height: 0)
         }
-        if let sealT = m.sealT, m.day == 1 || m.day == 4, t >= sealT {
-            let y = exp(-(t - sealT) * 6) * sin((t - sealT) * 50) * (m.day == 1 ? 14 : 6)
+        // the summit: a small shake on each climb tap, about 0.9 s of shaking when the volcano bursts
+        if m.day == 4, m.sealT == nil, let tapAt = m.tapTimes.last, t >= tapAt, t - tapAt < 0.3 {
+            let d = t - tapAt, f = 2.2 * (1 - d / 0.3)
+            return CGSize(width: sin(d * 61) * f * s0 * 2, height: cos(d * 47) * f * s0 * 2)
+        }
+        if let sealT = m.sealT, m.day == 4, t >= sealT, t - sealT < 0.9 {
+            let d = t - sealT, f = 5.5 * (1 - d / 0.9)
+            return CGSize(width: sin(d * 61) * f * s0 * 2, height: cos(d * 47) * f * s0 * 2)
+        }
+        if let sealT = m.sealT, m.day == 1, t >= sealT {
+            let y = exp(-(t - sealT) * 6) * sin((t - sealT) * 50) * 14
             return CGSize(width: 0, height: y * s0 * 2)
         }
         return .zero

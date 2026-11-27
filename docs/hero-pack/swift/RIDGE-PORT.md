@@ -9,7 +9,7 @@ Sources (prototype, `web/`):
 |---|---|
 | `hero10/wash.ts` | primitives (palette, `rng`, `gauss`, `fbm1`, `deform`, `wash`, `grain`, `granulate`), layout, and `Painter` (the `ridge` world) with its layer caches |
 | `hero10/wash2.ts` | `Painter2`: the other nine worlds (`night`, `beach`, `sunrise`, `path`, `fog`, `lake`, `sunset`, `cairn`, `hourglass`), each with its own cached layers, plus birds, reflections, glitter |
-| `hero12/wash3.ts` | `Painter3 extends Painter2`: the per-frame overlay (sun halo, ripples, ice, drip, tide, footprints, beacon, fireflies, constellation, shooting star, skipping stones, flash, bird burst, lanterns, rain, snow) |
+| `hero12/wash3.ts` | `Painter3 extends Painter2`: the per-frame overlay (sun halo, ripples, ice, drip, tide, footprints, the summit volcano (`volcano`: dormant wisp and glow, climb rumble, burst, lava), fireflies, constellation, shooting star, skipping stones, flash, bird burst, lanterns, rain, snow) |
 | `hero13/stage13.ts` | the shared stage: `Shape` list in stage units, `Cam`, `camMatrix`, `paintShapes` (Ridge) and `toTargets` (Matrix) |
 | `hero13/props13.ts` | 133 scenes (`W[state][day]`): backdrop params (`bd`), shapes (`draw`), camera (`cam`), haptics, kinetic type; `build()` with framing (`frameOf`) and `embolden` |
 | `hero13/card13.tsx` | the card: `clampCam`, render order, paper fade, copy column, note |
@@ -75,7 +75,7 @@ dynamic parts every frame:
 | night | `n-sky` (stars), `n-mtn`, `n-shore` | moon phase (charge), water fill, **`reflect(ctx, ctx.canvas)`** (reads back the canvas), glitter |
 | beach | `b-back`, `b-sand`, `b-palms` | hammock sway, waves |
 | sunrise | `s-sky`, `s-peaks`, `s-sea` | sun disc, 14 radial-gradient rays (`screen` in dark), cloud sea drift |
-| path | `p-base` | trail progress |
+| path | `p-base` (far range, the summit volcano cone with its gullies, forested ridges, hills) | trail progress |
 | fog | `f-base`, `f-mist` | mist drift |
 | lake | `l-above`, `l-reeds` | `reflect(ctx, above)` (reads the cached `above` layer), boat |
 | sunset | `ss-sky`, `ss-sea`, `ss-rocks` | sun, glitter |

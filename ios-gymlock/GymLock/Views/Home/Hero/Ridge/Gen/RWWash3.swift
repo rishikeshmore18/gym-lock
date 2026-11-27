@@ -34,6 +34,479 @@ nonisolated extension RW {
             return (w * (0.5 + x * 0.46), h * (0.06 + y * 0.4))
         }
     }
+    static let VC_CORAL: (Double, Double, Double) = (232.0, 93.0, 78.0)
+    static let VC_ORANGE: (Double, Double, Double) = (255.0, 150.0, 95.0)
+    static let VC_HOT: (Double, Double, Double) = (255.0, 214.0, 170.0)
+    static func vcA(_ c: (Double, Double, Double), _ a: Double) -> String {
+        return css(c, JS.round(JS.max(0.0, JS.min(1.0, a)) * 1000.0) / 1000.0)
+    }
+    static func vcPuff(_ ctx: C2D, _ x: Double, _ y: Double, _ r: Double, _ seed: Double, _ t: Double, _ al: Double, _ lit: Double, _ tone: Double) {
+        if al < 0.008 {
+            return
+        }
+        let c: Double = JS.round(48.0 + 112.0 * tone)
+        do {
+            var k: Double = 0.0
+            while k < 2.0 {
+                defer { k += 1 }
+                let ox: Double = (vcVn(seed + k * 3.1 + t * 0.1) - 0.5) * r * 0.9
+                let oy: Double = (vcVn(seed + k * 5.3 + 9.0 + t * 0.1) - 0.5) * r * 0.7
+                let rr: Double = r * (0.6 + 0.4 * vcRnd(seed + k))
+                let g: C2DGradient = ctx.createRadialGradient(x + ox, y + oy, 0.0, x + ox, y + oy, rr)
+                g.addColorStop(0.0, css((c, c - 2.0, c + 4.0), JS.min(1.0, al * 0.62)))
+                g.addColorStop(0.5, css((c + 8.0, c + 6.0, c + 12.0), JS.min(1.0, al * 0.32)))
+                g.addColorStop(1.0, css((c + 14.0, c + 12.0, c + 18.0), 0.0))
+                ctx.fillStyle = C2DStyle(g)
+                ctx.beginPath()
+                ctx.arc(x + ox, y + oy, rr, 0.0, Double.pi * 2.0)
+                ctx.fill()
+            }
+        }
+        if lit > 0.02 {
+            let g: C2DGradient = ctx.createRadialGradient(x, y + r * 0.45, 0.0, x, y + r * 0.45, r * 0.9)
+            g.addColorStop(0.0, vcA(VC_ORANGE, 0.55 * lit * JS.min(1.0, al * 1.4)))
+            g.addColorStop(0.5, vcA(VC_CORAL, 0.26 * lit * JS.min(1.0, al * 1.4)))
+            g.addColorStop(1.0, vcA(VC_CORAL, 0.0))
+            ctx.fillStyle = C2DStyle(g)
+            ctx.beginPath()
+            ctx.arc(x, y + r * 0.45, r * 0.9, 0.0, Double.pi * 2.0)
+            ctx.fill()
+        }
+    }
+    static func vcClipAboveRim(_ ctx: C2D, _ C: Cone, _ w: Double) {
+        let n: Double = Double(C.rim.count)
+        ctx.beginPath()
+        ctx.moveTo(-(10.0), -(10.0))
+        ctx.lineTo(w + 10.0, -(10.0))
+        ctx.lineTo(w + 10.0, (C.rim[Int(n - 1.0)]).1 + 2.0 * C.sc)
+        do {
+            var i: Double = n - 1.0
+            while i >= 0.0 {
+                defer { i -= 1 }
+                ctx.lineTo((C.rim[Int(i)]).0, (C.rim[Int(i)]).1 + 1.5 * C.sc)
+            }
+        }
+        ctx.lineTo(-(10.0), (C.rim[0]).1 + 2.0 * C.sc)
+        ctx.closePath()
+        ctx.clip()
+    }
+    static func vcPlume(_ ctx: C2D, _ C: Cone, _ t: Double, _ pw: Double, _ front: Double, _ hmax: Double, _ lean: Double, _ capY: Double, _ rs: Double, _ rate: Double, _ n: Double) {
+        let sc: Double = C.sc
+        let rTop: Double = sc * rs * (8.0 + 36.0 * pw) * 1.3
+        let Hm: Double = JS.min(hmax, C.vy - capY - rTop * 0.9)
+        var live: [[Double]] = ([] as [[Double]])
+        do {
+            var i: Double = 0.0
+            while i < n {
+                defer { i += 1 }
+                let ph: Double = JSMath.rem((t * rate + i / n), 1.0)
+                if ph <= front {
+                    live.append(([i, ph] as [Double]))
+                }
+            }
+        }
+        JS.sort(&live, { (a: [Double], b: [Double]) -> Double in
+            return b[1] - a[1]
+        })
+        for _e16 in live {
+            let fi: Double = _e16[0]
+            let ph: Double = _e16[1]
+            let i: Double = fi
+            let vis: Double = vcCl((front - ph) / 0.12)
+            let e: Double = 1.0 - JS.pow(1.0 - ph, 1.8)
+            let r: Double = sc * rs * (8.0 + 36.0 * JS.pow(ph, 0.62) * pw) * (0.72 + 0.55 * vcRnd(i * 3.7 + 1.0))
+            let xx: Double = C.vx + lean * JS.pow(ph, 1.5) + (vcRnd(i * 5.1 + 2.0) - 0.5) * r * (0.9 + 1.0 * ph) + JS.sin(ph * 5.0 + i * 1.7) * r * 0.1
+            let yy: Double = JS.max(C.vy - Hm * e + (vcRnd(i * 2.3 + 4.0) - 0.5) * r * 0.5, capY + r * 0.8)
+            let al: Double = pw * vis * JS.min(1.0, ph / 0.05) * (1.0 - vcCl((ph - 0.6) / 0.4)) * (1.0 - 0.5 * ph) * 1.7
+            vcPuff(ctx, xx, yy, r, i * 7.7, t, al, vcCl(1.0 - ph * 3.0), ph)
+        }
+    }
+    static func vcColumn(_ ctx: C2D, _ C: Cone, _ t: Double, _ burst: Double, _ hmax: Double, _ lean: Double, _ capY: Double, _ rs: Double) {
+        if (burst < 0.0 || burst > 4.0) {
+            return
+        }
+        let sc: Double = C.sc
+        let rTop: Double = sc * rs * 44.0
+        let Hc: Double = JS.min(hmax, C.vy - capY - rTop * 0.9)
+        do {
+            var i: Double = 11.0
+            while i >= 0.0 {
+                defer { i -= 1 }
+                let u: Double = vcCl((burst - 0.05 * i) / 1.5)
+                if u <= 0.0 {
+                    continue
+                }
+                let e: Double = 1.0 - JS.pow(1.0 - u, 2.2)
+                let r: Double = sc * rs * (9.0 + 30.0 * u)
+                let xx: Double = C.vx + (vcRnd(i + 5.0) - 0.5) * r * 0.5 + lean * 0.4 * u * u
+                let yy: Double = JS.max(C.vy - Hc * e * (0.6 + 0.4 * vcRnd(i)), capY + r * 0.85)
+                vcPuff(ctx, xx, yy, r, i * 3.3 + 200.0, t, 1.3 * (1.0 - vcCl((burst - 1.0) / 2.8)), vcCl(1.1 - u * 1.6), 0.1 * u)
+            }
+        }
+    }
+    static func vcWisp(_ ctx: C2D, _ C: Cone, _ t: Double, _ a: Double) {
+        let sc: Double = C.sc
+        var P: [(Double, Double)] = ([] as [(Double, Double)])
+        var Q: [(Double, Double)] = ([] as [(Double, Double)])
+        do {
+            var i: Double = 0.0
+            while i < 9.0 {
+                defer { i += 1 }
+                P.append((C.vx + i * 2.6 * sc + JS.sin(t * 1.4 + i * 0.7) * 2.4 * sc * (i / 4.0), C.vy - 4.0 * sc - i * 9.0 * sc))
+                Q.append((C.vx + i * 2.6 * sc + JS.sin(t * 1.4 + i * 0.7) * 2.4 * sc * (i / 4.0) + JS.sin(t * 1.1 + i) * 1.2 * sc, C.vy - 4.0 * sc - i * 9.0 * sc))
+            }
+        }
+        vcBrush(ctx, P, 4.5 * sc, 1.2 * sc, "rgba(80,78,84,\(JS.toFixed((0.16 * a), 3.0)))", 5.0, 0.3)
+        vcBrush(ctx, Q, 2.4 * sc, 0.6 * sc, "rgba(60,58,64,\(JS.toFixed((0.2 * a), 3.0)))", 9.0, 0.3)
+    }
+    static func vcVent(_ ctx: C2D, _ C: Cone, _ t: Double, _ gl: Double, _ flare: Double, _ still: Bool) {
+        let sc: Double = C.sc
+        let pul: Double = (still ? 0.92 + 0.08 * JS.sin(t * 1.6) : 0.9 + 0.1 * JS.sin(t * 2.3) + 0.05 * JS.sin(t * 7.1))
+        let R: Double = sc * (11.0 + 24.0 * gl + 70.0 * flare)
+        let g: C2DGradient = ctx.createRadialGradient(C.vx, C.vy - sc, 0.0, C.vx, C.vy - sc, R)
+        g.addColorStop(0.0, vcA(VC_HOT, 0.85 * gl))
+        g.addColorStop(0.3, vcA(VC_ORANGE, 0.55 * gl * pul))
+        g.addColorStop(0.7, vcA(VC_CORAL, 0.2 * gl * pul))
+        g.addColorStop(1.0, vcA(VC_CORAL, 0.0))
+        ctx.fillStyle = C2DStyle(g)
+        ctx.beginPath()
+        ctx.arc(C.vx, C.vy - sc, R, 0.0, Double.pi * 2.0)
+        ctx.fill()
+    }
+    static func vcHalo(_ ctx: C2D, _ C: Cone, _ gl: Double, _ flare: Double) {
+        let sc: Double = C.sc
+        let R: Double = sc * (75.0 + 60.0 * flare)
+        let g: C2DGradient = ctx.createRadialGradient(C.vx, C.vy - 8.0 * sc, 0.0, C.vx, C.vy - 8.0 * sc, R)
+        g.addColorStop(0.0, vcA(VC_CORAL, 0.2 * gl + 0.25 * flare))
+        g.addColorStop(1.0, vcA(VC_CORAL, 0.0))
+        ctx.fillStyle = C2DStyle(g)
+        ctx.beginPath()
+        ctx.arc(C.vx, C.vy - 8.0 * sc, R, 0.0, Double.pi * 2.0)
+        ctx.fill()
+    }
+    static func vcLava(_ ctx: C2D, _ C: Cone, _ G: [Gully], _ t: Double, _ flow: Double, _ pw: Double, _ still: Bool) {
+        let sc: Double = C.sc
+        let vD: Double = 16.0 * sc
+        ctx.save()
+        vcConePath(ctx, C, 60.0)
+        ctx.clip()
+        if flow > 0.01 {
+            var P: [(Double, Double)] = ([] as [(Double, Double)])
+            var Wd: [Double] = ([] as [Double])
+            do {
+                var f: Double = -(0.34)
+                while f <= 0.301 {
+                    defer { f += 0.05 }
+                    let r: (Double, Double) = vcRimAt(C, f)
+                    P.append((r.0, r.1 + 2.5 * sc))
+                    Wd.append((6.0 + 4.0 * vcVn(f * 9.0 + 4.0)) * sc * pw)
+                }
+            }
+            let k: Double = JS.min(1.0, flow * 3.0)
+            vcRib(ctx, P, Wd.map { (q: Double) -> Double in
+                return q * 3.0
+            })
+            ctx.fillStyle = C2DStyle(vcA(VC_CORAL, 0.16 * pw * k))
+            ctx.fill()
+            vcRib(ctx, P, Wd)
+            ctx.fillStyle = C2DStyle(vcA(VC_ORANGE, 0.95 * k))
+            ctx.fill()
+            vcRib(ctx, P, Wd.map { (q: Double) -> Double in
+                return q * 0.45
+            })
+            ctx.fillStyle = C2DStyle(vcA(VC_HOT, 0.95 * k))
+            ctx.fill()
+        }
+        do {
+            var gi: Double = 0.0
+            while gi < Double(G.count) {
+                defer { gi += 1 }
+                let g: Gully = G[Int(gi)]
+                if !g.lava {
+                    continue
+                }
+                let p: Double = vcCl((flow - g.delay) / (1.0 - g.delay))
+                if p <= 0.01 {
+                    continue
+                }
+                let e: Double = 1.0 - JS.pow(1.0 - p, 2.2)
+                let d0: Double = (g.par >= 0.0 ? g.dStart - 4.0 * sc : vD - 2.0 * sc)
+                let dEnd: Double = d0 + (g.dEnd - d0) * e
+                if dEnd - d0 < 4.0 * sc {
+                    continue
+                }
+                let n: Double = JS.max(3.0, JS.ceil((dEnd - d0) / (5.0 * sc)))
+                var P: [(Double, Double)] = ([] as [(Double, Double)])
+                var Wd: [Double] = ([] as [Double])
+                do {
+                    var i: Double = 0.0
+                    while i <= n {
+                        defer { i += 1 }
+                        let d: Double = d0 + ((dEnd - d0) * i) / n
+                        let u: Double = (d - d0) / (g.dEnd - d0)
+                        P.append(vcGPt(C, G, g, d))
+                        var wd: Double = g.wid * 9.2 * pw * sc * (1.0 - 0.92 * JS.pow(vcCl(u), 0.8)) + 0.5 * sc
+                        wd *= 0.6 + 0.8 * vcVn(g.seed * 3.0 + d / (15.0 * sc))
+                        if u > 0.45 {
+                            wd *= vcClamp((vcVn(g.seed * 7.0 + d / (9.0 * sc)) - (u - 0.45) * 1.3) * 5.0 + 0.12, 0.08, 1.0)
+                        }
+                        if i > n - 3.0 {
+                            wd *= (i == n ? 0.4 : 0.7)
+                        }
+                        Wd.append(wd)
+                    }
+                }
+                let a: (Double, Double) = P[0]
+                let b: (Double, Double) = P[Int(n)]
+                vcRib(ctx, P, Wd.map { (q: Double) -> Double in
+                    return q * 3.4
+                })
+                ctx.fillStyle = C2DStyle(vcA(VC_CORAL, 0.12 * pw))
+                ctx.fill()
+                vcRib(ctx, P, Wd.map { (q: Double) -> Double in
+                    return q * 1.8 + 1.2 * sc
+                })
+                ctx.fillStyle = "rgba(24,24,28,0.34)"
+                ctx.fill()
+                let gr: C2DGradient = ctx.createLinearGradient(a.0, a.1, b.0, b.1 + 0.01)
+                gr.addColorStop(0.0, vcA(VC_ORANGE, 0.98))
+                gr.addColorStop(0.4, vcA(mixc(VC_ORANGE, VC_CORAL, 0.7), 0.96))
+                gr.addColorStop(0.8, vcA(VC_CORAL, 0.92))
+                gr.addColorStop(1.0, vcA((e < 0.98 ? mixc(VC_CORAL, VC_ORANGE, 0.7) : mixc(VC_CORAL, (44.0, 38.0, 42.0), 0.4)), 0.9))
+                vcRib(ctx, P, Wd)
+                ctx.fillStyle = C2DStyle(gr)
+                ctx.fill()
+                let gc: C2DGradient = ctx.createLinearGradient(a.0, a.1, b.0, b.1 + 0.01)
+                gc.addColorStop(0.0, vcA(VC_HOT, 0.95))
+                gc.addColorStop(0.7, vcA(VC_HOT, 0.0))
+                vcRib(ctx, P, Wd.map { (q: Double) -> Double in
+                    return q * 0.4
+                })
+                ctx.fillStyle = C2DStyle(gc)
+                ctx.fill()
+                do {
+                    var j: Double = 0.0
+                    while j < 3.0 {
+                        defer { j += 1 }
+                        let u: Double = JSMath.rem(((still ? 0.2 + j * 0.3 : t * (0.1 + 0.04 * vcRnd(g.seed + j)) + j / 3.0 + vcRnd(g.seed * 2.0 + j))), 1.0)
+                        let fi: Double = u * n
+                        let i0: Double = JS.min(n - 1.0, JS.floor(fi))
+                        let f: Double = fi - i0
+                        let x0: Double = vcLerp((P[Int(i0)]).0, (P[Int(i0 + 1.0)]).0, f)
+                        let y0: Double = vcLerp((P[Int(i0)]).1, (P[Int(i0 + 1.0)]).1, f)
+                        let wc: Double = vcLerp(Wd[Int(i0)], Wd[Int(i0 + 1.0)], f)
+                        let ang: Double = JS.atan2((P[Int(i0 + 1.0)]).1 - (P[Int(i0)]).1, (P[Int(i0 + 1.0)]).0 - (P[Int(i0)]).0)
+                        ctx.save()
+                        ctx.translate(x0, y0)
+                        ctx.rotate(ang)
+                        ctx.fillStyle = C2DStyle(vcA(VC_ORANGE, 0.35 * pw * (1.0 - u * 0.5)))
+                        ctx.beginPath()
+                        ctx.ellipse(0.0, 0.0, wc * 1.9, wc * 0.9, 0.0, 0.0, Double.pi * 2.0)
+                        ctx.fill()
+                        ctx.fillStyle = C2DStyle(vcA(VC_HOT, 0.95 * (1.0 - u * 0.55)))
+                        ctx.beginPath()
+                        ctx.ellipse(wc * 0.2, 0.0, wc * 1.1, wc * 0.5, 0.0, 0.0, Double.pi * 2.0)
+                        ctx.fill()
+                        ctx.restore()
+                    }
+                }
+                if e < 0.97 {
+                    ctx.fillStyle = C2DStyle(vcA(VC_HOT, 0.9))
+                    ctx.beginPath()
+                    ctx.ellipse(b.0, b.1, Wd[Int(n - 1.0)] * 0.9 + 0.6, Wd[Int(n - 1.0)] * 0.9 + 0.6, 0.0, 0.0, Double.pi * 2.0)
+                    ctx.fill()
+                }
+            }
+        }
+        ctx.restore()
+    }
+    static func vcFountain(_ ctx: C2D, _ C: Cone, _ t: Double, _ n: Double, _ seed: Double, _ vmax: Double, _ once: Bool, _ burst: Double) {
+        let sc: Double = C.sc
+        let G: Double = 260.0 * sc
+        ctx.lineCap = "round"
+        do {
+            var i: Double = 0.0
+            while i < n {
+                defer { i += 1 }
+                let r1: Double = vcRnd(seed + i)
+                let r2: Double = vcRnd(seed + i + 500.0)
+                let r3: Double = vcRnd(seed + i + 900.0)
+                var tau: Double = 0.0
+                if once {
+                    tau = burst - r3 * 0.38
+                    if tau < 0.0 {
+                        continue
+                    }
+                } else {
+                    let Lf: Double = 1.1 + 0.6 * r1
+                    tau = ((JSMath.rem((t / Lf + r2), 1.0)) * Lf)
+                }
+                let ang: Double = -Double.pi / 2.0 + (r2 - 0.5) * ((once ? 1.0 : 0.8))
+                let v: Double = vmax * sc * (0.3 + 0.7 * r3 * r3)
+                let vx: Double = JS.cos(ang) * v
+                let vy: Double = JS.sin(ang) * v + G * tau
+                let px: Double = C.vx + (r1 - 0.5) * sc * 10.0 + JS.cos(ang) * v * tau + 6.0 * sc * tau
+                let py: Double = C.vy - 2.0 * sc + JS.sin(ang) * v * tau + 0.5 * G * tau * tau
+                let sf: Double = vcSurf(C, px)
+                if (py > C.vy + 4.0 * sc && (py >= sf - 0.5 || (sf > 100000000.0 && py > C.vy + 60.0 * sc))) {
+                    continue
+                }
+                let near: Double = (sf < 100000000.0 ? vcCl((sf - py) / (8.0 * sc)) : 1.0)
+                let age: Double = vcCl(tau / ((once ? 2.2 : 1.5)))
+                let sp: Double = JS.or(JS.hypot(vx, vy), 1.0)
+                let L2: Double = JS.max(2.6 * sc, JS.min(14.0 * sc, sp * 0.034))
+                ctx.strokeStyle = C2DStyle(vcA(mixc(VC_HOT, VC_CORAL, vcCl(age * 1.5)), 0.95 * (1.0 - age * 0.45) * near))
+                ctx.lineWidth = JS.max(1.0, sc * (2.1 - age * 0.9) * ((once ? 1.25 : 1.0)))
+                ctx.beginPath()
+                ctx.moveTo(px, py)
+                ctx.lineTo(px - (vx / sp) * L2, py - (vy / sp) * L2)
+                ctx.stroke()
+            }
+        }
+    }
+    static func vcSpatter(_ ctx: C2D, _ C: Cone, _ burst: Double) {
+        if burst < 0.0 {
+            return
+        }
+        let sc: Double = C.sc
+        let sp: Double = vcCl(burst / 0.3)
+        let fade: Double = 1.0 - vcCl((burst - 0.7) / 1.3)
+        if fade <= 0.0 {
+            return
+        }
+        do {
+            var i: Double = 0.0
+            while i < 18.0 {
+                defer { i += 1 }
+                let an: Double = -Double.pi * (0.1 + 0.8 * vcRnd(i + 300.0))
+                let len: Double = sc * (40.0 + 78.0 * vcRnd(i + 301.0)) * sp
+                let p0: (Double, Double) = (C.vx + JS.cos(an) * sc * 8.0, C.vy - sc * 2.0 + JS.sin(an) * sc * 5.0)
+                let p1: (Double, Double) = (C.vx + JS.cos(an) * len, C.vy + JS.sin(an) * len * 0.9)
+                let mid: (Double, Double) = ((p0.0 + p1.0) / 2.0 + (vcRnd(i + 302.0) - 0.5) * sc * 14.0, (p0.1 + p1.1) / 2.0)
+                vcBrush(ctx, ([p0, mid, p1] as [(Double, Double)]), sc * 4.0, sc * 0.4, vcA((JSMath.rem(i, 4.0) == 0.0 ? VC_ORANGE : VC_CORAL), 0.6 * fade), i * 13.0, 0.6)
+                ctx.fillStyle = C2DStyle(vcA(VC_CORAL, 0.7 * fade))
+                ctx.beginPath()
+                ctx.arc(p1.0, p1.1, JS.max(1.0, sc * 1.8), 0.0, Double.pi * 2.0)
+                ctx.fill()
+            }
+        }
+    }
+    static func vcEmbers(_ ctx: C2D, _ C: Cone, _ t: Double, _ n: Double, _ drift: Double, _ rise: Double) {
+        let sc: Double = C.sc
+        do {
+            var i: Double = 0.0
+            while i < n {
+                defer { i += 1 }
+                let ph: Double = JSMath.rem((t * (0.2 + vcRnd(i) * 0.2) + vcRnd(i + 4.0)), 1.0)
+                let ex: Double = C.vx + (vcRnd(i + 9.0) - 0.5) * sc * 30.0 + JS.sin(ph * 6.0 + i) * sc * 8.0 * (1.0 + ph) + ph * drift * sc
+                let ey: Double = C.vy - sc * 8.0 - ph * rise * sc
+                ctx.fillStyle = C2DStyle(vcA((JSMath.rem(i, 3.0) == 0.0 ? VC_HOT : VC_ORANGE), 0.9 * (1.0 - ph)))
+                let q: Double = JS.max(1.0, sc * 1.8)
+                ctx.fillRect(ex, ey, q, q)
+            }
+        }
+    }
+    static func vcTapPuffs(_ ctx: C2D, _ C: Cone, _ t: Double, _ tapAt: Double) {
+        let d: Double = t - tapAt
+        if (d < 0.0 || d > 1.5) {
+            return
+        }
+        let sc: Double = C.sc
+        let u: Double = d / 1.5
+        do {
+            var i: Double = 0.0
+            while i < 3.0 {
+                defer { i += 1 }
+                let r: Double = sc * (8.0 + u * 14.0)
+                vcPuff(ctx, C.vx + u * 16.0 * sc + (i - 1.0) * 5.0 * sc, C.vy - 8.0 * sc - u * 52.0 * sc - i * 5.0 * sc, r, i * 5.0 + 600.0, t, 0.9 * (1.0 - u) * (1.0 - u * 0.3), 0.0, 0.0)
+            }
+        }
+    }
+    static func volcano(_ ctx: C2D, _ w: Double, _ h: Double, _ L: Layout, _ pal: Pal, _ S: RScene, _ t: Double) {
+        let C: Cone = vcConeOf(w, h, L)
+        let G: [Gully] = vcGulliesOf(C, L.tall)
+        let sc: Double = C.sc
+        let still: Bool = (S.still ?? false)
+        let tall: Bool = L.tall
+        let tt: Double = (still ? 6.0 : t)
+        let b: Double = (S.beacon ?? 0.0)
+        let burstOn: Bool = (S.eruptAt != nil && t >= S.eruptAt!)
+        let a: Double = (burstOn ? t - ((S.eruptAt ?? 0.0)) : -(1.0))
+        let lv: Double = vcCl((b - 0.1) / 0.4)
+        let erupting: Bool = (burstOn || lv > 0.02)
+        var glow: Double = 0.12 + 0.6 * JS.min(b, 0.2)
+        var flow: Double = 0.0
+        var fountain: Double = 0.0
+        var embers: Double = 0.0
+        var flare: Double = 0.0
+        var front: Double = 1.0
+        var burst: Double = -(1.0)
+        if burstOn {
+            flow = vcCl(a / 2.4)
+            glow = vcCl(0.5 + a / 0.8)
+            fountain = vcCl((a - 0.8) / 1.2)
+            embers = JS.round(26.0 * vcCl(a / 1.2))
+            flare = JS.exp(-a / 0.45)
+            front = vcCl(a / 2.2)
+            burst = a
+        } else if lv > 0.02 {
+            flow = lv
+            glow = 0.2 + 0.8 * lv
+            fountain = vcCl((lv - 0.35) / 0.65)
+            embers = JS.round(26.0 * lv)
+            front = lv
+        } else {
+            glow = 0.16 + 0.52 * ((S.rumble ?? 0.0)) + 0.4 * JS.min(b, 0.1)
+            if ((S.tapAt != nil && t - S.tapAt! >= 0.0) && t - S.tapAt! < 0.5) {
+                glow += 0.25 * (1.0 - (t - S.tapAt!) / 0.5)
+            }
+        }
+        if still {
+            if erupting {
+                flow = 1.0
+                glow = JS.max(glow, 0.9)
+            }
+            fountain = 0.0
+            embers = 0.0
+            flare = 0.0
+            burst = -(1.0)
+            front = 1.0
+        }
+        let pw: Double = (tall ? 1.0 : 0.78)
+        let rs: Double = (tall ? 1.0 : 0.6)
+        let hmax: Double = ((tall ? 400.0 : 200.0)) * sc
+        let lean: Double = ((tall ? 150.0 : 100.0)) * sc
+        let capY: Double = JS.max(0.0, C.vy - 215.0 * sc)
+        vcHalo(ctx, C, glow, flare)
+        ctx.save()
+        vcClipAboveRim(ctx, C, w)
+        if erupting {
+            vcPlume(ctx, C, tt, pw, front, hmax, lean, capY, rs, 0.09, 40.0)
+            if burst >= 0.0 {
+                vcColumn(ctx, C, t, burst, hmax, lean, capY, rs)
+            }
+        } else {
+            vcWisp(ctx, C, tt, 0.5 + glow)
+        }
+        ctx.restore()
+        if flow > 0.01 {
+            vcLava(ctx, C, G, tt, flow, pw, still)
+        }
+        vcVent(ctx, C, t, glow, flare, still)
+        if fountain > 0.02 {
+            vcFountain(ctx, C, t, JS.round(((tall ? 44.0 : 26.0)) * fountain), 1.0, (tall ? 170.0 : 150.0), false, 0.0)
+        }
+        if (burst >= 0.0 && burst < 2.7) {
+            vcFountain(ctx, C, t, (tall ? 160.0 : 90.0), 3000.0, (tall ? 270.0 : 220.0), true, burst)
+            vcSpatter(ctx, C, burst)
+        }
+        if embers > 0.0 {
+            vcEmbers(ctx, C, t, (tall ? embers : JS.round(embers * 0.35)), 60.0, (tall ? 180.0 : 70.0))
+        }
+        if ((!erupting && !still) && S.tapAt != nil) {
+            vcTapPuffs(ctx, C, t, S.tapAt!)
+        }
+    }
     static func overlay3(_ ctx: C2D, _ w: Double, _ h: Double, _ S: RScene, _ theme: String, _ t: Double) {
         let L: Layout = layoutFor(w, h)
         let pal: Pal = palette(theme, JS.round(S.night * 4.0) / 4.0)
@@ -130,9 +603,9 @@ nonisolated extension RW {
                 var k: Double = 0.0
                 while k <= 20.0 {
                     defer { k += 1 }
-                    let _d16 = P(k / 20.0)
-                    let px: Double = _d16.0
-                    let py: Double = _d16.1
+                    let _d17 = P(k / 20.0)
+                    let px: Double = _d17.0
+                    let py: Double = _d17.1
                     if k != 0 {
                         ctx.lineTo(px, py)
                     } else {
@@ -148,9 +621,9 @@ nonisolated extension RW {
                 while k < 44.0 {
                     defer { k += 1 }
                     let u: Double = k / 44.0
-                    let _d17 = P(u)
-                    let px: Double = _d17.0
-                    let py: Double = _d17.1
+                    let _d18 = P(u)
+                    let px: Double = _d18.0
+                    let py: Double = _d18.1
                     let len: Double = s * (0.025 + 0.035 * JS.sin(u * Double.pi * 0.9 + 0.2)) * (0.8 + rnd3(k) * 0.4)
                     ctx.moveTo(px, py)
                     ctx.lineTo(px - len * 0.75, py - len * 0.55)
@@ -260,42 +733,8 @@ nonisolated extension RW {
                 }
             }
         }
-        if ((S.beacon != nil && S.beacon! > 0.0) && S.kind == "path") {
-            let route: [(Double, Double, Double, Bool)] = routeOf(w, h, L, pathLayout(L, w, h))
-            let _d18 = route[Int(Double(route.count) - 1.0)]
-            let bx: Double = _d18.0
-            let by: Double = _d18.1
-            let b: Double = S.beacon!
-            let glow: C2DGradient = ctx.createRadialGradient(bx, by, 0.0, bx, by, s * (0.06 + 0.2 * b))
-            glow.addColorStop(0.0, "rgba(255,236,220,\(JS.toFixed((0.6 * b), 3.0)))")
-            glow.addColorStop(0.35, "rgba(255,200,170,\(JS.toFixed((0.22 * b), 3.0)))")
-            glow.addColorStop(1.0, "rgba(255,200,170,0)")
-            ctx.fillStyle = C2DStyle(glow)
-            ctx.fillRect(bx - s, by - s, s * 2.0, s * 2.0)
-            let fh: Double = s * (0.02 + 0.09 * b)
-            do {
-                var k: Double = 0.0
-                while k < 3.0 {
-                    defer { k += 1 }
-                    let fl: Double = JS.sin(t * (9.0 + k * 3.0) + k) * 0.25
-                    let fw: Double = fh * (0.42 - k * 0.1)
-                    ctx.fillStyle = C2DStyle((k == 0.0 ? "#E85D4E" : (k == 1.0 ? "rgba(255,170,120,0.95)" : "rgba(255,240,220,0.95)")))
-                    ctx.beginPath()
-                    ctx.moveTo(bx + fl * fw, by - fh * (1.0 - k * 0.25))
-                    ctx.quadraticCurveTo(bx + fw, by - fh * 0.3, bx, by + fh * 0.05)
-                    ctx.quadraticCurveTo(bx - fw, by - fh * 0.3, bx + fl * fw, by - fh * (1.0 - k * 0.25))
-                    ctx.fill()
-                }
-            }
-            do {
-                var i: Double = 0.0
-                while i < JS.round(18.0 * b) {
-                    defer { i += 1 }
-                    let p: Double = JSMath.rem((t * (0.3 + rnd3(i) * 0.4) + rnd3(i + 3.0)), 1.0)
-                    ctx.fillStyle = C2DStyle("rgba(255,\(JS.str(150.0 + JS.round(rnd3(i) * 80.0))),120,\(JS.toFixed((0.9 * (1.0 - p)), 3.0)))")
-                    ctx.fillRect(bx + JS.sin(p * 6.0 + i) * s * 0.03 * (1.0 + p), by - fh - p * s * 0.25, JS.max(1.0, s * 0.004), JS.max(1.0, s * 0.004))
-                }
-            }
+        if S.kind == "path" {
+            volcano(ctx, w, h, L, pal, S, t)
         }
         if S.fireflies != nil {
             do {

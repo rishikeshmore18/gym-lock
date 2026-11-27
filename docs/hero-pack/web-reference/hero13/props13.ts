@@ -1334,22 +1334,12 @@ const W: Record<S4, Scn[]> = {
       hap: [{t: 0.4, kind: 'heavy'}, {t: 0.45, kind: 'success'}],
       type: 'slam',
     },
-    // Fri: the beacon on the summit catches and blazes
+    // Fri: the summit volcano wakes: the world lights it (bd.beacon, wash3 `volcano`), a flash lands with the haptic
     {
+      bd: (c) => ({beacon: ez((c.T - 0.25) / 2.2)}),
       draw: (c) => {
         const o: Shape[] = [];
-        const [sx, sy] = A.summit;
-        const b = ez((c.T - 0.25) / 1);
-        const fh = 2 + 8 * b;
-        const f = Math.sin(c.t * 11) * 0.5;
-        o.push(gl(sx, sy - 2, 6 + 16 * b, 'light', 0.6 * b));
-        if (b > 0) o.push(fx(pgs([sx - fh * 0.42, sy, sx + f, sy - fh * 1.3, sx + fh * 0.42, sy], 'light', 0.95)), fx(pg([sx - fh * 0.14, sy, sx + f * 0.6, sy - fh * 0.5, sx + fh * 0.14, sy], 'coral')));
-        const p: number[] = [];
-        for (let i = 0; i < Math.round(16 * b); i++) {
-          const ph = (rnd(i) + c.t * 0.5) % 1;
-          p.push(sx + Math.sin(ph * 6 + i) * 3 * (1 + ph), sy - fh - ph * 18);
-        }
-        o.push(ds(p, 0.3, 'light', 0.85), ds(p.slice(0, 6), 0.32, 'coral', 0.9), fl(0.3 * Math.exp(-(c.T - 0.3) / 0.3) * (c.T > 0.3 ? 1 : 0)));
+        o.push(fl(0.3 * Math.exp(-(c.T - 0.3) / 0.3) * (c.T > 0.3 ? 1 : 0)));
         return o;
       },
       cam: (c) => ({s: 1.14 - 0.1 * ez(c.T / 1.4), px: A.summit[0], py: A.summit[1] + 6}),

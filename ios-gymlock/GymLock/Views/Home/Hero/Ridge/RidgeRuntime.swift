@@ -187,6 +187,8 @@ nonisolated final class RScene {
     var moonX: Double?, moonY: Double?, boatX: Double?, sand: Double?, charge: Double?, stones: Double?
     var trail: Double?, birds: Double?, chipsAt: Double?, snow: Double?, frozen: Bool?, fireflies: Double?
     var drip: Bool?, tide: Double?, steps: Double?, beacon: Double?, lanterns: [Double]?, stars: Double?
+    /// The summit volcano (wash3.ts `volcano`): the climb's progress, the newest tap, the burst, Reduce Motion.
+    var rumble: Double?, tapAt: Double?, eruptAt: Double?, still: Bool?
     var starLines: Double?, shoot: Double?, skips: [Double]?, skipN: Double?, skipDone: Double?
     var burst: Double?, burstAt: String?, flash: Double?, ripples: Double?
 
@@ -234,6 +236,10 @@ nonisolated final class RScene {
         if let v = b.tide { tide = v }
         if let v = b.steps { steps = v }
         if let v = b.beacon { beacon = v }
+        if let v = b.rumble { rumble = v }
+        if let v = b.tapAt { tapAt = v }
+        if let v = b.eruptAt { eruptAt = v }
+        if let v = b.still { still = v }
         if let v = b.lanterns { lanterns = v }
         if let v = b.stars { stars = v }
         if let v = b.starLines { starLines = v }

@@ -72,6 +72,7 @@ nonisolated final class RidgeFrameRenderer: @unchecked Sendable {
 
         let B = RW.build(moment, day, c)
         let S = B.scene
+        if reduceMotion { S.still = true } // the summit volcano: static lava and plume, a gently breathing glow
         let cam = reduceMotion ? RW.CAM0 : RW.clampCam(B.cam)
         painter.xf = RW.camMatrix(cam, pxScale)
         let pal = RW.palette(theme, JSMath.round(S.night * 4) / 4)

@@ -787,6 +787,488 @@ nonisolated extension RW {
         }
         return out
     }
+    static func vcRnd(_ i: Double) -> Double {
+        let x: Double = JS.sin(i * 127.1 + 311.7) * 43758.5453
+        return x - JS.floor(x)
+    }
+    static func vcVn(_ x: Double) -> Double {
+        let i: Double = JS.floor(x)
+        let f: Double = x - i
+        let u: Double = f * f * (3.0 - 2.0 * f)
+        return vcRnd(i) * (1.0 - u) + vcRnd(i + 1.0) * u
+    }
+    static func vcCl(_ v: Double) -> Double {
+        return JS.max(0.0, JS.min(1.0, v))
+    }
+    static func vcClamp(_ v: Double, _ a: Double, _ b: Double) -> Double {
+        return JS.max(a, JS.min(b, v))
+    }
+    static func vcEase(_ u: Double) -> Double {
+        return u * u * (3.0 - 2.0 * u)
+    }
+    static func vcLerp(_ a: Double, _ b: Double, _ u: Double) -> Double {
+        return a + (b - a) * u
+    }
+    static func vcNone() -> [(Double, Double)] {
+        return ([] as [(Double, Double)])
+    }
+    static func vcLump(_ C: Cone, _ d: Double, _ k: Double) -> Double {
+        return 1.0 + 0.07 * (vcVn(C.seed + k + d / (70.0 * C.sc)) * 2.0 - 1.0) + 0.018 * (vcVn(C.seed * 3.0 + k + d / (8.0 * C.sc)) * 2.0 - 1.0)
+    }
+    static func vcHwL(_ C: Cone, _ d: Double) -> Double {
+        return (C.hw0 * 1.05 + C.a1 * 1.1 * d + C.a2 * 1.07 * d * d) * vcLump(C, d, 3.0)
+    }
+    static func vcHwR(_ C: Cone, _ d: Double) -> Double {
+        return (C.hw0 * 0.97 + C.a1 * 0.9 * d + C.a2 * 0.88 * d * d) * vcLump(C, d, 41.0)
+    }
+    static func vcPt(_ C: Cone, _ s: Double, _ d: Double) -> (Double, Double) {
+        return (C.cx + ((s < 0.0 ? s * vcHwL(C, d) : s * vcHwR(C, d))), C.y0 + d)
+    }
+    static func vcCone(_ vx: Double, _ vy: Double, _ sc: Double, _ hw0: Double, _ a1: Double, _ a2: Double, _ D: Double, _ seed: Double) -> Cone {
+        let y0: Double = vy - 13.0 * sc
+        let C: Cone = Cone(cx: vx, y0: y0, sc: sc, hw0: hw0, a1: a1, a2: a2, D: D, seed: seed, vx: vx, vy: vy, rim: ([] as [(Double, Double)]), tabL: ([] as [Double]), tabR: ([] as [Double]))
+        let rf: [[Double]] = ([([-(1.0), 2.0] as [Double]), ([-(0.9), -(4.0)] as [Double]), ([-(0.76), -(8.0)] as [Double]), ([-(0.6), -(5.0)] as [Double]), ([-(0.46), -(10.0)] as [Double]), ([-(0.32), -(3.0)] as [Double]), ([-(0.2), 5.0] as [Double]), ([-(0.08), 10.0] as [Double]), ([0.06, 12.0] as [Double]), ([0.18, 6.0] as [Double]), ([0.3, -(4.0)] as [Double]), ([0.44, -(9.0)] as [Double]), ([0.58, -(6.0)] as [Double]), ([0.72, -(10.0)] as [Double]), ([0.86, -(4.0)] as [Double]), ([1.0, 1.0] as [Double])] as [[Double]])
+        do {
+            var i: Double = 0.0
+            while i < Double(rf.count) {
+                defer { i += 1 }
+                let f: Double = (rf[Int(i)])[0]
+                C.rim.append((vx + f * ((f < 0.0 ? vcHwL(C, 0.0) : vcHwR(C, 0.0))), y0 + (rf[Int(i)])[1] * sc))
+            }
+        }
+        let nn: Double = JS.ceil(D / 3.0)
+        do {
+            var i: Double = 0.0
+            while i <= nn {
+                defer { i += 1 }
+                C.tabL.append(vx - vcHwL(C, i * 3.0))
+                C.tabR.append(vx + vcHwR(C, i * 3.0))
+            }
+        }
+        return C
+    }
+    static func vcConeOf(_ w: Double, _ h: Double, _ L: Layout) -> Cone {
+        let Lp: Layout = pathLayout(L, w, h)
+        let vy: Double = Lp.peakTop + h * 0.01
+        if L.tall {
+            let sc: Double = w / 592.0
+            return vcCone(Lp.peakX, vy, sc, 58.0 * sc, 0.29, 0.0022 / sc, JS.min(320.0 * sc, h * 0.8 - (vy - 13.0 * sc)), 11.0)
+        }
+        let sc: Double = (0.9 * h) / 488.0
+        return vcCone(Lp.peakX, vy, sc, 58.0 * sc, 0.29, 0.0022 / sc, (270.0 * h) / 488.0, 17.0)
+    }
+    static func vcRimAt(_ C: Cone, _ f: Double) -> (Double, Double) {
+        let x: Double = C.cx + f * ((f < 0.0 ? vcHwL(C, 0.0) : vcHwR(C, 0.0)))
+        do {
+            var i: Double = 1.0
+            while i < Double(C.rim.count) {
+                defer { i += 1 }
+                if x <= (C.rim[Int(i)]).0 {
+                    let a: (Double, Double) = C.rim[Int(i - 1.0)]
+                    let b: (Double, Double) = C.rim[Int(i)]
+                    let u: Double = (x - a.0) / (JS.or(b.0 - a.0, 1.0))
+                    return (x, a.1 + (b.1 - a.1) * u)
+                }
+            }
+        }
+        return C.rim[Int(Double(C.rim.count) - 1.0)]
+    }
+    static func vcSurf(_ C: Cone, _ x: Double) -> Double {
+        let first: Double = (C.rim[0]).0
+        let last: Double = (C.rim[Int(Double(C.rim.count) - 1.0)]).0
+        if (x >= first && x <= last) {
+            return (vcRimAt(C, (x - C.cx) / ((x < C.cx ? vcHwL(C, 0.0) : vcHwR(C, 0.0))))).1
+        }
+        if x < C.cx {
+            do {
+                var i: Double = 1.0
+                while i < Double(C.tabL.count) {
+                    defer { i += 1 }
+                    if C.tabL[Int(i)] <= x {
+                        return C.y0 + (i - 1.0 + (C.tabL[Int(i - 1.0)] - x) / (JS.or(C.tabL[Int(i - 1.0)] - C.tabL[Int(i)], 1.0))) * 3.0
+                    }
+                }
+            }
+            return 1000000000.0
+        }
+        do {
+            var i: Double = 1.0
+            while i < Double(C.tabR.count) {
+                defer { i += 1 }
+                if C.tabR[Int(i)] >= x {
+                    return C.y0 + (i - 1.0 + (x - C.tabR[Int(i - 1.0)]) / (JS.or(C.tabR[Int(i)] - C.tabR[Int(i - 1.0)], 1.0))) * 3.0
+                }
+            }
+        }
+        return 1000000000.0
+    }
+    static func vcConePath(_ ctx: C2D, _ C: Cone, _ extra: Double) {
+        let n: Double = JS.ceil(C.D / 5.0)
+        ctx.beginPath()
+        ctx.moveTo(C.cx - vcHwL(C, C.D), C.y0 + C.D + extra)
+        ctx.lineTo(C.cx - vcHwL(C, C.D), C.y0 + C.D)
+        do {
+            var i: Double = n
+            while i >= 0.0 {
+                defer { i -= 1 }
+                let d: Double = (i / n) * C.D
+                ctx.lineTo(C.cx - vcHwL(C, d), C.y0 + d)
+            }
+        }
+        for p in C.rim {
+            ctx.lineTo(p.0, p.1)
+        }
+        do {
+            var i: Double = 0.0
+            while i <= n {
+                defer { i += 1 }
+                let d: Double = (i / n) * C.D
+                ctx.lineTo(C.cx + vcHwR(C, d), C.y0 + d)
+            }
+        }
+        ctx.lineTo(C.cx + vcHwR(C, C.D), C.y0 + C.D + extra)
+        ctx.closePath()
+    }
+    static func vcGul(_ i: Double, _ s0: Double, _ dEnd: Double, _ wid: Double, _ delay: Double, _ w: Double, _ par: Double, _ dStart: Double, _ lava: Bool) -> Gully {
+        return Gully(i: i, seed: i * 13.0 + 5.0, w: w, delay: delay, wid: wid, dStart: dStart, dEnd: dEnd, s0: s0, par: par, lava: lava)
+    }
+    static func vcGullies(_ tall: Bool, _ k: Double) -> [Gully] {
+        if tall {
+            let r: Double = 0.92 * k
+            return ([vcGul(0.0, -(0.5), 255.0 * r, 0.6, 0.0, 0.1, -(1.0), 0.0, true), vcGul(1.0, 0.46, 185.0 * r, 0.5, 0.08, 0.1, -(1.0), 0.0, true), vcGul(2.0, 0.02, 105.0 * r, 0.4, 0.15, 0.08, -(1.0), 0.0, true), vcGul(3.0, -(0.74), 205.0 * r, 0.3, 0.5, 0.055, 0.0, 120.0 * k, true), vcGul(4.0, 0.7, 150.0 * r, 0.3, 0.45, 0.055, 1.0, 90.0 * k, true), vcGul(5.0, 0.2, 100.0 * r, 0.25, 0.5, 0.055, 2.0, 60.0 * k, true), vcGul(6.0, -(0.2), 38.0 * k, 0.45, 0.0, 0.055, -(1.0), 0.0, true), vcGul(7.0, 0.22, 36.0 * k, 0.45, 0.0, 0.055, -(1.0), 0.0, true), vcGul(8.0, -(0.84), 120.0 * k, 0.4, 0.0, 0.055, -(1.0), 0.0, false), vcGul(9.0, -(0.3), 170.0 * k, 0.4, 0.0, 0.055, -(1.0), 0.0, false), vcGul(10.0, 0.26, 140.0 * k, 0.35, 0.0, 0.055, -(1.0), 0.0, false), vcGul(11.0, 0.62, 150.0 * k, 0.4, 0.0, 0.055, -(1.0), 0.0, false), vcGul(12.0, 0.86, 150.0 * k, 0.4, 0.0, 0.055, -(1.0), 0.0, false)] as [Gully])
+        }
+        let r: Double = 0.85 * k
+        return ([vcGul(0.0, -(0.5), 178.0 * r, 0.6, 0.0, 0.1, -(1.0), 0.0, true), vcGul(1.0, 0.4, 130.0 * r, 0.5, 0.1, 0.1, -(1.0), 0.0, true), vcGul(2.0, -(0.74), 150.0 * r, 0.3, 0.5, 0.055, 0.0, 90.0 * k, true), vcGul(3.0, -(0.18), 34.0 * k, 0.45, 0.0, 0.055, -(1.0), 0.0, true), vcGul(4.0, 0.2, 32.0 * k, 0.45, 0.0, 0.055, -(1.0), 0.0, true), vcGul(5.0, -(0.84), 100.0 * k, 0.4, 0.0, 0.055, -(1.0), 0.0, false), vcGul(6.0, -(0.12), 120.0 * k, 0.4, 0.0, 0.055, -(1.0), 0.0, false), vcGul(7.0, 0.66, 110.0 * k, 0.4, 0.0, 0.055, -(1.0), 0.0, false)] as [Gully])
+    }
+    static func vcGulliesOf(_ C: Cone, _ tall: Bool) -> [Gully] {
+        return vcGullies(tall, C.D / ((tall ? 320.0 : 185.0)))
+    }
+    static func vcGs(_ C: Cone, _ G: [Gully], _ g: Gully, _ dd: Double) -> Double {
+        let sc: Double = C.sc
+        let wob: Double = g.w * (vcVn(g.seed + dd / (45.0 * sc)) * 2.0 - 1.0) + g.w * 0.5 * (vcVn(g.seed * 2.0 + dd / (17.0 * sc)) * 2.0 - 1.0)
+        if g.par >= 0.0 {
+            if dd <= g.dStart {
+                return vcGs(C, G, G[Int(g.par)], dd)
+            }
+            let ps: Double = vcGs(C, G, G[Int(g.par)], g.dStart)
+            let e: Double = vcEase(vcCl((dd - g.dStart) / (70.0 * sc)))
+            return ps + (g.s0 - ps) * e + wob * vcEase(vcCl((dd - g.dStart) / (40.0 * sc)))
+        }
+        let e: Double = vcEase(vcCl((dd - 16.0 * sc) / (46.0 * sc)))
+        return g.s0 * 0.1 + g.s0 * 0.9 * e + wob * e
+    }
+    static func vcGPt(_ C: Cone, _ G: [Gully], _ g: Gully, _ dd: Double) -> (Double, Double) {
+        return vcPt(C, vcClamp(vcGs(C, G, g, dd), -(0.88), 0.88), dd)
+    }
+    static func vcRib(_ ctx: C2D, _ P: [(Double, Double)], _ Wd: [Double]) {
+        let n: Double = Double(P.count)
+        var Lft: [(Double, Double)] = ([] as [(Double, Double)])
+        var Rgt: [(Double, Double)] = ([] as [(Double, Double)])
+        do {
+            var i: Double = 0.0
+            while i < n {
+                defer { i += 1 }
+                let p: (Double, Double) = P[Int(i)]
+                let a: (Double, Double) = P[Int(JS.max(0.0, i - 1.0))]
+                let b: (Double, Double) = P[Int(JS.min(n - 1.0, i + 1.0))]
+                var dx: Double = b.0 - a.0
+                var dy: Double = b.1 - a.1
+                let d: Double = JS.or(JS.hypot(dx, dy), 1.0)
+                dx /= d
+                dy /= d
+                let hw: Double = Wd[Int(i)] / 2.0
+                Lft.append((p.0 - dy * hw, p.1 + dx * hw))
+                Rgt.append((p.0 + dy * hw, p.1 - dx * hw))
+            }
+        }
+        ctx.beginPath()
+        ctx.moveTo((Lft[0]).0, (Lft[0]).1)
+        do {
+            var i: Double = 1.0
+            while i < n {
+                defer { i += 1 }
+                ctx.lineTo((Lft[Int(i)]).0, (Lft[Int(i)]).1)
+            }
+        }
+        do {
+            var i: Double = n - 1.0
+            while i >= 0.0 {
+                defer { i -= 1 }
+                ctx.lineTo((Rgt[Int(i)]).0, (Rgt[Int(i)]).1)
+            }
+        }
+        ctx.closePath()
+    }
+    static func vcBrush(_ ctx: C2D, _ pts: [(Double, Double)], _ w0: Double, _ w1: Double, _ fill: String, _ seed: Double, _ rag: Double) {
+        let n: Double = Double(pts.count)
+        if n < 3.0 {
+            return
+        }
+        var Wd: [Double] = ([] as [Double])
+        do {
+            var i: Double = 0.0
+            while i < n {
+                defer { i += 1 }
+                let u: Double = i / (n - 1.0)
+                Wd.append((w0 + (w1 - w0) * u) * (1.0 - rag + rag * 2.0 * vcVn(seed + i * 0.9)))
+            }
+        }
+        vcRib(ctx, pts, Wd)
+        ctx.fillStyle = C2DStyle(fill)
+        ctx.fill()
+    }
+    static func vcPaintCone(_ ctx: C2D, _ C: Cone, _ G: [Gully], _ pal: Pal) {
+        let sc: Double = C.sc
+        let cx: Double = C.cx
+        let y0: Double = C.y0
+        let xl: Double = cx - vcHwL(C, C.D)
+        let xr: Double = cx + vcHwR(C, C.D)
+        let dark: (Double, Double, Double) = mixc(pal.near, pal.mid2, 0.2)
+        ctx.save()
+        vcConePath(ctx, C, 60.0)
+        ctx.clip()
+        var g: C2DGradient = ctx.createLinearGradient(xl, 0.0, xr, 0.0)
+        g.addColorStop(0.0, css(mixc(pal.far, pal.sky1, 0.3)))
+        g.addColorStop(0.4, css(mixc(pal.far, pal.farShade, 0.05)))
+        g.addColorStop(0.55, css(mixc(pal.far, pal.farShade, 0.6)))
+        g.addColorStop(0.75, css(pal.mid))
+        g.addColorStop(1.0, css(mixc(pal.mid, pal.mid2, 0.65)))
+        ctx.fillStyle = C2DStyle(g)
+        ctx.fillRect(xl - 10.0, y0 - 40.0, xr - xl + 20.0, C.D + 120.0)
+        g = ctx.createLinearGradient(0.0, y0 + C.D * 0.5, 0.0, y0 + C.D)
+        g.addColorStop(0.0, css(pal.mist, 0.0))
+        g.addColorStop(1.0, css(pal.mist, 0.3))
+        ctx.fillStyle = C2DStyle(g)
+        ctx.fillRect(xl - 10.0, y0 + C.D * 0.5, xr - xl + 20.0, C.D)
+        let fs: [Double] = ([-(1.0), -(0.8), -(0.58), -(0.36), -(0.14), 0.06, 0.26, 0.48, 0.7, 1.0] as [Double])
+        do {
+            var k: Double = 0.0
+            while k < Double(fs.count) - 1.0 {
+                defer { k += 1 }
+                let a: Double = fs[Int(k)]
+                let b: Double = fs[Int(k + 1.0)]
+                let mid: Double = (a + b) / 2.0
+                ctx.beginPath()
+                do {
+                    var d: Double = 2.0 * sc
+                    while d <= C.D + 4.0 {
+                        defer { d += 8.0 * sc }
+                        let s: Double = vcClamp(a + 0.035 * (vcVn(k * 3.0 + d / (60.0 * sc)) * 2.0 - 1.0), -(1.0), 1.0)
+                        let p: (Double, Double) = vcPt(C, s, d)
+                        ctx.lineTo(p.0, p.1)
+                    }
+                }
+                do {
+                    var d: Double = C.D
+                    while d >= 2.0 * sc {
+                        defer { d -= 8.0 * sc }
+                        let s: Double = vcClamp(b + 0.035 * (vcVn(k * 3.0 + 3.0 + d / (60.0 * sc)) * 2.0 - 1.0), -(1.0), 1.0)
+                        let p: (Double, Double) = vcPt(C, s, d)
+                        ctx.lineTo(p.0, p.1)
+                    }
+                }
+                ctx.closePath()
+                if JSMath.rem(k, 2.0) == 0.0 {
+                    ctx.fillStyle = C2DStyle(css(pal.snow, 0.09 + 0.05 * vcRnd(k + 9.0)))
+                } else {
+                    ctx.fillStyle = C2DStyle(css(pal.near, 0.05 + 0.07 * vcRnd(k + 3.0) + 0.1 * vcCl(mid * 1.3)))
+                }
+                ctx.fill()
+            }
+        }
+        g = ctx.createLinearGradient(0.0, y0 - 20.0 * sc, 0.0, y0 + 150.0 * sc)
+        g.addColorStop(0.0, css(dark, 0.96))
+        g.addColorStop(0.28, css(dark, 0.78))
+        g.addColorStop(0.62, css(dark, 0.3))
+        g.addColorStop(1.0, css(dark, 0.0))
+        ctx.fillStyle = C2DStyle(g)
+        ctx.fillRect(xl - 10.0, y0 - 30.0 * sc, xr - xl + 20.0, 190.0 * sc)
+        ctx.beginPath()
+        do {
+            var i: Double = 0.0
+            while i <= 20.0 {
+                defer { i += 1 }
+                let p: (Double, Double) = vcPt(C, -(1.0) + i * 0.1, 2.0 * sc)
+                ctx.lineTo(p.0, p.1)
+            }
+        }
+        do {
+            var i: Double = 20.0
+            while i >= 0.0 {
+                defer { i -= 1 }
+                let s: Double = -(1.0) + i * 0.1
+                let p: (Double, Double) = vcPt(C, s, (52.0 + 70.0 * vcVn(31.0 + s * 3.1) + 22.0 * vcVn(77.0 + s * 9.0)) * sc)
+                ctx.lineTo(p.0, p.1)
+            }
+        }
+        ctx.closePath()
+        ctx.fillStyle = C2DStyle(css(dark, 0.34))
+        ctx.fill()
+        do {
+            var k: Double = 0.0
+            while k < 9.0 {
+                defer { k += 1 }
+                let s0: Double = -(0.85) + k * 0.21 + (vcRnd(k + 5.0) - 0.5) * 0.1
+                let len: Double = (70.0 + 90.0 * vcRnd(k + 11.0)) * sc
+                var P: [(Double, Double)] = ([] as [(Double, Double)])
+                do {
+                    var d: Double = 4.0 * sc
+                    while d < len {
+                        defer { d += 8.0 * sc }
+                        P.append(vcPt(C, vcClamp(s0 + 0.04 * (vcVn(k * 9.0 + d / (40.0 * sc)) * 2.0 - 1.0), -(0.9), 0.9), d))
+                    }
+                }
+                vcBrush(ctx, P, 6.0 * sc, 1.0 * sc, css(dark, 0.2), k * 17.0, 0.5)
+            }
+        }
+        do {
+            var gi: Double = 0.0
+            while gi < Double(G.count) {
+                defer { gi += 1 }
+                let gu: Gully = G[Int(gi)]
+                let d0: Double = (gu.par >= 0.0 ? gu.dStart : 12.0 * sc)
+                let d1: Double = gu.dEnd
+                do {
+                    var h: Double = 0.0
+                    while h < 2.0 {
+                        defer { h += 1 }
+                        var run: [(Double, Double)] = ([] as [(Double, Double)])
+                        let w1: Double = (0.6 + gu.wid * 1.6) * sc * (0.8 + 0.5 * vcRnd(gi * 3.0 + h))
+                        do {
+                            var d: Double = d0
+                            while d <= d1 {
+                                defer { d += 6.0 * sc }
+                                if vcVn(gu.seed * 3.0 + h * 7.0 + d / (24.0 * sc)) > 0.42 {
+                                    let p: (Double, Double) = vcGPt(C, G, gu, d)
+                                    run.append((p.0 + (h - 1.0) * 1.7 * sc, p.1))
+                                } else {
+                                    vcBrush(ctx, run, w1 * 0.35, w1, css(pal.near, 0.2 + 0.14 * vcRnd(gi + h)), gi * 5.0 + h, 0.45)
+                                    run = vcNone()
+                                }
+                            }
+                        }
+                        vcBrush(ctx, run, w1 * 0.35, w1, css(pal.near, 0.2 + 0.14 * vcRnd(gi + h)), gi * 5.0 + h, 0.45)
+                    }
+                }
+                var run: [(Double, Double)] = ([] as [(Double, Double)])
+                do {
+                    var d: Double = d0 + 8.0 * sc
+                    while d <= d1 * 0.9 {
+                        defer { d += 6.0 * sc }
+                        if vcVn(gu.seed * 5.0 + d / (20.0 * sc)) > 0.4 {
+                            let p: (Double, Double) = vcGPt(C, G, gu, d)
+                            run.append((p.0 - 2.6 * sc * (0.6 + 0.8 * gu.wid), p.1))
+                        } else {
+                            vcBrush(ctx, run, 0.6 * sc, 1.5 * sc, css(pal.snow, 0.4), gi * 3.0, 0.4)
+                            run = vcNone()
+                        }
+                    }
+                }
+                vcBrush(ctx, run, 0.6 * sc, 1.5 * sc, css(pal.snow, 0.4), gi * 3.0, 0.4)
+            }
+        }
+        let nsp: Double = JS.round(900.0 * sc * sc)
+        let sz: Double = (sc > 0.8 ? 1.4 : 1.0)
+        ctx.fillStyle = C2DStyle(css(pal.crack, 0.2))
+        ctx.beginPath()
+        do {
+            var i: Double = 0.0
+            while i < nsp {
+                defer { i += 1 }
+                if vcRnd(i + 5.0) >= 0.6 {
+                    continue
+                }
+                let p: (Double, Double) = vcPt(C, (vcRnd(i * 2.0 + 1000.0) * 2.0 - 1.0) * 0.96, vcRnd(i * 2.0 + 1001.0) * C.D * 0.9)
+                ctx.rect(p.0, p.1, sz, sz)
+            }
+        }
+        ctx.fill()
+        ctx.fillStyle = C2DStyle(css(pal.snow, 0.25))
+        ctx.beginPath()
+        do {
+            var i: Double = 0.0
+            while i < nsp {
+                defer { i += 1 }
+                if vcRnd(i + 5.0) < 0.6 {
+                    continue
+                }
+                let p: (Double, Double) = vcPt(C, (vcRnd(i * 2.0 + 1000.0) * 2.0 - 1.0) * 0.96, vcRnd(i * 2.0 + 1001.0) * C.D * 0.9)
+                ctx.rect(p.0, p.1, sz, sz)
+            }
+        }
+        ctx.fill()
+        ctx.restore()
+        ctx.save()
+        ctx.lineJoin = "round"
+        ctx.lineCap = "round"
+        ctx.beginPath()
+        do {
+            var d: Double = C.D * 0.9
+            while d >= 0.0 {
+                defer { d -= 4.0 }
+                ctx.lineTo(cx - vcHwL(C, d), y0 + d)
+            }
+        }
+        for p in C.rim {
+            ctx.lineTo(p.0, p.1)
+        }
+        do {
+            var d: Double = 0.0
+            while d <= C.D * 0.9 {
+                defer { d += 4.0 }
+                ctx.lineTo(cx + vcHwR(C, d), y0 + d)
+            }
+        }
+        ctx.strokeStyle = C2DStyle(css(pal.near, 0.34))
+        ctx.lineWidth = 1.5 * sc + 0.4
+        ctx.stroke()
+        ctx.beginPath()
+        do {
+            var i: Double = 0.0
+            while i < 6.0 {
+                defer { i += 1 }
+                if i == 0.0 {
+                    ctx.moveTo((C.rim[Int(i)]).0, (C.rim[Int(i)]).1 - 1.2 * sc)
+                } else {
+                    ctx.lineTo((C.rim[Int(i)]).0, (C.rim[Int(i)]).1 - 1.2 * sc)
+                }
+            }
+        }
+        ctx.strokeStyle = C2DStyle(css(pal.snow, 0.55))
+        ctx.lineWidth = 1.2 * sc + 0.3
+        ctx.stroke()
+        var T: [(Double, Double)] = ([] as [(Double, Double)])
+        do {
+            var i: Double = 0.0
+            while i <= 8.0 {
+                defer { i += 1 }
+                T.append(vcRimAt(C, -(0.3) + i * 0.075))
+            }
+        }
+        ctx.beginPath()
+        do {
+            var i: Double = 0.0
+            while i < Double(T.count) {
+                defer { i += 1 }
+                if i == 0.0 {
+                    ctx.moveTo((T[Int(i)]).0, (T[Int(i)]).1 - 0.5 * sc)
+                } else {
+                    ctx.lineTo((T[Int(i)]).0, (T[Int(i)]).1 - 0.5 * sc)
+                }
+            }
+        }
+        do {
+            var i: Double = Double(T.count) - 1.0
+            while i >= 0.0 {
+                defer { i -= 1 }
+                ctx.lineTo((T[Int(i)]).0 + (vcRnd(i + 3.0) - 0.5) * 2.0 * sc, (T[Int(i)]).1 + (7.0 + 6.0 * vcVn(60.0 + i * 1.9)) * sc)
+            }
+        }
+        ctx.closePath()
+        ctx.fillStyle = C2DStyle(css(pal.crack, 0.82))
+        ctx.fill()
+        ctx.restore()
+    }
     static func kind_night(_ PNT: RPainter2, _ ctx: C2D, _ w: Double, _ h: Double, _ L: Layout, _ pal: Pal, _ S: RScene, _ theme: String, _ t: Double, _ key: String) {
         let wl: Double = (L.tall ? h * 0.8 : h * 0.66)
         let Lw: Layout = Layout(horizon: wl - h * 0.01, peakX: L.peakX, peakTop: (L.tall ? h * 0.62 : h * 0.26), peakHalf: L.peakHalf, ridgeY: wl - h * 0.06, ledgeTop: L.ledgeTop, ledgeX: L.ledgeX, rockX: L.rockX, rockW: L.rockW, treeX: L.treeX, treeH: L.treeH, sunX: L.sunX, tall: L.tall)
@@ -1008,7 +1490,10 @@ nonisolated extension RW {
         let base: C2DSurface = PNT.layer("p-base", key, w, h, { (c: C2D) -> Void in
             skyGrad(c, w, h, Lp.horizon, pal)
             clouds(c, w, h, Lp.horizon, pal, rng(S.seed), 5.0)
-            paintFar(c, w, h, Lp, pal, rng(S.seed + 1.0), S.seed, S)
+            paintFar(c, w, h, Lp, pal, rng(S.seed + 1.0), S.seed, S, O_back_peak_ridges(peak: false, ridges: false))
+            let cone: Cone = vcConeOf(w, h, L)
+            vcPaintCone(c, cone, vcGulliesOf(cone, L.tall), pal)
+            paintFar(c, w, h, Lp, pal, rng(S.seed + 7.0), S.seed, S, O_back_peak_ridges(back: false, peak: false))
             func hy(_ x: Double) -> Double {
                 return ((L.tall ? h * 0.86 : h * 0.8)) - JS.pow(fbm1(x / (w * 0.3) + S.seed, 4.0), 1.4) * h * 0.12
             }
@@ -1090,12 +1575,6 @@ nonisolated extension RW {
         ctx.beginPath()
         ctx.arc(px, py, rad, 0.0, Double.pi * 2.0)
         ctx.fill()
-        let top: (Double, Double, Double, Bool) = route[Int(Double(route.count) - 1.0)]
-        ctx.strokeStyle = C2DStyle(css(pal.near, 0.8))
-        ctx.lineWidth = JS.max(1.0, w * 0.002)
-        ctx.beginPath()
-        ctx.arc(top.0, top.1, rad * 1.2, 0.0, Double.pi * 2.0)
-        ctx.stroke()
     }
     static func kind_fog(_ PNT: RPainter2, _ ctx: C2D, _ w: Double, _ h: Double, _ L: Layout, _ pal: Pal, _ S: RScene, _ theme: String, _ t: Double, _ key: String) {
         let base: C2DSurface = PNT.layer("f-base", key, w, h, { (c: C2D) -> Void in
