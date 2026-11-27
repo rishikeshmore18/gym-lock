@@ -350,6 +350,8 @@ struct Day0CantTodayB: View {
 
     @State private var holdProgress = 0.0
     @State private var isHolding = false
+    /// The skip button is pressed (tap kind): it grows the same way as during a hold.
+    @State private var skipPressed = false
     @State private var holdStep = 0
     @State private var bump = 0.0
     @State private var skipLocked = false
@@ -1135,6 +1137,7 @@ struct Day0CantTodayB: View {
                 ctaButton(c)
                 sideSlot(rest.count > 1 ? rest[1] : nil, c)
             }
+            .animation(.spring(response: 0.34, dampingFraction: 0.78), value: skipGrows)
             .padding(.horizontal, 22)
             .frame(height: 56, alignment: .top)
         } else {
@@ -1151,6 +1154,20 @@ struct Day0CantTodayB: View {
         }
     }
 
+    /// While the skip button is held (or pressed) it grows so the finger can see it, and the
+    /// other two make room: "next" narrows and the home button tucks in.
+    private var skipGrows: Bool { (isHolding || skipPressed) && answer == nil && !reduce }
+
+    /// How wide each side door's slot is right now.
+    private func slotWidth(_ door: CantTodayDoor?) -> CGFloat {
+        guard skipGrows, let door else { return 72 }
+        switch door {
+        case .skip: return 104
+        case .home: return 60
+        case .reschedule: return 72
+        }
+    }
+
     /// A side slot closes up in the time beat so the "set alarm" button can widen.
     private func sideSlot(_ door: CantTodayDoor?, _ c: D0BCtx) -> some View {
         let isTime = beat == .time
@@ -1161,7 +1178,7 @@ struct Day0CantTodayB: View {
                 Color.clear.frame(width: 72, height: 56)
             }
         }
-        .frame(width: isTime ? 0 : 72, height: 56, alignment: .top)
+        .frame(width: isTime ? 0 : slotWidth(door), height: 56, alignment: .top)
         .padding(.horizontal, isTime ? -6 : 0)
         .opacity(isTime ? 0 : 1)
         .offset(y: isTime && !reduce ? 8 : 0)
@@ -1231,7 +1248,9 @@ struct Day0CantTodayB: View {
             .contentShape(Circle())
         }
         .buttonStyle(D0BPressStyle(scale: 0.95, onPress: { pressed in tapPress(pressed) }))
-        .frame(width: 72, height: 56)
+        .scaleEffect(skipGrows ? 0.86 : 1, anchor: .top)
+        .opacity(skipGrows ? 0.7 : 1)
+        .frame(width: slotWidth(.home), height: 56)
         .overlay(alignment: .top) {
             VStack(spacing: 4) {
                 pips(filled: data.homeLeft, total: data.homeOf, size: 6, line: 1.2, gap: 5)
@@ -1256,8 +1275,6 @@ struct Day0CantTodayB: View {
         return Group {
             if needsHold {
                 skipCircle(c, nudge: a)
-                    .scaleEffect(isHolding ? 0.95 : 1)
-                    .animation(.easeOut(duration: 0.14), value: isHolding)
                     .cantTodayHold(
                         duration: 1.5,
                         progress: $holdProgress,
@@ -1285,17 +1302,20 @@ struct Day0CantTodayB: View {
                     skipCircle(c, nudge: a)
                         .contentShape(Circle())
                 }
-                .buttonStyle(D0BPressStyle(scale: 0.95, onPress: { pressed in tapPress(pressed) }))
+                .buttonStyle(D0BPressStyle(scale: 1, onPress: { pressed in
+                    skipPressed = pressed
+                    tapPress(pressed)
+                }))
             }
         }
-        .frame(width: 72, height: 56)
+        .frame(width: slotWidth(.skip), height: 56)
         .overlay(alignment: .top) {
             Text(label)
                 .font(.system(size: c.m.compact ? 10 : 11, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.62))
+                .foregroundStyle(Color.white.opacity(skipGrows ? 0.85 : 0.62))
                 .lineLimit(1)
                 .fixedSize()
-                .offset(y: 60)
+                .offset(y: skipGrows ? 74 : 60)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(needsHold ? "hold to skip" : "skip today")
@@ -1308,18 +1328,23 @@ struct Day0CantTodayB: View {
         let needsHold = input.data.skipNeedsHold
         let n = min(1.15, max(0, nudge))
         let ring = needsHold ? max(holdProgress, 0.25 * min(1, n)) : 0
+        // 56 pt at rest, 84 pt while held or pressed (centred on the same spot, so it grows
+        // under the finger and over the row's edges rather than pushing the row down).
+        let size: CGFloat = skipGrows ? 84 : 56
         return ZStack {
-            Circle().fill(Color.white.opacity(0.14))
+            Circle().fill(Color.white.opacity(skipGrows ? 0.2 : 0.14))
             Circle()
                 .trim(from: 0, to: CGFloat(min(1, ring)))
-                .stroke(D0B.text, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .stroke(D0B.text, style: StrokeStyle(lineWidth: skipGrows ? 4 : 3, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .padding(1.5)
+                .padding(skipGrows ? 2 : 1.5)
             D0BFlameShape()
-                .stroke(D0B.text, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
-                .frame(width: 22, height: 26)
+                .stroke(D0B.text, style: StrokeStyle(lineWidth: skipGrows ? 2.5 : 2, lineJoin: .round))
+                .frame(width: skipGrows ? 32 : 22, height: skipGrows ? 38 : 26)
         }
+        .frame(width: size, height: size)
         .frame(width: 56, height: 56)
+        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: skipGrows)
         .modifier(D0BLift(amount: needsHold ? n * 0.6 : n, ink: false, reduceMotion: reduce))
         .contentShape(Circle())
     }
