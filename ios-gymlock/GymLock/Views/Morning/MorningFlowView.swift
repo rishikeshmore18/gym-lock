@@ -209,7 +209,8 @@ struct MorningFlowView: View {
                 onStart: { coordinator.startQuickWorkout(minutes: HomeWorkoutRules.defaultMinutes) },
                 onReachedMinimum: { coordinator.quickWorkoutReachedMinimum() },
                 onFinish: { coordinator.finishQuickWorkout(completed: $0) },
-                onClose: { coordinator.leaveQuickWorkoutPicker() }
+                onClose: { coordinator.leaveQuickWorkoutPicker() },
+                onBack: { coordinator.backOutOfQuickWorkout() }
             )
 
         case .homeWorkoutProof:

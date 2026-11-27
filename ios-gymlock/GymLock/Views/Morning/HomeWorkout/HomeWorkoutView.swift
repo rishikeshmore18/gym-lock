@@ -27,6 +27,8 @@ struct HomeWorkoutView: View {
     /// true = finished (20+ min), false = ended early without counting.
     let onFinish: (Bool) -> Void
     let onClose: () -> Void
+    /// Back from the running screen before 20:00 (a mistaken start). The timer is thrown away.
+    let onBack: () -> Void
 
     @Environment(AppStore.self) private var store
     @Environment(GymSessionCoordinator.self) private var coordinator
@@ -42,6 +44,7 @@ struct HomeWorkoutView: View {
     @State private var firedMinute = 0
     @State private var reachedSent = false
     @State private var isConfirmingEnd = false
+    @State private var isConfirmingBack = false
 
     var body: some View {
         GeometryReader { geo in
@@ -78,6 +81,12 @@ struct HomeWorkoutView: View {
             Button(HomeWorkoutCopy.endWithout, role: .destructive) { onFinish(false) }
         } message: {
             Text(HomeWorkoutCopy.endMessage)
+        }
+        .confirmationDialog(HomeWorkoutCopy.backTitle, isPresented: $isConfirmingBack, titleVisibility: .visible) {
+            Button(HomeWorkoutCopy.stay, role: .cancel) {}
+            Button(HomeWorkoutCopy.goBack, role: .destructive) { onBack() }
+        } message: {
+            Text(HomeWorkoutCopy.backMessage)
         }
         .blocksHeroHaptics("homeWorkout")
     }
@@ -128,6 +137,16 @@ struct HomeWorkoutView: View {
         let dark = look.isDark
         VStack(spacing: 0) {
             HStack {
+                if f.isRunning, !f.isDone {
+                    GlassCircleButton(symbol: "chevron.left", label: "back", diameter: HomeWorkoutLayout.topControlSize) {
+                        // The first minute is the "tapped by mistake" window: no question asked.
+                        if f.elapsed < HomeWorkoutLayout.mistakeWindow {
+                            onBack()
+                        } else {
+                            isConfirmingBack = true
+                        }
+                    }
+                }
                 Spacer()
                 if !f.isRunning {
                     GlassCircleButton(symbol: "xmark", label: "close", diameter: HomeWorkoutLayout.topControlSize, action: onClose)
