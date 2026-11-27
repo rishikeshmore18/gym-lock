@@ -569,6 +569,16 @@ struct Day0CantTodayB: View {
 
     private func coreView(_ c: D0BCtx) -> some View {
         VStack(spacing: c.m.coreGap) {
+            if !input.data.targets.isEmpty {
+                // a quiet title so the polaroid reads as "pick a new day and time"
+                Text("reschedule")
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(0.4)
+                    .foregroundStyle(Color.white.opacity(0.62))
+                    .opacity(c.done ? 0 : 1)
+                    .animation(.linear(duration: 0.22), value: c.done)
+                    .accessibilityAddTraits(.isHeader)
+            }
             polaroid(c)
             if !input.data.cost.isEmpty {
                 chipsRow(c)

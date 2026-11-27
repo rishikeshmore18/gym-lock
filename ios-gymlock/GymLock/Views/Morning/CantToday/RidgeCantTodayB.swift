@@ -1391,6 +1391,19 @@ struct RidgeCantTodayB: View {
                 .offset(x: g.cx - g.pw / 2, y: g.panelTop + panelOff)
                 .allowsHitTesting(live && (mode == .time || mode == .home) && canReschedule)
 
+            // a quiet title so the clock reads as "pick a new time"
+            if canReschedule {
+                Text("reschedule")
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(0.4)
+                    .foregroundStyle(Color.white.opacity(0.62))
+                    .frame(width: g.pw)
+                    .opacity(panelV * (1 - 0.7 * dimV) * ui)
+                    .offset(x: g.cx - g.pw / 2, y: g.panelTop - 22 + panelOff)
+                    .allowsHitTesting(false)
+                    .accessibilityAddTraits(.isHeader)
+            }
+
             // cost, in place of the main button while the skip is held
             HStack(spacing: 22) {
                 ForEach(data.cost) { c in

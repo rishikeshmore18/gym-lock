@@ -8,7 +8,7 @@
 //
 //    - items are named by id, ordered top to bottom; each starts 140 ms after the previous
 //    - the first wave starts 0.35 s after `settle(at:)`
-//    - a wave repeats after 3 s of idle, at most twice (three waves per settle)
+//    - a wave repeats once after 3 s of idle: two waves for the whole screen, then it stays still
 //    - a kind stops nudging for good once the user touched it
 //    - `cancel()` stops everything at once; `rest(at:)` restarts the idle clock
 //    - haptics: .light at each peak, .soft at the last peak of the wave, one cue id per wave and item
@@ -36,7 +36,7 @@ final class CantTodayNudger {
     private let envelopeLength = 0.6
     private let firstDelay = 0.35
     private let idleGap = 3.0
-    private let maxWaves = 3          // the first wave plus two repeats
+    private let maxWaves = 2          // the first wave plus one repeat, for the life of the screen
 
     init(haptics: PauseHaptics, reduceMotion: Bool) {
         self.haptics = haptics
@@ -53,10 +53,10 @@ final class CantTodayNudger {
     }
 
     func settle(at time: Double) {
-        wavesRun = 0
+        // The two waves are for the whole screen, not per step: a new step does not start more.
         waveStart = nil
         waveItems = []
-        nextStart = eligibleIds().isEmpty ? nil : time + firstDelay
+        nextStart = (wavesRun >= maxWaves || eligibleIds().isEmpty) ? nil : time + firstDelay
     }
 
     func touched(kind: String) {

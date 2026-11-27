@@ -1362,6 +1362,10 @@ private nonisolated enum MPBBuild {
                 }
             case .reschedule:
                 if n > 0 {
+                    // a quiet printed title over the day and time board
+                    var title = textRow("reschedule", m, p: 1.4 * f, bold: false, top: 4 * f, bot: 2 * f)
+                    title.layers = title.layers.map { MPBLayer(path: $0.path, alpha: 0.5) }
+                    rows.append(title)
                     out.boardIdx = rows.count
                     rows.append(boardRow(hb: hb, f: f, p1: p1))
                     out.noteIdx = rows.count
