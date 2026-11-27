@@ -332,9 +332,23 @@ struct SkipRulesTests {
 
     // MARK: - Home workout
 
-    @Test func homeWorkoutOptionsAreTwentyFiveAndThirty() {
-        #expect(HomeWorkoutRules.options == [25, 30])
-        #expect(HomeWorkoutRules.defaultMinutes == 25)
+    @Test func homeWorkoutMinimumIsTwentyLikeTheGym() {
+        #expect(HomeWorkoutRules.defaultMinutes == 20)
+        #expect(HomeWorkoutRules.defaultMinutes == WorkoutRules.minimumMinutes)
+    }
+
+    @Test func homeWorkoutClockFlipsAtHalfwayAndCountsPastTwenty() {
+        #expect(HomeWorkoutClock.label(0) == "0 min in")
+        #expect(HomeWorkoutClock.label(462) == "7 min in")
+        #expect(HomeWorkoutClock.label(600) == "10 min to go")
+        #expect(HomeWorkoutClock.label(1190) == "under a minute")
+        #expect(HomeWorkoutClock.label(1205) == "apps unlocked.")
+        #expect(HomeWorkoutClock.label(1620) == "+7 min")
+        #expect(HomeWorkoutClock.format(3790) == "63:10")
+        #expect(HomeWorkoutClock.beat(301)?.text == "5 down.")
+        #expect(HomeWorkoutClock.beat(1201)?.isTwenty == true)
+        #expect(HomeWorkoutClock.beat(1510)?.text == "+5.")
+        #expect(HomeWorkoutClock.beat(320) == nil)
     }
 
     @Test func theFourthHomeWorkoutInAMonthIsGreyed() {

@@ -757,7 +757,7 @@ final class GymSessionCoordinator {
             return
         }
 
-        if current.state.wantsShield {
+        if current.state.wantsShield, !current.homeWorkoutMinimumReached(at: Date()) {
             if !shield.isShielded { applyShield(for: current) }
         } else if shield.isShielded {
             releaseShield(sessionID: current.id)
@@ -1864,6 +1864,16 @@ final class GymSessionCoordinator {
         reconcileShieldWithSession()
     }
 
+    /// 20 minutes of the home workout are done (FLOW, Flow 4: the timer ends, the apps unlock).
+    ///
+    /// The timer has no upper limit, so the session stays in .quickWorkoutActive while the user
+    /// keeps going; only the lock lifts. `reconcileShieldWithSession` keeps it off from here on.
+    func quickWorkoutReachedMinimum() {
+        guard let current = session, current.state == .quickWorkoutActive,
+              current.homeWorkoutMinimumReached(at: Date()) else { return }
+        releaseShield(sessionID: current.id)
+    }
+
     /// Finishes a home workout.
     ///
     /// The timer ends and the apps unlock (FLOW, Flow 4). The day only counts
@@ -1883,6 +1893,9 @@ final class GymSessionCoordinator {
         }
 
         let started = current.quickWorkoutStartedAt ?? Date()
+        // The timer counts up with no upper limit: record the minutes actually done.
+        let done = Int(Date().timeIntervalSince(started) / 60)
+        current.quickWorkoutMinutes = max(current.quickWorkoutMinutes ?? HomeWorkoutRules.defaultMinutes, done)
         current.state = .homeWorkoutAwaitingProof
         session = current
 

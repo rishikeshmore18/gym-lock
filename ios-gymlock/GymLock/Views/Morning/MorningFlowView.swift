@@ -125,7 +125,10 @@ struct MorningFlowView: View {
     }
 
     private func screenKey(for route: MorningRoute, session: GymSession) -> String {
-        usesTrip(route, session: session) ? "trip" : String(describing: route)
+        if usesTrip(route, session: session) { return "trip" }
+        // Setup and the running timer are one page: the art morphs into the timer in place.
+        if route == .quickWorkoutPicker || route == .quickWorkoutActive { return "homeWorkout" }
+        return String(describing: route)
     }
 
     @ViewBuilder
@@ -198,18 +201,15 @@ struct MorningFlowView: View {
                 onCantToday: { coordinator.beginCantToday(from: .closedWindow) }
             )
 
-        case .quickWorkoutPicker:
-            QuickWorkoutView(
-                homeWorkoutsUsed: coordinator.homeWorkoutsUsedThisMonth,
-                isAtCap: coordinator.homeWorkoutCapReached,
-                onStart: { coordinator.startQuickWorkout(minutes: $0) },
-                onBack: { coordinator.leaveQuickWorkoutPicker() }
-            )
-
-        case .quickWorkoutActive:
-            QuickWorkoutActiveView(
+        case .quickWorkoutPicker, .quickWorkoutActive:
+            HomeWorkoutView(
                 session: session,
-                onFinish: { coordinator.finishQuickWorkout(completed: $0) }
+                isRunning: route == .quickWorkoutActive,
+                isAtCap: coordinator.homeWorkoutCapReached,
+                onStart: { coordinator.startQuickWorkout(minutes: HomeWorkoutRules.defaultMinutes) },
+                onReachedMinimum: { coordinator.quickWorkoutReachedMinimum() },
+                onFinish: { coordinator.finishQuickWorkout(completed: $0) },
+                onClose: { coordinator.leaveQuickWorkoutPicker() }
             )
 
         case .homeWorkoutProof:
