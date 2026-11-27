@@ -469,7 +469,6 @@ struct Day0CantTodayB: View {
 
             progressBar(done: done)
                 .opacity(closing ? 0 : 1)
-            backButton
             closeButton
             endText
         }
@@ -549,37 +548,6 @@ struct Day0CantTodayB: View {
         .opacity(closing ? 0 : 1)
         .animation(.linear(duration: 0.3), value: closing)
         .allowsHitTesting(answer == nil)
-    }
-
-    /// Back to the day step from the time step. Same circle as the close button, mirrored to the
-    /// top left; it is only there while the time reels are up.
-    private var backButton: some View {
-        let layout = input.layout
-        let shown = beat == .time && answer == nil
-        return Button {
-            goDay()
-        } label: {
-            ZStack {
-                Circle().fill(Color.white.opacity(0.16))
-                Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Color.white)
-            }
-            .frame(width: 36, height: 36)
-            .frame(width: 44, height: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(D0BPressStyle(scale: 0.95))
-        .accessibilityLabel("back, pick another day")
-        .padding(.top, layout.safeArea.top + 6)
-        .padding(.leading, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .opacity(shown && !closing ? 1 : 0)
-        .animation(.linear(duration: 0.2), value: shown)
-        .animation(.linear(duration: 0.3), value: closing)
-        .allowsHitTesting(shown)
-        .accessibilityHidden(!shown)
     }
 
     private var endText: some View {
@@ -1163,6 +1131,7 @@ struct Day0CantTodayB: View {
         if !data.targets.isEmpty {
             HStack(alignment: .top, spacing: 12) {
                 sideSlot(rest.first, c)
+                backSlot(c)
                 ctaButton(c)
                 sideSlot(rest.count > 1 ? rest[1] : nil, c)
             }
@@ -1199,6 +1168,38 @@ struct Day0CantTodayB: View {
         .allowsHitTesting(!isTime)
         .accessibilityHidden(isTime)
         .animation(.linear(duration: 0.25), value: beat)
+        .animation(D0B.curve(0.3), value: beat)
+    }
+
+    /// Back to the day step, beside "set alarm" in the time beat: (<-) (set alarm), about a fifth
+    /// and four fifths of the row. In the day beat it closes up to nothing, like the side slots.
+    private func backSlot(_ c: D0BCtx) -> some View {
+        let isTime = beat == .time
+        let shown = isTime && answer == nil
+        let row = max(0, input.layout.size.width - 44 - 12)
+        let width = (row * 0.2).rounded()
+        return Button {
+            goDay()
+        } label: {
+            ZStack {
+                Capsule().fill(Color.white.opacity(0.14))
+                Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(D0B.text)
+            }
+            .frame(height: c.m.ctaH)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(D0BPressStyle(scale: 0.96))
+        .accessibilityLabel("back, pick another day")
+        .frame(width: isTime ? width : 0, height: c.m.ctaH)
+        .padding(.horizontal, isTime ? 0 : -6)
+        .opacity(isTime ? 1 : 0)
+        .clipped()
+        .allowsHitTesting(shown)
+        .accessibilityHidden(!isTime)
+        .animation(.linear(duration: 0.22), value: beat)
         .animation(D0B.curve(0.3), value: beat)
     }
 
